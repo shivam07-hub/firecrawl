@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ---
 
@@ -139,10 +139,10 @@ cp .env.example .env
 # pip install -r requirements.txt
 ```
 
-**MCP setup (Claude Code):**
-Edit `~/.claude/mcp.json` — replace `fc-YOUR_API_KEY_HERE` with your real key.
-After editing, restart Claude Code. The `firecrawl_scrape`, `firecrawl_extract`,
-`firecrawl_map`, etc. tools will then be available in your Claude Code session.
+**MCP setup (Codex):**
+Edit `~/.Codex/mcp.json` — replace `fc-YOUR_API_KEY_HERE` with your real key.
+After editing, restart Codex. The `firecrawl_scrape`, `firecrawl_extract`,
+`firecrawl_map`, etc. tools will then be available in your Codex session.
 
 ### Run commands
 
@@ -512,7 +512,7 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
 ### Chunk 4 — Archon 3-day cadence + docs (REPEATS EVERY 3 DAYS automatically)
 - Update `.archon/workflows/scraper-weekly-run.yaml` → rename to `scraper-3day-run.yaml`
 - Schedule: every 3 days via Archon cron (not weekly)
-- After each run: update RUN HISTORY in KNOWN_PORTALS.md + CLAUDE.md
+- After each run: update RUN HISTORY in KNOWN_PORTALS.md + AGENTS.md
 - Archon workflow nodes: check-docker + check-lm + test-portals → scrape (--skip-enrich) → enrich (--enrich-only) → upload (csv_importer.py) → summarize
 - **This chunk is the repeating operational heartbeat — set it once, it runs itself**
 

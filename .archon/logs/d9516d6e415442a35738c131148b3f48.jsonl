@@ -1,0 +1,13 @@
+{"type":"workflow_start","workflow_name":"scraper-weekly-run","content":"Weekly dump 2026-04-16","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.149Z"}
+{"type":"node_start","step":"check-docker","content":"<bash>","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.151Z"}
+{"type":"node_start","step":"check-lm","content":"<bash>","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.151Z"}
+{"type":"node_start","step":"test-portals","content":"<bash>","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.151Z"}
+{"type":"node_error","step":"check-lm","error":"Bash node 'check-lm' failed: Command failed: bash -c echo \"── Checking LM Studio at localhost:1234 ──\"\nHTTP=$(curl -s -o /dev/null -w \"%{http_code}\" \\\n  http://localhost:1234/v1/models --max-time 5 2>/dev/null)\nif [ \"$HTTP\" = \"200\" ]; then\n  echo \"✅ LM Studio UP\"\n  # List loaded models\n  MODELS=$(curl -s http://localhost:1234/v1/models 2>/dev/null \\\n    | python3 -c \"import sys,json; d=json.load(sys.stdin); ids=[m['id'] for m in d.get('data',[])]; print('   Loaded models: ' + (', '.join(ids) if ids else '(none)'))\" 2>/dev/null)\n  echo \"$MODELS\"\nelse\n  echo \"❌ LM Studio DOWN (HTTP ${HTTP:-no-response})\"\n  echo \"   Start LM Studio and load a model, then re-run.\"\n  exit 1\nfi","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.245Z"}
+{"type":"node_complete","step":"check-docker","content":"<bash>","duration_ms":616,"workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:55.767Z"}
+{"type":"node_complete","step":"test-portals","content":"<bash>","duration_ms":1461,"workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:56.612Z"}
+{"type":"node_start","step":"scrape","content":"<bash>","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:11:56.613Z"}
+{"type":"node_complete","step":"scrape","content":"<bash>","duration_ms":1100522,"workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:30:17.143Z"}
+{"type":"node_skipped","step":"enrich","content":"trigger_rule","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:30:17.148Z"}
+{"type":"node_skipped","step":"upload","content":"trigger_rule","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:30:17.149Z"}
+{"type":"node_skipped","step":"summarize","content":"trigger_rule","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:30:17.149Z"}
+{"type":"workflow_complete","workflow_id":"d9516d6e415442a35738c131148b3f48","ts":"2026-04-15T22:30:17.156Z"}

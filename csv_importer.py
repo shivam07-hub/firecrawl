@@ -1,0 +1,325 @@
+"""
+csv_importer.py — Supabase upserter for Dump 4+ schema
+
+Walks All_CSV_Outputs_thru_firecrawl/, picks the latest jobs.json per company,
+quality-gates, then upserts into Supabase `jobs` table.
+
+Schema (jobs table):
+    job_id, job_title, job_description, company_name, Industry, Location,
+    apply_url, main_skills TEXT[], side_skills TEXT[], batch_date INTEGER
+
+Run from firecrawl_Supabase/ root:
+    python3 csv_importer.py              # upload with default quality gate
+    python3 csv_importer.py --dry-run    # quality report only, no upload
+    python3 csv_importer.py --min-score 0  # upload everything (no gate)
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
+from supabase import Client, create_client
+
+# ── Config ─────────────────────────────────────────────────────────────────────
+
+_HERE     = Path(__file__).resolve().parent          # firecrawl_Supabase/
+ENV_FILE  = _HERE / "scraper" / ".env"
+LOGS_DIR  = _HERE / "logs"
+BATCH_SIZE = 200
+TABLE     = "jobs"
+_PLACEHOLDER_TITLE_PATTERNS = (
+    re.compile(r"\bscraped via firecrawl\b", re.IGNORECASE),
+)
+
+load_dotenv(ENV_FILE)
+_DEFAULT_OUTPUT_BASE = _HERE / "All_CSV_Outputs_thru_firecrawl"
+_CONFIGURED_OUTPUT_BASE = Path(os.getenv("OUTPUT_BASE", str(_DEFAULT_OUTPUT_BASE)))
+OUTPUT_BASE = _CONFIGURED_OUTPUT_BASE
+if not OUTPUT_BASE.exists() and _DEFAULT_OUTPUT_BASE.exists():
+    OUTPUT_BASE = _DEFAULT_OUTPUT_BASE
+
+
+# ── File discovery ─────────────────────────────────────────────────────────────
+
+def discover_json_files(base: Path) -> list[Path]:
+    """Return the latest jobs.json for each company folder."""
+    found = []
+    for company_dir in sorted(base.iterdir()):
+        if not company_dir.is_dir():
+            continue
+        outputs_dir = company_dir / "Outputs"
+        if not outputs_dir.is_dir():
+            continue
+        date_dirs = sorted(d for d in outputs_dir.iterdir() if d.is_dir())
+        if not date_dirs:
+            continue
+        json_path = date_dirs[-1] / "jobs.json"
+        if json_path.exists():
+            found.append(json_path)
+    return found
+
+
+def infer_batch_date(json_path: Path) -> int:
+    """
+    Prefer batch date from folder name: .../Outputs/YYYY_MM_DD/jobs.json.
+    Fall back to today's date if folder name is not parseable.
+    """
+    try:
+        dt = datetime.strptime(json_path.parent.name, "%Y_%m_%d")
+        return int(dt.strftime("%Y%m%d"))
+    except Exception:
+        return int(datetime.now().strftime("%Y%m%d"))
+
+
+def _first_non_empty(job: dict, *keys: str, default: str = "") -> str:
+    for key in keys:
+        val = job.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            s = val.strip()
+            if s:
+                return s
+            continue
+        return str(val)
+    return default
+
+
+def _normalize_skills(value: object) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [s.strip() for s in value.split(",") if s.strip()]
+    return []
+
+
+def normalize_job(job: dict, default_batch_date: int) -> dict:
+    """Normalize canonical and legacy raw schemas into one canonical job dict."""
+    return {
+        "job_id": _first_non_empty(job, "job_id"),
+        "job_title": _first_non_empty(job, "job_title", "title"),
+        "job_description": _first_non_empty(job, "job_description", "raw_jd_text"),
+        "company_name": _first_non_empty(job, "company_name"),
+        "industry": _first_non_empty(job, "industry", "Industry", "Industry_name"),
+        "Location": _first_non_empty(job, "Location", "location", "location_city", "location_country", default="India"),
+        "apply_url": _first_non_empty(job, "apply_url", "job_url", "url"),
+        "main_skills": _normalize_skills(job.get("main_skills") or job.get("skills_required")),
+        "side_skills": _normalize_skills(job.get("side_skills") or job.get("skills_preferred")),
+        "batch_date": int(job.get("batch_date") or default_batch_date),
+    }
+
+
+def is_placeholder_title(title: str) -> bool:
+    if not title:
+        return False
+    return any(pattern.search(title) for pattern in _PLACEHOLDER_TITLE_PATTERNS)
+
+
+# ── Quality gate ───────────────────────────────────────────────────────────────
+
+def quality_score(job: dict) -> int:
+    """
+    0-3 score for a job in the Dump 4 schema:
+      +1  job_description non-empty
+      +1  main_skills non-empty list
+      +1  Location non-empty
+    """
+    score = 0
+    if job.get("job_description"):
+        score += 1
+    if job.get("main_skills"):
+        score += 1
+    if job.get("Location"):
+        score += 1
+    return score
+
+
+def preprocess(jobs: list[dict], min_score: int, default_batch_date: int) -> tuple[list[dict], int, int, int, int]:
+    """
+    Normalize + quality-gate.
+    Returns (clean_jobs, n_invalid, n_dupes, n_quality_drop, n_placeholders).
+    """
+    normalized = [normalize_job(j, default_batch_date) for j in jobs]
+
+    valid = [j for j in normalized if j.get("job_id") and j.get("job_title")]
+    n_invalid = len(normalized) - len(valid)
+
+    without_placeholders = [j for j in valid if not is_placeholder_title(j.get("job_title", ""))]
+    n_placeholders = len(valid) - len(without_placeholders)
+
+    seen: dict[str, dict] = {}
+    for job in without_placeholders:
+        jid = str(job["job_id"])
+        prev = seen.get(jid)
+        # Keep the richer row when duplicate IDs appear in mixed-schema dumps.
+        if prev is None or quality_score(job) >= quality_score(prev):
+            seen[jid] = job
+    n_dupes = len(without_placeholders) - len(seen)
+
+    passed = [j for j in seen.values() if quality_score(j) >= min_score]
+    n_quality = len(seen) - len(passed)
+
+    return list(passed), n_invalid, n_dupes, n_quality, n_placeholders
+
+
+# ── Row builder ────────────────────────────────────────────────────────────────
+
+def build_row(job: dict) -> dict:
+    """Map a canonical job dict → Supabase `jobs` table row."""
+    skills_main = _normalize_skills(job.get("main_skills"))
+    skills_side = _normalize_skills(job.get("side_skills"))
+
+    return {
+        "job_id":          str(job["job_id"]),
+        "job_title":       str(job["job_title"]),
+        "job_description": str(job.get("job_description") or ""),
+        "company_name":    str(job.get("company_name") or ""),
+        "industry":        str(job.get("industry") or job.get("Industry") or ""),
+        "location":        str(job.get("Location") or job.get("location") or "India"),
+        "apply_url":       str(job.get("apply_url") or "") or None,
+        "main_skills":     skills_main,
+        "side_skills":     skills_side,
+        "batch_date":      job.get("batch_date") or int(datetime.now().strftime("%Y%m%d")),
+    }
+
+
+# ── Supabase I/O ───────────────────────────────────────────────────────────────
+
+def upsert_batch(supabase: Client, batch: list[dict]) -> None:
+    supabase.table(TABLE).upsert(batch, on_conflict="job_id").execute()
+
+
+# ── Reports ────────────────────────────────────────────────────────────────────
+
+def print_quality_report(json_files: list[Path], min_score: int) -> None:
+    print(f"\n{'─'*72}")
+    print(f"  QUALITY REPORT  (gate: min_score >= {min_score}/3)   table → {TABLE}")
+    print(f"{'─'*72}")
+    print(f"  {'Company':<35} {'Total':>6} {'Pass':>6} {'Drop':>6} {'PH':>4} {'JD%':>5} {'Skl%':>5}")
+    print(f"  {'─'*35} {'─'*6} {'─'*6} {'─'*6} {'─'*4} {'─'*5} {'─'*5}")
+
+    grand_total = grand_pass = grand_drop = grand_ph = 0
+    for json_path in json_files:
+        company = json_path.parts[-4]
+        try:
+            jobs = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        file_batch_date = infer_batch_date(json_path)
+        normalized = [normalize_job(j, file_batch_date) for j in jobs]
+
+        valid_rows = [j for j in normalized if j.get("job_id") and j.get("job_title")]
+        n_ph = sum(1 for j in valid_rows if is_placeholder_title(j.get("job_title", "")))
+
+        valid = {}
+        for job in valid_rows:
+            if is_placeholder_title(job.get("job_title", "")):
+                continue
+            jid = str(job["job_id"])
+            prev = valid.get(jid)
+            if prev is None or quality_score(job) >= quality_score(prev):
+                valid[jid] = job
+
+        passed = [j for j in valid.values() if quality_score(j) >= min_score]
+
+        has_jd   = sum(1 for j in valid.values() if j.get("job_description"))
+        has_skl  = sum(1 for j in valid.values() if j.get("main_skills"))
+        jd_pct   = round(100 * has_jd  / len(valid)) if valid else 0
+        skl_pct  = round(100 * has_skl / len(valid)) if valid else 0
+
+        print(f"  {company:<35} {len(valid):>6} {len(passed):>6} {len(valid)-len(passed):>6} {n_ph:>4} {jd_pct:>4}% {skl_pct:>4}%")
+        grand_total += len(valid); grand_pass += len(passed); grand_drop += len(valid) - len(passed)
+        grand_ph += n_ph
+
+    print(f"  {'─'*35} {'─'*6} {'─'*6} {'─'*6} {'─'*4}")
+    print(f"  {'TOTAL':<35} {grand_total:>6} {grand_pass:>6} {grand_drop:>6} {grand_ph:>4}")
+    print(f"{'─'*72}\n")
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=f"Upsert scraped jobs into Supabase `{TABLE}`")
+    parser.add_argument("--dry-run",    action="store_true", help="Quality report only — no Supabase writes")
+    parser.add_argument("--min-score",  type=int, default=1, metavar="N",
+                        help="Min quality score 0-3 (default 1). 0 = upload everything.")
+    args = parser.parse_args()
+
+    json_files = discover_json_files(OUTPUT_BASE)
+    if not json_files:
+        print(f"ERROR: No jobs.json files found under {OUTPUT_BASE}")
+        sys.exit(1)
+    print(f"Found {len(json_files)} company file(s) under {OUTPUT_BASE}")
+
+    print_quality_report(json_files, args.min_score)
+
+    if args.dry_run:
+        print("Dry-run mode — no data written to Supabase.")
+        return
+
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not supabase_url or not supabase_key:
+        print(f"ERROR: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in {ENV_FILE}")
+        sys.exit(1)
+
+    supabase: Client = create_client(supabase_url, supabase_key)
+
+    batch: list[dict] = []
+    total_uploaded = total_dropped = 0
+
+    for json_path in json_files:
+        company = json_path.parts[-4]
+        try:
+            jobs = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  SKIP {company}: could not read file — {e}")
+            continue
+
+        file_batch_date = infer_batch_date(json_path)
+        clean, n_invalid, n_dupes, n_quality, n_placeholders = preprocess(jobs, args.min_score, file_batch_date)
+        dropped = n_invalid + n_dupes + n_quality + n_placeholders
+        total_dropped += dropped
+
+        flags = []
+        if n_invalid: flags.append(f"{n_invalid} invalid")
+        if n_dupes:   flags.append(f"{n_dupes} dupes")
+        if n_quality: flags.append(f"{n_quality} below gate")
+        if n_placeholders: flags.append(f"{n_placeholders} placeholders")
+        suffix = f"  [{', '.join(flags)} dropped]" if flags else ""
+        print(f"  {company}: {len(clean)} jobs → {TABLE}{suffix}")
+
+        for job in clean:
+            batch.append(build_row(job))
+            total_uploaded += 1
+            if len(batch) >= BATCH_SIZE:
+                upsert_batch(supabase, batch)
+                batch = []
+
+    if batch:
+        upsert_batch(supabase, batch)
+
+    print(f"\n✅  {total_uploaded} rows upserted into `{TABLE}`  ({total_dropped} dropped)")
+
+    LOGS_DIR.mkdir(exist_ok=True)
+    summary_path = LOGS_DIR / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    summary_path.write_text(json.dumps({
+        "timestamp": datetime.now().isoformat(),
+        "table": TABLE,
+        "output_base": str(OUTPUT_BASE),
+        "companies": len(json_files),
+        "uploaded": total_uploaded,
+        "dropped": total_dropped,
+    }, indent=2))
+    print(f"Log → {summary_path}\n")
+
+
+if __name__ == "__main__":
+    main()

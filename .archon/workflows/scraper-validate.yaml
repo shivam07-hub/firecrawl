@@ -1,0 +1,133 @@
+name: scraper-validate
+description: |
+  Validation run: scrape 5 jobs/company from all portals in KNOWN_PORTALS.md.
+  No LLM enrichment. Output goes to validation_outputs/ (separate from real data).
+  Use this to verify column coverage (job_id, job_title, job_description,
+  industry, Location, apply_url) before a full weekly run.
+
+  REQUIRES:
+    - Docker running (for JS-heavy portals via Firecrawl + Playwright)
+    - LM Studio running in Ollama-compatible mode (port 11434) for JS-heavy portals.
+      Direct API portals (Workday, SmartRecruiters, Greenhouse, Amazon) work without LM Studio.
+
+  Run with:
+    archon workflow run scraper-validate --no-worktree
+
+  Results:
+    validation_outputs/{Company}/Outputs/{date}/jobs.json + jobs.csv
+
+provider: claude
+model: sonnet
+
+nodes:
+  # ──────────────────────────────────────────────────────────────────────────
+  # LAYER 0 — Pre-flight checks (parallel)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: check-docker
+    bash: |
+      echo "── Checking Firecrawl Docker at localhost:3002 ──"
+      HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+        http://localhost:3002/v1/scrape \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer local" \
+        -d '{"url":"https://example.com","formats":["markdown"]}' \
+        --max-time 8 2>/dev/null)
+      if [ "$HTTP" = "200" ]; then
+        echo "✅ Firecrawl Docker UP (HTTP $HTTP)"
+      else
+        echo "❌ Firecrawl Docker DOWN (HTTP ${HTTP:-no-response})"
+        echo "   Start it: cd /Users/incognito/Mirror\ CV/firecrawl_Supabase && docker compose up -d"
+        exit 1
+      fi
+    timeout: 15000
+
+  - id: check-lm
+    bash: |
+      echo "── Checking LM Studio Ollama API at localhost:11434 ──"
+      HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+        http://localhost:11434/api/tags --max-time 5 2>/dev/null)
+      if [ "$HTTP" = "200" ]; then
+        echo "✅ LM Studio Ollama API UP — JS-heavy portals will use extract"
+        curl -s http://localhost:11434/api/tags 2>/dev/null \
+          | python3 -c "import sys,json; d=json.load(sys.stdin); models=[m['name'] for m in d.get('models',[])]; print('   Models: ' + (', '.join(models) if models else '(none)'))" 2>/dev/null || true
+      else
+        echo "⚠️  LM Studio Ollama API not running on port 11434"
+        echo "   → Direct API portals will still scrape fine."
+        echo "   → JS-heavy portals (Eightfold, Avature, custom SPAs) will be skipped."
+        echo "   To enable: LM Studio → Settings → Local Server → Ollama API Compatibility → ON"
+      fi
+    timeout: 10000
+    on_failure: continue
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # LAYER 1 — Validate scrape
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: validate
+    depends_on: [check-docker]
+    bash: |
+      echo "── Starting validation scrape (5 jobs/company, no enrichment) ──"
+      cd /Users/incognito/Mirror\ CV/firecrawl_Supabase/scraper
+      python main.py --validate
+    timeout: 1800000   # 30 min
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # LAYER 2 — Coverage report
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: report
+    depends_on: [validate]
+    bash: |
+      python3 - <<'EOF'
+      import json
+      from pathlib import Path
+
+      base = Path('/Users/incognito/Mirror CV/firecrawl_Supabase/validation_outputs')
+      if not base.exists():
+          print("No validation_outputs directory found.")
+          exit(0)
+
+      companies = []
+      for co_dir in sorted(base.iterdir()):
+          jf = list(co_dir.rglob('jobs.json'))
+          if not jf:
+              continue
+          jobs = json.loads(jf[0].read_text())
+          n = len(jobs)
+          has_id    = sum(1 for j in jobs if j.get('job_id'))
+          has_title = sum(1 for j in jobs if j.get('job_title'))
+          has_desc  = sum(1 for j in jobs if j.get('job_description','').strip())
+          has_loc   = sum(1 for j in jobs if j.get('Location','').strip())
+          has_url   = sum(1 for j in jobs if j.get('apply_url','').strip())
+          has_ind   = sum(1 for j in jobs if j.get('industry','').strip())
+          companies.append({
+              'name': co_dir.name, 'n': n,
+              'id': has_id, 'title': has_title, 'desc': has_desc,
+              'loc': has_loc, 'url': has_url, 'ind': has_ind,
+          })
+
+      total_jobs = sum(c['n'] for c in companies)
+      print(f"\n{'='*80}")
+      print(f"VALIDATION REPORT — {len(companies)} companies, {total_jobs} total jobs")
+      print(f"{'='*80}")
+      print(f"{'Company':<30} {'n':>3}  job_id  title  desc  loc  url  industry")
+      print("-"*75)
+      for c in companies:
+          def mark(v, total):
+              return '✅' if v == total else f'⚠{v}'
+          print(f"{c['name']:<30} {c['n']:>3}  "
+                f"{mark(c['id'],c['n']):<8} {mark(c['title'],c['n']):<7} "
+                f"{mark(c['desc'],c['n']):<6} {mark(c['loc'],c['n']):<5} "
+                f"{mark(c['url'],c['n']):<5} {mark(c['ind'],c['n'])}")
+
+      missing_desc = [c['name'] for c in companies if c['desc'] == 0]
+      if missing_desc:
+          print(f"\n⚠️  job_description empty: {', '.join(missing_desc)}")
+          print("   → Workday CXS JD API blocked (Cloudflare). JDs need cloud Firecrawl or browser session.")
+      missing_loc = [c['name'] for c in companies if c['loc'] == 0]
+      if missing_loc:
+          print(f"\n⚠️  Location empty: {', '.join(missing_loc)}")
+      EOF
+    timeout: 60000
