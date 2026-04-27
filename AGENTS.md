@@ -288,6 +288,53 @@ CREATE TABLE jobs (
 
 ## RUN HISTORY & CURRENT STATE
 
+### Session 2026-04-27 — Architecture V3 Phase 0 baseline freeze
+
+**Objective:** Run Phase 0 exactly as defined before Phase 1 modularization work.
+
+**Commands executed:**
+- `cd scraper && python main.py --dry-run` ✅
+- `cd scraper && python main.py --validate --skip-enrich` ✅
+- `cd scraper && python test_pipeline.py` ⚠️ (failed checks captured as baseline caveats)
+
+**Artifacts captured:**
+- `logs/run_summary_20260427_211642.json`
+- `scraper/MIGRATION_BASELINE.md`
+- `scraper/MIGRATION_STATUS.md` (Phase 0 marked complete; Phase 1 set in progress)
+
+**Baseline notes:**
+- Validate run finished with 135 processed, 24 skipped, 339 new validate rows.
+- `test_pipeline.py` has 5 known failing checks (industry completeness, `strip_html` formatting, schema field count expectation, and LM-dependent enrichment checks while LM unavailable).
+
+### Session 2026-04-27 — Architecture V3 Phase 1 provider registry skeleton
+
+**Objective:** Complete Phase 1 modular contract without changing scrape behavior.
+
+**Code changes:**
+- Added provider contract + result model: `scraper/providers/base.py`
+- Added ATS wrapper providers:
+  - `scraper/providers/workday.py`
+  - `scraper/providers/smartrecruiters.py`
+  - `scraper/providers/greenhouse.py`
+  - `scraper/providers/lever.py`
+  - `scraper/providers/phenom.py`
+  - `scraper/providers/generic_json.py`
+  - `scraper/providers/firecrawl_js.py`
+- Added central dispatch + fallback policy: `scraper/providers/registry.py`
+- Added package export: `scraper/providers/__init__.py`
+- Switched `scraper/main.py` dispatch from ATS `if/elif` chain to `dispatch_scrape(...)`.
+
+**Phase 1 verification executed:**
+- `python scraper/main.py --dry-run` ✅
+- `python scraper/main.py --validate --skip-enrich` ✅
+
+**Verification artifact:**
+- `logs/run_summary_20260427_213806.json`
+
+**Phase 1 outcome:**
+- Runtime parity preserved; direct paths and fallback paths continued to behave as baseline.
+- Fallback policy is now centralized in registry, not distributed across `main.py`.
+
 ### Session 2026-04-19 — Portal expansion + JD fix
 
 **Code changes:**

@@ -29,29 +29,38 @@ _WORKDAY_BLOCKED = object()   # sentinel: API returned redirect/error, try Firec
 
 
 def scrape_workday(portal: dict, max_jobs: int | None = None) -> list[dict] | None:
-    """Returns list of jobs, empty list if no India jobs, or None if blocked (→ Firecrawl fallback)."""
+    """Returns list of jobs, empty list if no matches for scope, or None if blocked (→ Firecrawl fallback)."""
     endpoint = portal['endpoint']
+    india_only = portal.get('india_only', True)
 
     company = portal.get('company', '')
     reg = WORKDAY_REGISTRY.get(company)
-    use_search_text = reg and reg.get('search_text')
-    if use_search_text:
-        # searchText mode: no facet filter — tenant has no India UUID
-        search_text_val = reg['search_text']
-        print(f"    [REGISTRY] Using searchText='{search_text_val}' for {company}")
-    elif reg:
-        facet_param  = reg['india_facet_param']
-        india_uuids  = reg.get('india_uuids') or [reg['india_uuid']]
-        print(f"    [REGISTRY] Using hardcoded facet IDs for {company}")
+    if india_only:
+        use_search_text = bool(reg and reg.get('search_text'))
+        if use_search_text:
+            # searchText mode: no facet filter — tenant has no India UUID
+            search_text_val = reg['search_text']
+            print(f"    [REGISTRY] Using searchText='{search_text_val}' for {company}")
+        elif reg:
+            facet_param = reg['india_facet_param']
+            india_uuids = reg.get('india_uuids') or [reg['india_uuid']]
+            print(f"    [REGISTRY] Using hardcoded facet IDs for {company}")
+        else:
+            uuid_result = _workday_india_uuid(endpoint)
+            if uuid_result is _WORKDAY_BLOCKED:
+                return None   # signals scrape_portal to fall back to Firecrawl
+            if uuid_result is None:
+                print(f"    [WARN] no India UUID found for {company}")
+                return []
+            facet_param, india_uuid = uuid_result
+            india_uuids = [india_uuid]
     else:
-        uuid_result = _workday_india_uuid(endpoint)
-        if uuid_result is _WORKDAY_BLOCKED:
-            return None   # signals scrape_portal to fall back to Firecrawl
-        if uuid_result is None:
-            print(f"    [WARN] no India UUID found for {company}")
-            return []
-        facet_param, india_uuid = uuid_result
-        india_uuids = [india_uuid]
+        # Global scope: fetch without India facet filtering.
+        use_search_text = False
+        search_text_val = ""
+        facet_param = ""
+        india_uuids = []
+        print(f"    [SCOPE] Global mode for {company} (no India facet filter)")
 
     parts = endpoint.split('/')
     referer = '/'.join(parts[:3]) + '/' + parts[-2] if len(parts) >= 8 else endpoint
@@ -60,7 +69,9 @@ def scrape_workday(portal: dict, max_jobs: int | None = None) -> list[dict] | No
     jobs, offset = [], 0
     seen_ids: set[str] = set()
     while True:
-        if use_search_text:
+        if not india_only:
+            facets = {}
+        elif use_search_text:
             facets = {}
         else:
             facets = {facet_param: india_uuids}
@@ -96,8 +107,8 @@ def scrape_workday(portal: dict, max_jobs: int | None = None) -> list[dict] | No
             # externalPath is the browser-friendly path (e.g. /job/India--Hyderabad/Title_JR123)
             url = f"https://{tenant}.{instance}.myworkdayjobs.com{ext}" if ext else ''
             loc = p.get('locationsText') or p.get('primaryLocation', '')
-            # searchText may return global results (e.g. "Indiana") — filter to India only
-            if use_search_text and not is_india(loc):
+            # searchText may return global results (e.g. "Indiana") — filter only in India scope
+            if india_only and use_search_text and not is_india(loc):
                 continue
             bf  = p.get('bulletFields') or []
             bu  = bf[1] if len(bf) > 1 else None
@@ -208,7 +219,7 @@ def scrape_smartrecruiters(portal: dict, max_jobs: int | None = None) -> list[di
     print(f"    {len(listings)} postings listed — fetching JDs...")
 
     jobs = []
-    india_only = portal.get('india_only', False)
+    india_only = portal.get('india_only', True)
     for p in listings:
         loc  = p.get('location') or {}
         city = loc.get('city') or loc.get('country', '')
@@ -252,7 +263,7 @@ def scrape_smartrecruiters(portal: dict, max_jobs: int | None = None) -> list[di
 
 # ── GREENHOUSE ────────────────────────────────────────────────────────────────
 
-def scrape_greenhouse(portal: dict) -> list[dict]:
+def scrape_greenhouse(portal: dict, max_jobs: int | None = None) -> list[dict]:
     url = portal['endpoint']
     try:
         r = requests.get(url, headers=_HEADERS, timeout=REQUEST_TIMEOUT)
@@ -263,8 +274,11 @@ def scrape_greenhouse(portal: dict) -> list[dict]:
         return []
 
     india_only = portal.get('india_only', True)
+    listings = data.get('jobs', [])
+    if max_jobs:
+        listings = listings[:max_jobs]
     jobs = []
-    for p in data.get('jobs', []):
+    for p in listings:
         loc = (p.get('location') or {}).get('name', '')
         if india_only and not is_india(loc):
             continue
@@ -287,7 +301,7 @@ def scrape_greenhouse(portal: dict) -> list[dict]:
 
 # ── CUSTOM / SAP / ORACLE (GET-based JSON or HTML) ───────────────────────────
 
-def scrape_get(portal: dict) -> list[dict]:
+def scrape_get(portal: dict, max_jobs: int | None = None) -> list[dict]:
     """
     Best-effort scraper for GET-based APIs (Amazon, Microsoft, Apple, SAP HTML, etc.).
     Returns partial jobs if the response is JSON with a recognisable structure,
@@ -309,7 +323,7 @@ def scrape_get(portal: dict) -> list[dict]:
     ct = r.headers.get('Content-Type', '')
     if 'json' in ct or r.text.lstrip().startswith(('{', '[')):
         try:
-            return _parse_json_response(r.json(), portal, url)
+            return _parse_json_response(r.json(), portal, url, max_jobs=max_jobs)
         except Exception:
             pass
 
@@ -380,7 +394,7 @@ def _fetch_workday_jds(jobs: list[dict], portal: dict) -> None:
         print(f"    [FC FALLBACK] JDs via Firecrawl: {fc_ok} ok  {len(still_missing) - fc_ok} missing")
 
 
-def _parse_json_response(data, portal: dict, source_url: str) -> list[dict]:
+def _parse_json_response(data, portal: dict, source_url: str, max_jobs: int | None = None) -> list[dict]:
     """Walk common JSON structures to extract job listings."""
     company  = portal['company']
     platform = portal.get('ats', 'Custom').title()
@@ -414,7 +428,8 @@ def _parse_json_response(data, portal: dict, source_url: str) -> list[dict]:
             raw_loc.get('city') or raw_loc.get('name') or ''
         )
 
-        if not is_india(loc):
+        india_only = portal.get('india_only', True)
+        if india_only and not is_india(loc):
             continue
 
         raw_jd = strip_html(
@@ -454,6 +469,8 @@ def _parse_json_response(data, portal: dict, source_url: str) -> list[dict]:
             'source_platform': platform,
             'industry':        portal.get('industry', ''),
         })
+        if max_jobs and len(jobs) >= max_jobs:
+            break
     return jobs
 
 
@@ -527,23 +544,11 @@ def scrape_validate(portal: dict, max_jobs: int = 5) -> list[dict]:
         if len(jobs) >= max_jobs:
             break
 
-    # Fallback: if no links found, create 1 stub entry so the portal shows up in output
+    # No stub/fake row fallback: if no links are parseable, surface 0 so the
+    # pipeline can track this portal as extraction-failed instead of injecting noise.
     if not jobs:
-        # grab first meaningful heading as title
-        heading = next((l.lstrip('# ').strip() for l in md.splitlines() if l.startswith('#') and len(l) > 5), '')
-        title = heading or f"{portal['company']} careers page"
-        jobs.append({
-            'job_id':          job_hash(title, url),
-            'title':           title,
-            'job_url':         url,
-            'source_api_url':  url,
-            'business_unit':   None,
-            'raw_jd_text':     md[:1000],
-            'location_city':   '',
-            'date_posted':     None,
-            'source_platform': 'Firecrawl',
-            'industry':        portal.get('industry', ''),
-        })
+        print("    0 entries from scrape (no parseable job links)")
+        return []
 
     print(f"    {len(jobs)} entries from scrape")
     return jobs
@@ -553,7 +558,7 @@ def scrape_extract(portal: dict, max_jobs: int | None = None) -> list[dict]:
     """
     Scrape JS-heavy career pages via Firecrawl Docker.
     Two-pass: scrape listing page → parse individual job URLs → batch_scrape each.
-    Falls back to single-entry staging if no job links are parseable.
+    Returns [] if no job links are parseable (no placeholder row is created).
     """
     url     = portal.get('endpoint') or portal.get('careers_url', '')
     company = portal.get('company', '')
@@ -592,20 +597,8 @@ def scrape_extract(portal: dict, max_jobs: int | None = None) -> list[dict]:
     print(f"    Found {len(job_links)} candidate job URLs in listing markdown")
 
     if not job_links:
-        print(f"    No job links found — using single staging entry (small/boutique company)")
-        return [{
-            'job_id':           job_hash(company, url),
-            'title':            f'{company} — scraped via Firecrawl',
-            'job_url':          url,
-            'source_api_url':   url,
-            'business_unit':    None,
-            'raw_jd_text':      markdown,
-            'location_city':    'India',
-            'date_posted':      None,
-            'source_platform':  'Firecrawl',
-            'industry':         portal.get('industry', ''),
-            '_fc_raw_markdown': True,
-        }]
+        print("    No job links found — returning 0 jobs (no placeholder row)")
+        return []
 
     cap = max_jobs or 200
     job_links = job_links[:cap]
@@ -639,14 +632,15 @@ def scrape_extract(portal: dict, max_jobs: int | None = None) -> list[dict]:
                 'industry':        portal.get('industry', ''),
             })
 
-    print(f"    {len(jobs)} India jobs extracted from individual pages")
+    scope_label = "India" if india_only else "global"
+    print(f"    {len(jobs)} {scope_label} jobs extracted from individual pages")
     return jobs
 
 
 
 # ── PHENOM REST API (paginated JSON) ──────────────────────────────────────────
 
-def scrape_phenom_api(portal: dict) -> list[dict]:
+def scrape_phenom_api(portal: dict, max_jobs: int | None = None) -> list[dict]:
     """
     Scrape Phenom/iCIMS REST APIs that return paginated JSON with full JDs.
     Currently handles: Schneider Electric (careers.se.com/api/jobs).
@@ -659,7 +653,7 @@ def scrape_phenom_api(portal: dict) -> list[dict]:
     india_only = portal.get('india_only', True)
     jobs       = []
     page       = 1
-    _GLOBAL_CAP = 500   # cap when india_only=False to avoid unbounded fetches
+    _GLOBAL_CAP = max_jobs or 2000   # cap when india_only=False to avoid unbounded fetches
 
     while True:
         url = f"{base_url}&page={page}"
@@ -721,7 +715,8 @@ def scrape_phenom_api(portal: dict) -> list[dict]:
             break
         page += 1
 
-    print(f"    {len(jobs)} India jobs fetched via Phenom API")
+    scope_label = "India" if india_only else "global"
+    print(f"    {len(jobs)} {scope_label} jobs fetched via Phenom API")
     return jobs
 
 
@@ -730,11 +725,10 @@ def scrape_phenom_api(portal: dict) -> list[dict]:
 _INDIA_KEYWORDS = {'india', 'bangalore', 'bengaluru', 'hyderabad', 'mumbai',
                    'pune', 'chennai', 'noida', 'gurgaon', 'gurugram', 'delhi'}
 
-def scrape_lever(portal: dict) -> list[dict]:
+def scrape_lever(portal: dict, max_jobs: int | None = None) -> list[dict]:
     """
     Lever ATS: GET https://api.lever.co/v0/postings/{slug}?mode=json
-    Returns all active postings. Filters to India jobs unless portal marks
-    india_only=False (for India-founded companies, all jobs are India).
+    Returns all active postings. Filters to India jobs only when india_only=True.
     """
     slug       = portal['lever_slug']
     company    = portal['company']
@@ -779,6 +773,8 @@ def scrape_lever(portal: dict) -> list[dict]:
             'source_platform': 'Lever',
             'industry':        portal.get('industry', ''),
         })
+        if max_jobs and len(jobs) >= max_jobs:
+            break
 
     print(f"    {len(jobs)} jobs fetched via Lever ({slug})")
     return jobs

@@ -1,13 +1,13 @@
 name: scraper-weekly-run
 description: |
-  Mirror job scraper pipeline — runs every 3 days: test → scrape → enrich → upload.
+  Mirror job scraper pipeline — weekly full global run: test → scrape → enrich → upload.
 
-  Cadence: every 3 days (Archon cron: 0 2 */3 * * )
+  Cadence: weekly (Archon cron: 0 2 * * 0 )
   Stages:
     test-portals   — parse KNOWN_PORTALS.md and verify portals; abort if broken
     check-docker   — verify Firecrawl Docker is up at localhost:3002 (Phase 1)
     check-lm       — verify LM Studio is up at localhost:1234 (Phase 2)
-    scrape         — python main.py --skip-enrich            (~40-90 min)
+    scrape         — python main.py --skip-enrich --scope global   (~40-90 min)
     enrich         — python main.py --enrich-only           (~20-40 min)
     upload         — python csv_importer.py                 (< 5 min)
     summarize      — AI node: concise run report with action items
@@ -28,7 +28,7 @@ description: |
     🟡 = JS-required — use Firecrawl Docker scrape()
     ✅ = direct API working, ≥5 jobs with JD confirmed
 
-schedule: "0 2 */3 * *"
+schedule: "0 2 * * 0"
 
 provider: claude
 model: sonnet
@@ -78,7 +78,7 @@ nodes:
   - id: test-portals
     bash: |
       echo "── Parsing KNOWN_PORTALS.md (dry-run) ──"
-      cd scraper && python main.py --dry-run 2>&1
+      cd scraper && python main.py --dry-run --scope global 2>&1
       EXIT=$?
       if [ $EXIT -ne 0 ]; then
         echo "❌ Portal parse failed — check KNOWN_PORTALS.md for syntax errors"
@@ -99,7 +99,7 @@ nodes:
       echo "PHASE 1 — SCRAPE"
       echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
       echo "════════════════════════════════════"
-      cd scraper && python main.py --skip-enrich 2>&1
+      cd scraper && python main.py --skip-enrich --scope global 2>&1
       EXIT=$?
       echo "────────────────────────────────────"
       echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"

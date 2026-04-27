@@ -32,7 +32,7 @@ from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
-from scrapers import scrape_workday, scrape_smartrecruiters, scrape_greenhouse, scrape_lever, scrape_get, scrape_extract, scrape_validate, scrape_phenom_api
+from providers import dispatch_scrape
 from enricher import enrich_job
 from writer import to_canonical, save_jobs, SCHEMA
 from utils import company_slug
@@ -40,6 +40,7 @@ from config import OUTPUT_BASE
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
+_GLOBAL_SCOPE_DEFAULT_CAP = 2000
 
 _INTER_COMPANY_DELAY = 2   # seconds between companies
 
@@ -76,58 +77,12 @@ def setup_logging(log_dir: str = "../logs") -> logging.Logger:
 
 def scrape_portal(portal: dict, log: logging.Logger, max_jobs: int | None = None,
                   validate_mode: bool = False) -> list[dict]:
-    ats = portal["ats"]
-
-    if portal.get("js_required"):
-        return _scrape_firecrawl_extract(portal, log, max_jobs=max_jobs, validate_mode=validate_mode)
-
-    if ats == "phenom_api":
-        return scrape_phenom_api(portal)
-
-    if ats == "workday":
-        jobs = scrape_workday(portal, max_jobs=max_jobs)
-        if jobs is None:
-            log.info(f"    Workday direct API blocked → falling back to Firecrawl")
-            fc_portal = dict(portal)
-            if portal.get("careers_url"):
-                fc_portal["endpoint"] = portal["careers_url"]
-            return _scrape_firecrawl_extract(fc_portal, log, max_jobs=max_jobs, validate_mode=validate_mode)
-        return jobs
-
-    if ats == "smartrecruiters":
-        return scrape_smartrecruiters(portal, max_jobs=max_jobs)
-
-    if ats == "greenhouse":
-        return scrape_greenhouse(portal)
-
-    if ats == "lever":
-        return scrape_lever(portal)
-
-    # custom / sap / oracle / other — direct GET, fallback to Firecrawl on HTML
-    raw = scrape_get(portal)
-    if raw and raw[0].get("_needs_firecrawl"):
-        return _scrape_firecrawl_extract(portal, log, max_jobs=max_jobs, validate_mode=validate_mode)
-    # Oracle HCM REST APIs are auth-gated — return 0 jobs; fall back to Firecrawl
-    if not raw and ats == "oracle" and portal.get("careers_url"):
-        log.info(f"    Oracle REST returned 0 → falling back to Firecrawl on careers_url")
-        fc_portal = {**portal, "endpoint": portal["careers_url"]}
-        return _scrape_firecrawl_extract(fc_portal, log, max_jobs=max_jobs, validate_mode=validate_mode)
-    return raw
-
-
-def _scrape_firecrawl_extract(portal: dict, log: logging.Logger,
-                               max_jobs: int | None = None, validate_mode: bool = False) -> list[dict]:
-    company = portal["company"]
-    if validate_mode:
-        # No LLM needed: Playwright scrape + markdown parse
-        jobs = scrape_validate(portal, max_jobs=max_jobs or 5)
-    else:
-        jobs = scrape_extract(portal, max_jobs=max_jobs)
-    if jobs:
-        log.info(f"    Firecrawl {'scrape' if validate_mode else 'extract'}: {len(jobs)} entries")
-    else:
-        log.warning(f"    Firecrawl returned 0 for {company}")
-    return jobs
+    return dispatch_scrape(
+        portal,
+        log,
+        max_jobs=max_jobs,
+        validate_mode=validate_mode,
+    )
 
 
 # ── Company scrapers (bespoke HTTP scripts) ───────────────────────────────────
@@ -168,9 +123,14 @@ def run_company_scrapers(log: logging.Logger) -> set[str]:
 
 def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         max_jobs: int | None = None, output_base: str = OUTPUT_BASE,
-        validate_mode: bool = False) -> dict:
+        validate_mode: bool = False, scope: str = "india") -> dict:
     summary = {
+        "scope": scope,
+        "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
         "processed": 0, "skipped": 0, "total_new": 0,
+        "unresolved": [],
+        "low_count": [],
+        "company_stats": [],
         "errors": [], "start": datetime.now().isoformat(),
     }
     total = len(portals)
@@ -187,11 +147,32 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         except Exception as e:
             log.error(f"  FATAL scrape error — {company}: {e}")
             summary["errors"].append({"company": company, "stage": "scrape", "error": str(e)})
+            summary["unresolved"].append({
+                "company": company,
+                "ats": ats,
+                "scope": scope,
+                "reason": "scrape_exception",
+                "details": str(e),
+            })
             summary["skipped"] += 1
             continue
 
         if not raw_jobs:
-            log.info(f"  0 India jobs — skipping")
+            log.info(f"  0 {scope} jobs — skipping")
+            summary["unresolved"].append({
+                "company": company,
+                "ats": ats,
+                "scope": scope,
+                "reason": "no_jobs_returned",
+                "details": "scraper returned empty result set",
+            })
+            summary["company_stats"].append({
+                "company": company,
+                "ats": ats,
+                "raw_jobs": 0,
+                "saved_new": 0,
+                "status": "no_jobs",
+            })
             summary["skipped"] += 1
             continue
 
@@ -226,16 +207,97 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         try:
             path, new_count = save_jobs(company, enriched, output_base=output_base)
             log.info(f"  Saved {new_count} new jobs → {path}")
+            if len(raw_jobs) < 5:
+                log.warning(f"  LOW COUNT: {len(raw_jobs)} scraped job(s) for {company}")
+                summary["low_count"].append({
+                    "company": company,
+                    "ats": ats,
+                    "raw_jobs": len(raw_jobs),
+                    "saved_new": new_count,
+                    "reason": "below_5_scraped_jobs",
+                })
+            summary["company_stats"].append({
+                "company": company,
+                "ats": ats,
+                "raw_jobs": len(raw_jobs),
+                "saved_new": new_count,
+                "status": "ok",
+            })
             summary["processed"] += 1
             summary["total_new"] += new_count
         except Exception as e:
             log.error(f"  FATAL save error — {company}: {e}")
+            summary["unresolved"].append({
+                "company": company,
+                "ats": ats,
+                "scope": scope,
+                "reason": "save_exception",
+                "details": str(e),
+            })
+            summary["company_stats"].append({
+                "company": company,
+                "ats": ats,
+                "raw_jobs": len(raw_jobs),
+                "saved_new": 0,
+                "status": "save_error",
+                "error": str(e),
+            })
             summary["errors"].append({"company": company, "stage": "save", "error": str(e)})
 
         time.sleep(_INTER_COMPANY_DELAY)
 
     summary["end"] = datetime.now().isoformat()
     return summary
+
+
+def _persist_diagnostics_to_supabase(summary: dict, log: logging.Logger) -> None:
+    """
+    Best-effort write of run diagnostics to Supabase.
+    If table/env is missing, this no-ops with a warning (does not fail the run).
+    """
+    table = os.getenv("SCRAPE_DIAGNOSTICS_TABLE", "scrape_diagnostics")
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not supabase_url or not supabase_key:
+        log.info("  Diagnostics table skipped: SUPABASE_URL/SUPABASE_SERVICE_KEY not set")
+        return
+
+    try:
+        from supabase import create_client
+    except Exception as e:
+        log.warning(f"  Diagnostics table skipped: could not import supabase client ({e})")
+        return
+
+    unresolved_map = {u.get("company"): u for u in summary.get("unresolved", [])}
+    rows = []
+    for stat in summary.get("company_stats", []):
+        company = stat.get("company")
+        unresolved = unresolved_map.get(company, {})
+        rows.append({
+            "run_id": summary.get("run_id"),
+            "scope": summary.get("scope"),
+            "started_at": summary.get("start"),
+            "ended_at": summary.get("end"),
+            "company_name": company,
+            "ats": stat.get("ats"),
+            "raw_jobs": stat.get("raw_jobs", 0),
+            "saved_new": stat.get("saved_new", 0),
+            "status": stat.get("status", "unknown"),
+            "reason": unresolved.get("reason"),
+            "details": unresolved.get("details"),
+        })
+
+    if not rows:
+        return
+
+    try:
+        sb = create_client(supabase_url, supabase_key)
+        batch_size = 200
+        for i in range(0, len(rows), batch_size):
+            sb.table(table).insert(rows[i:i + batch_size]).execute()
+        log.info(f"  Diagnostics table rows : {len(rows)} inserted into `{table}`")
+    except Exception as e:
+        log.warning(f"  Diagnostics table write failed (`{table}`): {e}")
 
 
 # ── Enrich-only pass ──────────────────────────────────────────────────────────
@@ -320,6 +382,10 @@ def main():
     parser.add_argument("--resume",                action="store_true", help="Skip companies that already have output in All_CSV_Outputs")
     parser.add_argument("--enrich-only",           action="store_true", help="Enrich already-scraped jobs (no scraping, LM Studio only)")
     parser.add_argument("--with-company-scrapers", action="store_true", help="Run company_scrapers/ scripts before KNOWN_PORTALS phase")
+    parser.add_argument("--scope", choices=["india", "global"], default="india",
+                        help="Job geography scope (default: india).")
+    parser.add_argument("--global-cap", type=int, default=_GLOBAL_SCOPE_DEFAULT_CAP,
+                        help=f"Max jobs per company when --scope global (default: {_GLOBAL_SCOPE_DEFAULT_CAP}).")
     parser.add_argument("--validate",              action="store_true",
                         help=f"Validation run: scrape {_VALIDATE_MAX_JOBS} jobs/company, no enrichment, "
                              f"write to validation_outputs/ — use to verify column coverage across all portals")
@@ -332,11 +398,19 @@ def main():
         return
 
     # --validate: cap to 5 jobs/company, no enrichment, separate output folder
+    # --scope global: cap company output to avoid unbounded runs
     validate_mode = args.validate
-    max_jobs      = _VALIDATE_MAX_JOBS if validate_mode else None
+    if validate_mode:
+        max_jobs = _VALIDATE_MAX_JOBS
+    elif args.scope == "global":
+        max_jobs = args.global_cap
+    else:
+        max_jobs = None
     output_base   = _VALIDATE_OUTPUT_BASE if validate_mode else OUTPUT_BASE
     if validate_mode:
         log.info(f"VALIDATE MODE: max {_VALIDATE_MAX_JOBS} jobs/company → {output_base}")
+    elif args.scope == "global":
+        log.info(f"GLOBAL MODE: cap {max_jobs} jobs/company")
 
     scraped_slugs: set[str] = set()
     if args.with_company_scrapers:
@@ -360,6 +434,13 @@ def main():
         skipped = before - len(portals)
         log.info(f"--resume: skipping {skipped} already-scraped companies, {len(portals)} remaining")
 
+    # Scope override:
+    # india  -> force India filtering across adapters
+    # global -> disable India filtering where adapter supports it
+    for p in portals:
+        p["india_only"] = (args.scope == "india")
+
+    log.info(f"Scope: {args.scope}")
     log.info(f"Portals to process: {len(portals)}")
     for p in portals:
         flag = "🌐" if p["js_required"] else "⚡"
@@ -370,7 +451,8 @@ def main():
 
     log.info("─" * 60)
     summary = run(portals, skip_enrich=args.skip_enrich or validate_mode, log=log,
-                  max_jobs=max_jobs, output_base=output_base, validate_mode=validate_mode)
+                  max_jobs=max_jobs, output_base=output_base,
+                  validate_mode=validate_mode, scope=args.scope)
 
     log.info("─" * 60)
     log.info(f"RUN COMPLETE")
@@ -384,6 +466,18 @@ def main():
         log.warning(f"  Errors ({len(summary['errors'])}):")
         for e in summary["errors"]:
             log.warning(f"    [{e['stage']}] {e['company']}: {e['error']}")
+
+    if summary["low_count"]:
+        log.warning(f"  Low-count companies (<5 scraped jobs): {len(summary['low_count'])}")
+        for row in summary["low_count"]:
+            log.warning(f"    {row['company']} [{row['ats']}]: scraped={row['raw_jobs']} saved_new={row['saved_new']}")
+
+    reports_dir = Path(__file__).resolve().parent.parent / "logs"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = reports_dir / f"run_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    log.info(f"  Run summary JSON    : {summary_path}")
+    _persist_diagnostics_to_supabase(summary, log)
 
 
 if __name__ == "__main__":

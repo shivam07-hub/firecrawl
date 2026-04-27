@@ -288,6 +288,51 @@ CREATE TABLE jobs (
 
 ## RUN HISTORY & CURRENT STATE
 
+### Session 2026-04-27 — Global scope controls + lifecycle/versioning + diagnostics
+
+**Code changes:**
+- `scraper/main.py`
+  - Added `--scope india|global` (default `india`) and `--global-cap` (default `2000`).
+  - Added unresolved-company diagnostics in run summary JSON (`no_jobs_returned`, scrape/save exceptions).
+  - Added best-effort Supabase diagnostics sink (`scrape_diagnostics` table).
+- `scraper/scrapers.py`
+  - Removed placeholder fallback rows from Firecrawl paths (`scrape_validate`, `scrape_extract` now return `[]` when no links are parseable).
+  - Made provider filters scope-aware so `india_only` can be forced by run scope.
+  - Added adapter-level cap wiring for global mode (`greenhouse`, `lever`, `phenom_api`, generic JSON parse path).
+- `csv_importer.py`
+  - Default quality gate changed to `--min-score 0` to keep all valid non-placeholder jobs.
+  - Added mixed-schema normalization support (legacy + canonical).
+  - Added lifecycle/versioning logic:
+    - `first_seen`, `last_seen`, `is_active`, `change_fingerprint`.
+    - Meaningful-change version events (`insert` / `update` / `deactivate`) in `job_versions`.
+    - **Inactive after 1 miss** (if a previously active job is absent in a successful company run).
+- `.archon/workflows/scraper-weekly-run.yaml`
+  - Switched cadence to weekly.
+  - Made dry-run and scrape phases global-scope by default.
+- New docs/scripts:
+  - `scraper/ARCHITECTURE_V3_MODULAR_PLAN.md`
+  - `scraper/sql/create_scrape_diagnostics.sql`
+  - `scraper/sql/create_job_lifecycle.sql`
+  - `scraper/sql/create_jobs_india_view.sql`
+
+**Data quality impact (2026-04-27):**
+- Placeholder cleanup completed (historic Firecrawl placeholder rows removed from Supabase).
+- Import path now preserves real low-count companies instead of forcing synthetic 1-row placeholders.
+- Confirmed global-scope smoke test: `Thoughtworks` returned 46 jobs in one company run.
+
+**Infrastructure status (confirmed by user):**
+- All 3 SQL scripts were executed successfully on Supabase:
+  - `create_scrape_diagnostics.sql`
+  - `create_job_lifecycle.sql`
+  - `create_jobs_india_view.sql`
+
+**Operating model decision (locked):**
+- Weekly full run in **global** scope.
+- On-demand full/targeted dumps anytime the scraper agent is called.
+- India dataset is derived downstream from global via `jobs_india` view/filter.
+- Global per-company cap: `2000`.
+- Versioning tracks **meaningful changes only** (`job_title`, `job_description`, `location`, `apply_url`).
+
 ### Session 2026-04-19 — Portal expansion + JD fix
 
 **Code changes:**
@@ -455,9 +500,57 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
 
 ---
 
+## CLAUDE CODE SKILLS (available via `/skill-name`)
+
+> **For Codex:** These are Claude Code slash-command skills. When handing off to Claude Code, reference the trigger to invoke the relevant skill.
+
+| Skill | Trigger | Purpose |
+|---|---|---|
+| `improve-codebase-architecture` | `/improve-codebase-architecture` | Find deepening opportunities, ADR-informed refactor suggestions |
+| `graphify` | `/graphify` | Any input → knowledge graph (HTML + JSON + audit report) |
+| `triage-issue` | `/triage-issue` | Root-cause a bug, file GitHub issue with TDD fix plan |
+| `request-refactor-plan` | `/request-refactor-plan` | Interview-driven refactor plan → GitHub issue |
+| `to-issues` | `/to-issues` | Break plan/spec/PRD into vertical-slice GitHub issues |
+| `to-prd` | `/to-prd` | Turn conversation into a PRD, file as GitHub issue |
+| `review` | `/review` | Review current branch PR |
+| `security-review` | `/security-review` | Security review of pending branch changes |
+| `tdd` | `/tdd` | Red-green-refactor TDD loop for features/bug fixes |
+| `simplify` | `/simplify` | Review changed code for reuse, quality, efficiency |
+| `brooks-design` | `/brooks-design` | Brooks' design philosophy — conceptual integrity audit |
+| `ousterhout-design` | `/ousterhout-design` | Ousterhout deep module principles — complexity audit |
+| `init` | `/init` | Initialize CLAUDE.md with codebase documentation |
+| `qa` | `/qa` | Interactive QA session → GitHub issues |
+| `grill-me` | `/grill-me` | Relentless interview to resolve plan/design ambiguities |
+| `github-triage` | `/github-triage` | Label-based GitHub issue triage state machine |
+| `git-guardrails-claude-code` | `/git-guardrails-claude-code` | Block dangerous git commands via hooks |
+| `setup-pre-commit` | `/setup-pre-commit` | Husky + lint-staged + type check + tests pre-commit hooks |
+| `frontend-design` | `/frontend-design` | Production-grade frontend interfaces, high design quality |
+| `baseline-ui` | `/baseline-ui` | Animation, typography, accessibility, layout audits |
+| `fixing-accessibility` | `/fixing-accessibility` | ARIA, keyboard nav, focus, contrast audits + fixes |
+| `fixing-motion-performance` | `/fixing-motion-performance` | Animation perf: layout thrashing, compositor, scroll-linked |
+| `fixing-metadata` | `/fixing-metadata` | HTML metadata: titles, OG tags, Twitter cards, canonical |
+| `design-an-interface` | `/design-an-interface` | Multiple radically different interface designs via subagents |
+| `schedule` | `/schedule` | Schedule recurring or one-time remote agents |
+| `loop` | `/loop` | Run a prompt on a recurring interval |
+| `claude-api` | `/claude-api` | Build/debug/optimize Claude API / Anthropic SDK apps |
+| `archon` | `/archon` | Run Archon AI workflows from Claude Code |
+| `obsidian-vault` | `/obsidian-vault` | Search, create, manage Obsidian vault notes |
+| `edit-article` | `/edit-article` | Restructure, clarify, tighten prose in articles |
+| `write-a-skill` | `/write-a-skill` | Create new agent skills with proper structure |
+| `caveman` | `/caveman` | Ultra-compressed communication mode (~75% token reduction) |
+| `find-skills` | `/find-skills` | Discover and install agent skills |
+| `karpathy-guidelines` | `/karpathy-guidelines` | Reduce common LLM coding mistakes |
+| `update-config` | `/update-config` | Configure Claude Code harness via settings.json |
+| `fewer-permission-prompts` | `/fewer-permission-prompts` | Add allowlist to reduce permission prompts |
+| `scaffold-exercises` | `/scaffold-exercises` | Create exercise directory structures |
+| `migrate-to-shoehorn` | `/migrate-to-shoehorn` | Migrate `as` type assertions to shoehorn |
+| `keybindings-help` | `/keybindings-help` | Customize keyboard shortcuts |
+
+---
+
 ## MISSION STATEMENT
 
-**Goal:** Keep Firecrawl running to capture all job openings + full JDs from 100+ company portals every 3 days. The JD corpus is used to extract skills required in the age of AI (via LM Studio enrichment → Supabase). Every scraper build decision must serve this mission — if a direct API exists, use it; Firecrawl is the fallback, not the default.
+**Goal:** Keep Firecrawl running to capture all job openings + full JDs from 100+ company portals through a weekly full **global** dump plus on-demand targeted dumps. The JD corpus is used to extract skills required in the age of AI (via LM Studio enrichment → Supabase). Every scraper build decision must serve this mission — if a direct API exists, use it; Firecrawl is the fallback, not the default.
 
 ---
 
@@ -509,25 +602,28 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
   - API: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json`
 - Wire all new scrapers into `to_canonical()` → `save_jobs()` (5-field schema only)
 
-### Chunk 4 — Archon 3-day cadence + docs (REPEATS EVERY 3 DAYS automatically)
-- Update `.archon/workflows/scraper-weekly-run.yaml` → rename to `scraper-3day-run.yaml`
-- Schedule: every 3 days via Archon cron (not weekly)
-- After each run: update RUN HISTORY in KNOWN_PORTALS.md + CLAUDE.md
-- Archon workflow nodes: check-docker + check-lm + test-portals → scrape (--skip-enrich) → enrich (--enrich-only) → upload (csv_importer.py) → summarize
-- **This chunk is the repeating operational heartbeat — set it once, it runs itself**
+### Chunk 4 — Archon Weekly Global Cadence + docs (OPERATIONAL HEARTBEAT)
+- Keep `.archon/workflows/scraper-weekly-run.yaml` as the canonical workflow.
+- Schedule: weekly via Archon cron (`0 2 * * 0`).
+- Weekly scrape phase runs in global scope: `python main.py --skip-enrich --scope global --global-cap 2000`.
+- India subset is consumed downstream from global (`jobs_india` view / location filters).
+- On-demand targeted dumps are always allowed:
+  - `python main.py --company "<Company>" --skip-enrich --scope global --global-cap 2000`
+- After each run: update RUN HISTORY in KNOWN_PORTALS.md + CLAUDE.md.
+- Archon workflow nodes remain: check-docker + check-lm + test-portals → scrape → enrich → upload → summarize.
 
 ---
 
 ## NEXT SESSION — Weekly Scraper Run (Dump 5)
 
-**Goal:** Execute a full fresh weekly scrape of all 100+ companies, enrich with LM Studio, upload to Supabase.
+**Goal:** Execute a full fresh weekly **global** scrape of all 100+ companies, enrich with LM Studio, upload to Supabase, then use downstream India filtering.
 
 **How to run (requires Docker + LM Studio both on):**
 ```bash
 archon workflow run scraper-weekly-run --no-worktree "Weekly dump $(date +%Y-%m-%d)"
 ```
 - Layer 0: check-docker + check-lm + test-portals (parallel pre-flight)
-- Layer 1: scrape — `python main.py --skip-enrich` (full fresh scrape, 40-90 min)
+- Layer 1: scrape — `python main.py --skip-enrich --scope global --global-cap 2000` (full fresh scrape, 40-90 min)
 - Layer 2: enrich — `python main.py --enrich-only` (LM Studio, 20-40 min)
 - Layer 3: upload — `python csv_importer.py` (Supabase upsert, < 5 min)
 - Layer 4: summarize — AI run report
@@ -541,6 +637,12 @@ archon workflow run scraper-weekly-run --no-worktree --resume "Weekly dump $(dat
 ```
 
 **IMPORTANT — do NOT add --resume for a fresh weekly run.** `--resume` is only for recovering from a mid-run crash within the same session. Using it on a new week skips all companies that already have output folders (18 min run that does nothing).
+
+**On-demand targeted dump (anytime):**
+```bash
+cd scraper
+python main.py --company "<Company>" --skip-enrich --scope global --global-cap 2000
+```
 
 **Architecture goal (v2):**
 ```

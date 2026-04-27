@@ -9,12 +9,13 @@ Schema (jobs table):
     apply_url, main_skills TEXT[], side_skills TEXT[], batch_date INTEGER
 
 Run from firecrawl_Supabase/ root:
-    python3 csv_importer.py              # upload with default quality gate
+    python3 csv_importer.py              # upload all valid non-placeholder rows
     python3 csv_importer.py --dry-run    # quality report only, no upload
-    python3 csv_importer.py --min-score 0  # upload everything (no gate)
+    python3 csv_importer.py --min-score 1  # optional: enforce minimal quality gate
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,8 @@ TABLE     = "jobs"
 _PLACEHOLDER_TITLE_PATTERNS = (
     re.compile(r"\bscraped via firecrawl\b", re.IGNORECASE),
 )
+JOB_VERSIONS_TABLE = os.getenv("JOB_VERSIONS_TABLE", "job_versions")
+_MEANINGFUL_FIELDS = ("job_title", "job_description", "location", "apply_url")
 
 load_dotenv(ENV_FILE)
 _DEFAULT_OUTPUT_BASE = _HERE / "All_CSV_Outputs_thru_firecrawl"
@@ -122,6 +125,28 @@ def is_placeholder_title(title: str) -> bool:
     return any(pattern.search(title) for pattern in _PLACEHOLDER_TITLE_PATTERNS)
 
 
+def _truthy_env(name: str, default: str = "1") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def _meaningful_payload(row: dict) -> dict:
+    return {k: str(row.get(k) or "").strip() for k in _MEANINGFUL_FIELDS}
+
+
+def _fingerprint(payload: dict) -> str:
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _changed_fields(old_payload: dict, new_payload: dict) -> list[str]:
+    return [k for k in _MEANINGFUL_FIELDS if (old_payload.get(k) or "") != (new_payload.get(k) or "")]
+
+
 # ── Quality gate ───────────────────────────────────────────────────────────────
 
 def quality_score(job: dict) -> int:
@@ -196,6 +221,53 @@ def upsert_batch(supabase: Client, batch: list[dict]) -> None:
     supabase.table(TABLE).upsert(batch, on_conflict="job_id").execute()
 
 
+def supports_lifecycle_columns(supabase: Client) -> bool:
+    try:
+        supabase.table(TABLE).select("job_id,first_seen,last_seen,is_active,change_fingerprint").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
+
+def supports_table(supabase: Client, table: str) -> bool:
+    try:
+        supabase.table(table).select("*").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
+
+def fetch_company_existing(supabase: Client, company: str) -> tuple[dict[str, dict], set[str]]:
+    """
+    Return:
+      existing_by_id: all known rows for company
+      active_ids: currently active job ids for company
+    """
+    existing_by_id: dict[str, dict] = {}
+    active_ids: set[str] = set()
+    resp = supabase.table(TABLE).select(
+        "job_id,first_seen,is_active,change_fingerprint,job_title,job_description,location,apply_url"
+    ).eq("company_name", company).execute()
+    for row in (resp.data or []):
+        jid = str(row.get("job_id") or "")
+        if not jid:
+            continue
+        existing_by_id[jid] = row
+        if bool(row.get("is_active")):
+            active_ids.add(jid)
+    return existing_by_id, active_ids
+
+
+def deactivate_jobs(supabase: Client, job_ids: list[str]) -> None:
+    for chunk in _chunks(job_ids, BATCH_SIZE):
+        supabase.table(TABLE).update({"is_active": False}).in_("job_id", chunk).execute()
+
+
+def insert_version_events(supabase: Client, events: list[dict], table: str = JOB_VERSIONS_TABLE) -> None:
+    for chunk in _chunks(events, BATCH_SIZE):
+        supabase.table(table).insert(chunk).execute()
+
+
 # ── Reports ────────────────────────────────────────────────────────────────────
 
 def print_quality_report(json_files: list[Path], min_score: int) -> None:
@@ -248,8 +320,8 @@ def print_quality_report(json_files: list[Path], min_score: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=f"Upsert scraped jobs into Supabase `{TABLE}`")
     parser.add_argument("--dry-run",    action="store_true", help="Quality report only — no Supabase writes")
-    parser.add_argument("--min-score",  type=int, default=1, metavar="N",
-                        help="Min quality score 0-3 (default 1). 0 = upload everything.")
+    parser.add_argument("--min-score",  type=int, default=0, metavar="N",
+                        help="Min quality score 0-3 (default 0). 0 = upload every non-placeholder valid row.")
     args = parser.parse_args()
 
     json_files = discover_json_files(OUTPUT_BASE)
@@ -272,8 +344,20 @@ def main() -> None:
 
     supabase: Client = create_client(supabase_url, supabase_key)
 
+    lifecycle_requested = _truthy_env("ENABLE_JOB_LIFECYCLE", "1")
+    versions_requested = _truthy_env("ENABLE_JOB_VERSIONS", "1")
+    lifecycle_enabled = lifecycle_requested and supports_lifecycle_columns(supabase)
+    versions_enabled = versions_requested and supports_table(supabase, JOB_VERSIONS_TABLE)
+
+    if lifecycle_requested and not lifecycle_enabled:
+        print(f"WARNING: lifecycle columns not found on `{TABLE}`. Run scraper/sql/create_job_lifecycle.sql")
+    if versions_requested and not versions_enabled:
+        print(f"WARNING: version table `{JOB_VERSIONS_TABLE}` not found. Run scraper/sql/create_job_lifecycle.sql")
+
     batch: list[dict] = []
     total_uploaded = total_dropped = 0
+    total_deactivated = 0
+    version_events: list[dict] = []
 
     for json_path in json_files:
         company = json_path.parts[-4]
@@ -296,8 +380,84 @@ def main() -> None:
         suffix = f"  [{', '.join(flags)} dropped]" if flags else ""
         print(f"  {company}: {len(clean)} jobs → {TABLE}{suffix}")
 
+        existing_by_id: dict[str, dict] = {}
+        active_ids: set[str] = set()
+        current_ids: set[str] = {str(j.get("job_id")) for j in clean if j.get("job_id")}
+        if lifecycle_enabled or versions_enabled:
+            try:
+                existing_by_id, active_ids = fetch_company_existing(supabase, company)
+            except Exception as e:
+                print(f"  WARN {company}: could not fetch existing rows for lifecycle/versioning — {e}")
+                existing_by_id, active_ids = {}, set()
+
+        if lifecycle_enabled:
+            # Inactive after 1 miss: any currently-active job not present in this run
+            # for the same company is marked inactive immediately.
+            to_deactivate = sorted(active_ids - current_ids)
+            if to_deactivate:
+                deactivate_jobs(supabase, to_deactivate)
+                total_deactivated += len(to_deactivate)
+                if versions_enabled:
+                    for jid in to_deactivate:
+                        old = existing_by_id.get(jid, {})
+                        old_payload = _meaningful_payload(old)
+                        version_events.append({
+                            "job_id": jid,
+                            "company_name": company,
+                            "batch_date": file_batch_date,
+                            "change_type": "deactivate",
+                            "changed_fields": [],
+                            "old_fingerprint": old.get("change_fingerprint") or _fingerprint(old_payload),
+                            "new_fingerprint": None,
+                            "old_snapshot": old_payload,
+                            "new_snapshot": None,
+                        })
+
         for job in clean:
-            batch.append(build_row(job))
+            row = build_row(job)
+            jid = str(row["job_id"])
+
+            if lifecycle_enabled:
+                old = existing_by_id.get(jid)
+                row["first_seen"] = int(old.get("first_seen")) if (old and old.get("first_seen")) else int(row["batch_date"])
+                row["last_seen"] = int(row["batch_date"])
+                row["is_active"] = True
+                new_payload = _meaningful_payload(row)
+                row["change_fingerprint"] = _fingerprint(new_payload)
+
+            if versions_enabled:
+                old = existing_by_id.get(jid)
+                new_payload = _meaningful_payload(row)
+                new_fp = _fingerprint(new_payload)
+                if not old:
+                    version_events.append({
+                        "job_id": jid,
+                        "company_name": company,
+                        "batch_date": file_batch_date,
+                        "change_type": "insert",
+                        "changed_fields": list(_MEANINGFUL_FIELDS),
+                        "old_fingerprint": None,
+                        "new_fingerprint": new_fp,
+                        "old_snapshot": None,
+                        "new_snapshot": new_payload,
+                    })
+                else:
+                    old_payload = _meaningful_payload(old)
+                    old_fp = old.get("change_fingerprint") or _fingerprint(old_payload)
+                    if old_fp != new_fp:
+                        version_events.append({
+                            "job_id": jid,
+                            "company_name": company,
+                            "batch_date": file_batch_date,
+                            "change_type": "update",
+                            "changed_fields": _changed_fields(old_payload, new_payload),
+                            "old_fingerprint": old_fp,
+                            "new_fingerprint": new_fp,
+                            "old_snapshot": old_payload,
+                            "new_snapshot": new_payload,
+                        })
+
+            batch.append(row)
             total_uploaded += 1
             if len(batch) >= BATCH_SIZE:
                 upsert_batch(supabase, batch)
@@ -306,7 +466,14 @@ def main() -> None:
     if batch:
         upsert_batch(supabase, batch)
 
+    if version_events and versions_enabled:
+        insert_version_events(supabase, version_events, table=JOB_VERSIONS_TABLE)
+
     print(f"\n✅  {total_uploaded} rows upserted into `{TABLE}`  ({total_dropped} dropped)")
+    if lifecycle_enabled:
+        print(f"Lifecycle: {total_deactivated} rows marked inactive (missed in latest company run)")
+    if versions_enabled:
+        print(f"Versions: {len(version_events)} job version event(s) written to `{JOB_VERSIONS_TABLE}`")
 
     LOGS_DIR.mkdir(exist_ok=True)
     summary_path = LOGS_DIR / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -317,6 +484,10 @@ def main() -> None:
         "companies": len(json_files),
         "uploaded": total_uploaded,
         "dropped": total_dropped,
+        "deactivated": total_deactivated,
+        "version_events": len(version_events),
+        "lifecycle_enabled": lifecycle_enabled,
+        "versions_enabled": versions_enabled,
     }, indent=2))
     print(f"Log → {summary_path}\n")
 
