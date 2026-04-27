@@ -61,3 +61,10 @@ _local/
 
 
 apps/api/src/lib/scrape-interact/*.md
+
+# scraper output artifacts (do not commit generated job dumps)
+/All_CSV_Outputs_thru_firecrawl/
+/all_CSV_saved/
+/All_CSV_saved/
+/validation_outputs/
+/logs/
