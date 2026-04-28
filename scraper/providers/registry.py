@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from schema import Portal
+
 import logging
 
-from providers.base import FALLBACK_FIRECRAWL_EXTRACT, Provider, ProviderResult
+from providers.base import FALLBACK_FIRECRAWL_EXTRACT, Provider, ProviderResult, ScrapeReason
 from providers.firecrawl_js import FirecrawlJSProvider
 from providers.generic_json import GenericJSONProvider
 from providers.greenhouse import GreenhouseProvider
@@ -23,14 +25,14 @@ _ATS_PROVIDERS: dict[str, Provider] = {
 }
 
 
-def _provider_for_portal(portal: dict) -> Provider:
+def _provider_for_portal(portal: Portal) -> Provider:
     if portal.get("js_required"):
         return _FIRECRAWL_PROVIDER
     return _ATS_PROVIDERS.get(portal.get("ats", ""), _GENERIC_PROVIDER)
 
 
 def _run_firecrawl_extract(
-    portal: dict,
+    portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None,
@@ -52,7 +54,7 @@ def _run_firecrawl_extract(
 
 def _apply_fallback(
     result: ProviderResult,
-    portal: dict,
+    portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None,
@@ -80,7 +82,7 @@ def _apply_fallback(
 
 
 def dispatch_scrape(
-    portal: dict,
+    portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None = None,
@@ -98,6 +100,11 @@ def dispatch_scrape(
         )
 
     result = provider.scrape(portal, max_jobs=max_jobs, validate_mode=validate_mode)
+
+    # Log typed reason for non-success outcomes (aids debugging without log-string parsing)
+    if result.reason not in (ScrapeReason.SUCCESS, ScrapeReason.NO_JOBS, ScrapeReason.FALLBACK):
+        log.warning(f"    [{portal['company']}] scrape reason: {result.reason.value}")
+
     return _apply_fallback(
         result,
         portal,

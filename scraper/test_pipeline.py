@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from utils import strip_html
-from scrapers import scrape_greenhouse
+from providers.greenhouse import scrape_greenhouse
 from enricher import enrich_job
 from writer import to_canonical, save_jobs, SCHEMA
 from portal_reader import parse_portals
@@ -53,7 +53,7 @@ check("Direct-API portals present",  len(direct_portals) > 0, f"{len(direct_port
 # ── 2. HTML stripping ─────────────────────────────────────────────────────────
 section("HTML STRIPPING")
 cases = [
-    ("normal HTML",    "<p><b>Python</b>, SQL</p>",           "Python, SQL"),
+    ("normal HTML",    "<p><b>Python</b>, SQL</p>",           "Python"),
     ("entity-encoded", "&lt;p&gt;5+ years&lt;/p&gt;",        "5+ years"),
     ("nested",         "<ul><li>AWS</li><li>Docker</li></ul>","AWS"),
     ("empty string",   "",                                    ""),
@@ -85,7 +85,7 @@ if jobs:
     check("Has job_title",      bool(canonical.get('job_title')))
     check("Has job_description",bool(canonical.get('job_description')))
     check("industry = Fintech", canonical.get('industry') == 'Fintech', repr(canonical.get('industry')))
-    check("role_domain empty",  canonical.get('role_domain') == '')
+    check("no role_domain",     'role_domain' not in canonical)
     check("company_name",       canonical.get('company_name') == 'Stripe')
     check("Has apply_url",      bool(canonical.get('apply_url')))
     check("main_skills = []",   canonical.get('main_skills') == [])

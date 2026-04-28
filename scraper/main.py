@@ -37,6 +37,8 @@ from enricher import enrich_job
 from writer import to_canonical, save_jobs, SCHEMA
 from utils import company_slug
 from config import OUTPUT_BASE
+from validation import LOW_COUNT_THRESHOLD
+from pipeline_validator import run_gate
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
@@ -128,6 +130,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         "scope": scope,
         "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
         "processed": 0, "skipped": 0, "total_new": 0,
+        "total_validation_drops": 0,
         "unresolved": [],
         "low_count": [],
         "company_stats": [],
@@ -186,6 +189,20 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         # ── Normalise to 7-field schema ───────────────────────────────────────
         canonical = [to_canonical(j, company) for j in raw_jobs]
 
+        # ── Gate 1: post_scrape — identity + placeholder ──────────────────────
+        g1 = run_gate(canonical, "post_scrape")
+        if g1.drop_count:
+            log.warning(f"  {g1.drop_count} jobs dropped [post_scrape] — {g1.reasons}")
+        summary["total_validation_drops"] += g1.drop_count
+
+        # ── Gate 2: pre_enrich — description present + min length ─────────────
+        g2 = run_gate(g1.passed, "pre_enrich")
+        if g2.drop_count:
+            log.warning(f"  {g2.drop_count} jobs dropped [pre_enrich] — {g2.reasons}")
+        summary["total_validation_drops"] += g2.drop_count
+
+        canonical = g2.passed
+
         # ── Enrich (main_skills + side_skills from job_description) ──────────
         if skip_enrich:
             enriched = canonical
@@ -207,7 +224,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         try:
             path, new_count = save_jobs(company, enriched, output_base=output_base)
             log.info(f"  Saved {new_count} new jobs → {path}")
-            if len(raw_jobs) < 5:
+            if len(raw_jobs) < LOW_COUNT_THRESHOLD:
                 log.warning(f"  LOW COUNT: {len(raw_jobs)} scraped job(s) for {company}")
                 summary["low_count"].append({
                     "company": company,
@@ -220,6 +237,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
                 "company": company,
                 "ats": ats,
                 "raw_jobs": len(raw_jobs),
+                "validation_drops": len(validation_drops),
                 "saved_new": new_count,
                 "status": "ok",
             })

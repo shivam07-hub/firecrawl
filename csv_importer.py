@@ -29,13 +29,20 @@ from supabase import Client, create_client
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 _HERE     = Path(__file__).resolve().parent          # firecrawl_Supabase/
+
+# Pull shared constants from scraper/ package
+sys.path.insert(0, str(_HERE / "scraper"))
+from schema import CANONICAL_FIELDS, LEGACY_FIELD_ALIASES  # noqa: E402
+from validation import (  # noqa: E402
+    is_placeholder_title,
+    is_valid,
+    quality_score,
+    LOW_COUNT_THRESHOLD,
+)
 ENV_FILE  = _HERE / "scraper" / ".env"
 LOGS_DIR  = _HERE / "logs"
 BATCH_SIZE = 200
 TABLE     = "jobs"
-_PLACEHOLDER_TITLE_PATTERNS = (
-    re.compile(r"\bscraped via firecrawl\b", re.IGNORECASE),
-)
 JOB_VERSIONS_TABLE = os.getenv("JOB_VERSIONS_TABLE", "job_versions")
 _MEANINGFUL_FIELDS = ("job_title", "job_description", "location", "apply_url")
 
@@ -111,7 +118,7 @@ def normalize_job(job: dict, default_batch_date: int) -> dict:
         "job_description": _first_non_empty(job, "job_description", "raw_jd_text"),
         "company_name": _first_non_empty(job, "company_name"),
         "industry": _first_non_empty(job, "industry", "Industry", "Industry_name"),
-        "Location": _first_non_empty(job, "Location", "location", "location_city", "location_country", default="India"),
+        "location": _first_non_empty(job, "location", "Location", "location_city", "location_country", default="India"),
         "apply_url": _first_non_empty(job, "apply_url", "job_url", "url"),
         "main_skills": _normalize_skills(job.get("main_skills") or job.get("skills_required")),
         "side_skills": _normalize_skills(job.get("side_skills") or job.get("skills_preferred")),
@@ -119,10 +126,7 @@ def normalize_job(job: dict, default_batch_date: int) -> dict:
     }
 
 
-def is_placeholder_title(title: str) -> bool:
-    if not title:
-        return False
-    return any(pattern.search(title) for pattern in _PLACEHOLDER_TITLE_PATTERNS)
+# is_placeholder_title, is_valid, quality_score imported from scraper/validation.py
 
 
 def _truthy_env(name: str, default: str = "1") -> bool:
@@ -148,22 +152,7 @@ def _changed_fields(old_payload: dict, new_payload: dict) -> list[str]:
 
 
 # ── Quality gate ───────────────────────────────────────────────────────────────
-
-def quality_score(job: dict) -> int:
-    """
-    0-3 score for a job in the Dump 4 schema:
-      +1  job_description non-empty
-      +1  main_skills non-empty list
-      +1  Location non-empty
-    """
-    score = 0
-    if job.get("job_description"):
-        score += 1
-    if job.get("main_skills"):
-        score += 1
-    if job.get("Location"):
-        score += 1
-    return score
+# quality_score imported from scraper/validation.py
 
 
 def preprocess(jobs: list[dict], min_score: int, default_batch_date: int) -> tuple[list[dict], int, int, int, int]:
@@ -173,7 +162,7 @@ def preprocess(jobs: list[dict], min_score: int, default_batch_date: int) -> tup
     """
     normalized = [normalize_job(j, default_batch_date) for j in jobs]
 
-    valid = [j for j in normalized if j.get("job_id") and j.get("job_title")]
+    valid = [j for j in normalized if is_valid(j)]
     n_invalid = len(normalized) - len(valid)
 
     without_placeholders = [j for j in valid if not is_placeholder_title(j.get("job_title", ""))]
@@ -194,6 +183,27 @@ def preprocess(jobs: list[dict], min_score: int, default_batch_date: int) -> tup
     return list(passed), n_invalid, n_dupes, n_quality, n_placeholders
 
 
+# ── Schema conformance ─────────────────────────────────────────────────────────
+
+_SUPABASE_REQUIRED = frozenset({
+    "job_id", "job_title", "job_description", "company_name",
+    "industry", "location", "apply_url", "main_skills", "side_skills", "batch_date",
+})
+
+
+def validate_row(row: dict) -> list[str]:
+    """Return list of field errors. Empty list = row is conformant."""
+    errors = []
+    for f in _SUPABASE_REQUIRED:
+        if f not in row:
+            errors.append(f"missing:{f}")
+    if not isinstance(row.get("main_skills"), list):
+        errors.append("type:main_skills must be list")
+    if not isinstance(row.get("side_skills"), list):
+        errors.append("type:side_skills must be list")
+    return errors
+
+
 # ── Row builder ────────────────────────────────────────────────────────────────
 
 def build_row(job: dict) -> dict:
@@ -207,7 +217,7 @@ def build_row(job: dict) -> dict:
         "job_description": str(job.get("job_description") or ""),
         "company_name":    str(job.get("company_name") or ""),
         "industry":        str(job.get("industry") or job.get("Industry") or ""),
-        "location":        str(job.get("Location") or job.get("location") or "India"),
+        "location":        str(job.get("location") or job.get("Location") or "India"),
         "apply_url":       str(job.get("apply_url") or "") or None,
         "main_skills":     skills_main,
         "side_skills":     skills_side,
@@ -456,6 +466,10 @@ def main() -> None:
                             "old_snapshot": old_payload,
                             "new_snapshot": new_payload,
                         })
+
+            errs = validate_row(row)
+            if errs:
+                print(f"  WARN schema violation for {row.get('job_id')}: {errs}")
 
             batch.append(row)
             total_uploaded += 1

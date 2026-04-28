@@ -15,46 +15,32 @@ from datetime import datetime
 from pathlib import Path
 from utils import company_slug
 from config import OUTPUT_BASE
+from schema import CANONICAL_FIELDS, RAW_FIELD_MAP
 
-# Canonical field order (11 fields)
-SCHEMA = [
-    "job_id",
-    "job_title",
-    "job_description",
-    "industry",
-    "role_domain",
-    "company_name",
-    "Location",
-    "apply_url",
-    "main_skills",
-    "side_skills",
-    "batch_date",
-]
+# SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
+SCHEMA = CANONICAL_FIELDS
 
-# Set once per run so all jobs in a batch share the same date integer (YYYYMMDD)
-_BATCH_DATE: int = int(datetime.now().strftime("%Y%m%d"))
+def _today() -> int:
+    return int(datetime.now().strftime("%Y%m%d"))
 
 
 def to_canonical(raw: dict, company_name: str) -> dict:
-    """
-    Map a raw scraper dict to the 10-field canonical schema.
-    Scrapers use legacy field names (title, raw_jd_text, job_url) — remapped here.
-    industry comes from the portal config dict (static per company).
-    role_domain, main_skills, side_skills start empty; enricher.py fills them.
-    batch_date is an integer YYYYMMDD set at import time (same for the whole run).
-    """
+    """Map raw scraper dict to canonical schema using RAW_FIELD_MAP for renames."""
+    def _get(raw_key: str, canonical_key: str, default=''):
+        # Try canonical key first (already-mapped field), then raw key alias
+        return raw.get(canonical_key) or raw.get(raw_key) or default
+
     return {
         "job_id":          raw.get('job_id') or '',
-        "job_title":       raw.get('title') or '',
-        "job_description": raw.get('raw_jd_text') or '',
+        "job_title":       _get('title', 'job_title'),
+        "job_description": _get('raw_jd_text', 'job_description'),
         "industry":        raw.get('industry') or '',
-        "role_domain":     raw.get('role_domain') or '',
         "company_name":    company_name,
-        "Location":        raw.get('location_city') or 'India',
-        "apply_url":       raw.get('job_url') or '',
+        "location":        _get('location_city', 'location') or raw.get('Location') or 'India',
+        "apply_url":       _get('job_url', 'apply_url'),
         "main_skills":     raw.get('main_skills') or [],
         "side_skills":     raw.get('side_skills') or [],
-        "batch_date":      _BATCH_DATE,
+        "batch_date":      _today(),
     }
 
 

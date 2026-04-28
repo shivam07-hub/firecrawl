@@ -19,10 +19,30 @@ import json
 import difflib
 from pathlib import Path
 from openai import OpenAI
-from config import LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL
+from config import LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL, _speed as _MODEL_SPEED
 from rag_skills import retrieve as _retrieve_skills
 
-_client = OpenAI(base_url=LM_STUDIO_BASE_URL, api_key=LM_STUDIO_API_KEY)
+# Singletons — None until first use (lazy init keeps import side-effect free)
+_client: OpenAI | None = None
+_L3_INDEX: dict[str, str] | None = None
+_L3_STRIPPED: dict[str, str] | None = None
+_L3_KEYS: list[str] | None = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(base_url=LM_STUDIO_BASE_URL, api_key=LM_STUDIO_API_KEY)
+    return _client
+
+
+def _get_l3_index() -> tuple[dict[str, str], dict[str, str], list[str]]:
+    global _L3_INDEX, _L3_STRIPPED, _L3_KEYS
+    if _L3_INDEX is None:
+        _L3_INDEX, _L3_STRIPPED = _build_l3_index()
+        _L3_KEYS = list(_L3_INDEX.keys())
+    return _L3_INDEX, _L3_STRIPPED, _L3_KEYS
+
 
 # ── Lightcast L3 taxonomy index ────────────────────────────────────────────────
 
@@ -64,9 +84,7 @@ def _build_l3_index() -> tuple[dict[str, str], dict[str, str]]:
     }
     return exact, stripped
 
-# exact: lowercase name → canonical; stripped: parenthetical-stripped → canonical
-_L3_INDEX, _L3_STRIPPED = _build_l3_index()
-_L3_KEYS: list[str] = list(_L3_INDEX.keys())  # kept for difflib lookups
+# Indexes populated on first call to _get_l3_index()
 
 # ── Controlled vocabularies ────────────────────────────────────────────────────
 
@@ -172,7 +190,9 @@ def _match_to_taxonomy(skill: str) -> str | None:
 
     If the taxonomy index is empty (file missing), passes the skill through unchanged.
     """
-    if not _L3_INDEX:
+    l3_index, l3_stripped, l3_keys = _get_l3_index()
+
+    if not l3_index:
         return skill if (isinstance(skill, str) and skill.strip()) else None
 
     normalized = skill.strip().lower()
@@ -180,18 +200,18 @@ def _match_to_taxonomy(skill: str) -> str | None:
         return None
 
     # 1. Exact
-    if normalized in _L3_INDEX:
-        return _L3_INDEX[normalized]
+    if normalized in l3_index:
+        return l3_index[normalized]
 
     # 2. Stripped-parenthetical (e.g. "Docker" → "Docker (Software)")
-    if normalized in _L3_STRIPPED:
-        return _L3_STRIPPED[normalized]
+    if normalized in l3_stripped:
+        return l3_stripped[normalized]
 
     # 3. Fuzzy — only for longer terms to avoid short-string false positives
     if len(normalized) >= 8:
-        matches = difflib.get_close_matches(normalized, _L3_KEYS, n=1, cutoff=0.88)
+        matches = difflib.get_close_matches(normalized, l3_keys, n=1, cutoff=0.88)
         if matches:
-            return _L3_INDEX[matches[0]]
+            return l3_index[matches[0]]
 
     return None
 
@@ -224,14 +244,19 @@ def _validate_enrichment(data: dict) -> dict:
 
 def _llm_json(prompt: str, default):
     """Call LM Studio and parse the response as JSON. Returns default on any failure."""
+    # deepseek-r1 (quality) emits a reasoning_content block before the answer;
+    # 150 tokens is exhausted in thinking — needs 2048 to guarantee JSON output.
+    # Fast models (gemma) don't use reasoning tokens so 300 is sufficient.
+    _max_tokens = 2048 if _MODEL_SPEED == "quality" else 300
     try:
-        resp = _client.chat.completions.create(
+        resp = _get_client().chat.completions.create(
             model=LM_STUDIO_MODEL,
             messages=[
+                {"role": "system", "content": "You are a precise job data extractor. Return a single valid JSON object. No explanation, no markdown."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.05,
-            max_tokens=150,
+            temperature=0.0,
+            max_tokens=_max_tokens,
         )
         text = resp.choices[0].message.content or ''
         return _parse_json(text) if text else default
