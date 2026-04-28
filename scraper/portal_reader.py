@@ -49,54 +49,21 @@ def _industry(company: str) -> str:
 # ── Workday tenant overrides ──────────────────────────────────────────────────
 # Tenants that use non-standard facet names, have no dynamic-discoverable India
 # UUID, or are Cloudflare-blocked at the discovery endpoint.
-# Inlined from former company_registry.py — full migration to KNOWN_PORTALS.md
-# columns is tracked as Arch-Phase D1.
-_WORKDAY_REGISTRY: dict[str, dict] = {
-    # searchText mode — no India UUID in tenant facets
-    "Intel":  {"search_text": "india"},
-    "Target": {"search_text": "india"},
-    # Standard India UUID (shared across many Workday tenants)
-    "3M":               {"india_facet_param": "Location_Country",    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"},
-    "NXP Semiconductors":{"india_facet_param": "Location_Country",   "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"},
-    "Autodesk":         {"india_facet_param": "locationCountry",     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"},
-    "DXC Technology":   {"india_facet_param": "locationCountry",     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"},
-    "Airbus":           {"india_facet_param": "locationCountry",     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e",
-                         "it_facet_param": "jobFamilyGroup", "it_uuids": ["f5811cef9cb5015323ad7f3f550a1df2"]},
-    "Shell":            {"india_facet_param": "locationCountry",     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e",
-                         "it_facet_param": "jobFamilyGroup", "it_uuids": ["a87fe1bd64b8016d9c737d3fa72c300c"]},
-    # Non-standard facets
-    "Roche":   {"india_facet_param": "locations", "india_uuid": "54c59631019f01c479dfb787a377c235"},
-    "Philips": {"india_facet_param": "locationHierarchy1", "india_uuid": "6e1b2a934716103c2adde1d57e7700ea",
-                "it_facet_param": "jobFamilyGroup", "it_uuids": [
-                    "94eec23a3cab01216af07777df6a8d29", "169c3da8f7270169c0ee692fbd324709",
-                    "40b79030b3e0100163f33cd03cff0000", "58aeacb31cc0011e54561931bd325829",
-                    "358cbd5a2fcc01e0783eb441a1012864", "a05309e84f810165f53b47218532188d",
-                ]},
-    # Multi-office UUID lists (no single country facet available)
-    "Barclays": {"india_facet_param": "locations", "india_uuids": [
-        "1110a9ca6540100196e1f0c315e90000", "112c0542820110016378a0a3e68d0000",
-        "112c05428201100163788a5627320000", "253dfca5ccfc10016b1361f46cfe0000",
-        "c58206e6ec7510011bb86a010cff0000", "1ab48a98eb7c1001634cf23b210c0000",
-        "b8f75d1cb9781000cd91027a85e30000", "1ab48a98eb7c100163423aff71b80000",
-        "112c0542820110016377af553b050000", "112c0542820110016377c02c6ef00000",
-        "1ab48a98eb7c100163465bf6c3310000", "112c05428201100163763bd6ad400000",
-    ]},
-    "Maersk": {"india_facet_param": "locations", "india_uuids": [
-        "4e4d26638c45010787a24d3a78f50000", "8df45049b43810013bfc511ded230000",
-        "4e4d26638c45010787a25209b00e0000", "26c4d72049dc10009e0daf1507aa0000",
-        "853120f5cc8a10009e388f5d2aec0000", "15350d48499210009e07c02b134d0000",
-        "ddba4775944910009e1b192970560000", "d8801e5af43d10009dfa3a8079340000",
-        "5fb6db3471ab10009df11e5466840000", "d8801e5af43d10009e0f6cca3a670000",
-        "ddba4775944910009e424afe3f850000", "7a38998ecd771001354b00da72100000",
-        "e27b2cd8aca310009e0d527ac7650000", "d8801e5af43d10009e04f442bf430000",
-        "f37d2115b2fa1001e2ef05dbcdc00000", "614482d9d2ed1000c19c822fe2b50000",
-        "e78dddcb583810009e1299afb33f0000", "5fb6db3471ab10009e1c4676598a0000",
-        "d8801e5af43d10009e1bfb079d6e0000", "4140682c689310014db3b323f82e0000",
-        "4e4d26638c450107879f5562654c0000", "4e4d26638c45010787a37d5e5ad00000",
-        "0829310dd78f100197add0dc5cc90000", "4e4d26638c45010787a25b0edea60000",
-        "4e4d26638c45010787a25f43fa5f0000", "4e4d26638c45010787a265e08d260000",
-    ]},
-}
+# Arch-Phase D1: data lives in workday_registry.json — edit that file, not here.
+_WORKDAY_REGISTRY_PATH = Path(__file__).parent / "workday_registry.json"
+_WORKDAY_REGISTRY: dict[str, dict] | None = None
+
+
+def _load_workday_registry() -> dict[str, dict]:
+    global _WORKDAY_REGISTRY
+    if _WORKDAY_REGISTRY is None:
+        if _WORKDAY_REGISTRY_PATH.exists():
+            raw = json.loads(_WORKDAY_REGISTRY_PATH.read_text(encoding="utf-8"))
+            _WORKDAY_REGISTRY = {k: v for k, v in raw.items() if not k.startswith("_")}
+        else:
+            print(f"  [WARN] workday_registry.json not found at {_WORKDAY_REGISTRY_PATH}; Workday tenant overrides disabled")
+            _WORKDAY_REGISTRY = {}
+    return _WORKDAY_REGISTRY
 
 
 # Statuses we will actually scrape
@@ -221,9 +188,8 @@ def _workday(rows) -> list[Portal]:
             'status':       status,
             'industry':     _industry(company),
         }
-        # Embed Workday tenant overrides so workday.py reads from portal dict,
-        # not a separate global registry (Arch-Phase D1 interim step).
-        reg = _WORKDAY_REGISTRY.get(company)
+        # Embed Workday tenant overrides from workday_registry.json (Arch-Phase D1).
+        reg = _load_workday_registry().get(company)
         if reg:
             portal['workday_search_text']  = reg.get('search_text', '')
             portal['workday_facet_param']  = reg.get('india_facet_param', '')

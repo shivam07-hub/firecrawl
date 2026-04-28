@@ -1,7 +1,25 @@
-# CLAUDE.md
+# CLAUDE.md — v2.0
 
 Guidance for Claude Code in this repository.
 Run history → `RUN_HISTORY.md`. Portal config → `KNOWN_PORTALS.md`.
+
+---
+
+## VERSION HISTORY
+
+| Version | Date | Summary |
+|---------|------|---------|
+| **v2.0** | 2026-04-28 | Architecture V3 complete (A1–D1). First production run under modular provider architecture. |
+| v1.x | 2026-04-19 | V2 scraper with monolithic scrapers.py + company_registry.py (deprecated). |
+
+**v2.0 architecture changes:**
+- `scrapers.py` deleted → all ATS logic in `providers/` modules
+- `company_registry.py` deleted → data in `workday_registry.json`
+- `COMPANY_INDUSTRY` dict deleted → data in `company_industries.json`
+- `Pipeline_validator.py` — single validation module (3 gates)
+- `schema.py` — typed `Portal` TypedDict + canonical field list
+- `base.py` — `ScrapeReason` enum + `ProviderResult` typed return
+- All module-level singletons lazy-initialized (import is side-effect free)
 
 ---
 
@@ -149,7 +167,7 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `config.py` | Env vars: LM Studio URL/key/model, Firecrawl URL, output paths |
 | `utils.py` | `strip_html`, `is_india`, `job_hash`, `company_slug` |
 | `portal_reader.py` | Parses `KNOWN_PORTALS.md` → list of portal dicts |
-| `scrapers.py` | **DEPRECATED shim** — lazy-import forwarding only; target for deletion in Arch-Phase A1 |
+| `workday_registry.json` | Workday tenant overrides (facet params, India UUIDs, search_text mode) — edit to add tenants |
 | `rag_skills.py` | IDF-weighted inverted index over 35,108 Lightcast L3 skills — vocab injection for LLM |
 | `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → `main_skills` + `side_skills` |
 | `writer.py` | `to_canonical()` → 5-field schema; `save_jobs()` → deduped JSON+CSV; `load_to_supabase()` |
@@ -257,64 +275,21 @@ Credits are finite. Rules:
 
 ---
 
-## BUILD PLAN — OPEN CHUNKS
+## BUILD PLAN
 
-### Arch-Phase A — Foundation (do first, unblocks B–D)
+### ✅ Arch-Phases A–D — COMPLETE (v2.0, 2026-04-28)
 
-**Goal:** eliminate the two things that block testing and graceful degradation.
+All 7 architecture chunks completed. Architecture V3 is production-ready.
 
-#### A1 — Delete `scrapers.py` shim + fix circular import
-- **Why:** `scrapers.py` (83 lines) is pure boilerplate. It exists only because `providers/firecrawl_js.py` imports `scrapers` at module level, creating a cycle: `providers/__init__ → registry → firecrawl_js → scrapers`. Lazy imports paper over it but every new provider must add a forwarding stub here.
-- **Fix:** Remove the `import scrapers` line in `providers/firecrawl_js.py`. Inline whatever `scrapers` provided directly into `firecrawl_js.py`. Delete `scrapers.py`. Update `company_scrapers/` V1 scripts and `test_pipeline.py` that still import via the shim.
-- **Done when:** `scrapers.py` is gone; all imports come directly from `providers/`.
-
-#### A2 — Defer module-level singletons to lazy init
-- **Why:** Four globals init at import time: `_client` (enricher.py:25), `_L3_INDEX` (enricher.py:68), `_app` (firecrawl_client.py:35), `_BATCH_DATE` (writer.py:24). Consequences: (a) `--skip-enrich` crashes if LM Studio is offline because `enricher.py` is imported regardless; (b) missing taxonomy file silently disables skill validation with no error; (c) pipeline crossing midnight stamps wrong `batch_date`; (d) tests require live services at import time.
-- **Fix:** Set all four to `None` at module level. Add `_get_client()`, `_get_l3_index()`, `_get_app()`, `_get_batch_date()` lazy-init functions called on first use. `_BATCH_DATE` should be computed at the start of each `save_jobs()` call, not at import.
-- **Done when:** `python -c "import enricher"` succeeds with LM Studio offline and taxonomy file absent.
-
----
-
-### Arch-Phase B — Data Contract (depends on A)
-
-**Goal:** replace the untyped `portal` dict nerve bundle with a schema that fails loudly on misconfiguration.
-
-#### B1 — Typed `Portal` dataclass
-- **Why:** The `portal` dict carries ATS-specific fields (`tenant`, `sr_id`, `board_token`, `lever_slug`, `india_facet_param`) plus cross-cutting flags (`india_only`, `js_required`). No schema means: `india_only` silently ignored by `greenhouse.py`, has different semantics in `lever.py`, applied only on the searchText path in `workday.py`. Adding a new ATS means editing `portal_reader.py`, `registry.py`, and the provider — with no type error if a required field is missing.
-- **Fix:** Add `@dataclass class Portal` in `schema.py` with all known fields typed (use `Optional` for ATS-specific ones). `portal_reader.py` returns `list[Portal]` not `list[dict]`. Providers receive `Portal`. `india_only` becomes a first-class field with a docstring stating its semantics. All providers that read it must declare they handle it.
-- **Done when:** `portal_reader.py` returns typed objects; `mypy scraper/` passes on provider files.
-
-#### B2 — Move `COMPANY_INDUSTRY` to `KNOWN_PORTALS.md`
-- **Why:** 200+ company→industry mappings are hardcoded in `portal_reader.py:22-233`. If a company name in `KNOWN_PORTALS.md` doesn't exactly match the key, industry silently becomes `''`. Updates require a Python edit. The dict is the longest block in `portal_reader.py`, burying the parsing logic.
-- **Fix:** Add `industry: <value>` as an optional field per portal entry in `KNOWN_PORTALS.md`. `portal_reader.py` reads it directly. Remove the `COMPANY_INDUSTRY` dict. Emit a loud warning (not silent empty string) if `industry` is absent on a portal.
-- **Done when:** `COMPANY_INDUSTRY` dict deleted; dry-run shows no empty industry fields for existing portals.
-
----
-
-### Arch-Phase C — Pipeline Integrity (depends on B)
-
-**Goal:** make failure visible — both validation drops and provider errors.
-
-#### C1 — Consolidate three validation gates into one module
-- **Why:** Validation is split across three files and three stages: identity checks in `validation.py:21-78`, description check in `main.py:210-215`, skill taxonomy check in `enricher.py:199-222`. A job with valid identity but empty description passes Gate 1, fails Gate 2, but its drop is never counted in validation stats (line 251). To understand what gets dropped and why you must read three files.
-- **Fix:** Create `pipeline_validator.py` with a single `validate(job, stage: Literal["post_scrape", "pre_enrich", "post_enrich"]) -> ValidationResult` function. Move all three gates here, in dependency order: identity → description → skills. `main.py` calls one function per stage. All drop reasons funnel into one counter.
-- **Done when:** `validation.py` content merged in; `main.py` validation calls reduced to one per stage; all drop reasons visible in one place.
-
-#### C2 — Typed error returns from all providers
-- **Why:** Providers return failure in three incompatible ways: `break` (workday), `return []` (smartrecruiters, greenhouse), `ProviderResult.fallback()` (workday on block, oracle on empty). `main.py` can't distinguish "no India jobs today" from "API blocked" from "wrong endpoint" without parsing log strings. `ProviderResult.fallback_policy` exists but most providers never populate it.
-- **Fix:** Mandate all providers return `ProviderResult` with a `reason` field (use an enum: `SUCCESS`, `NO_JOBS`, `API_BLOCKED`, `CONFIG_ERROR`, `TIMEOUT`). Remove all bare `return []` from provider error paths. `registry.py` dispatch logs the reason. `main.py` decides on fallback based on typed reason, not log line parsing.
-- **Done when:** Zero `return []` in provider error paths; `main.py` no longer inspects log strings to decide on fallback.
-
----
-
-### Arch-Phase D — Config Consolidation (depends on B1)
-
-**Goal:** eliminate the hidden second config file for Workday tenants.
-
-#### D1 — Merge `company_registry.py` into `KNOWN_PORTALS.md`
-- **Why:** `company_registry.py` (132 lines) is a mini-database of Workday tenant workarounds: non-standard facet names, missing India UUIDs, Cloudflare-blocked tenants. It's disconnected from `KNOWN_PORTALS.md` where the portal metadata lives. Adding a new Workday company requires editing both files. If a company appears in `KNOWN_PORTALS.md` but not the registry, the scraper silently attempts UUID discovery which may block. No audit trail of why entries exist.
-- **Fix:** Add optional Workday-specific fields to `KNOWN_PORTALS.md` per portal: `workday_facet_param`, `workday_india_uuids`, `workday_search_text`. `portal_reader.py` (already updated in B1) populates these onto the `Portal` dataclass. `providers/workday.py` reads them from the typed portal; fallback to dynamic discovery only when absent. Delete `company_registry.py`.
-- **Done when:** `company_registry.py` deleted; `--dry-run` shows all Workday portals parse correctly; Workday scraper results match pre-refactor baseline.
+| Phase | What changed |
+|-------|-------------|
+| A1 | `scrapers.py` deleted — ATS logic in `providers/` |
+| A2 | All singletons lazy-init (`_client`, `_L3_INDEX`, `_app`, `batch_date`) |
+| B1 | `Portal` TypedDict in `schema.py` — typed throughout |
+| B2 | `COMPANY_INDUSTRY` dict → `company_industries.json` |
+| C1 | `pipeline_validator.py` — single `run_gate()` with 3 stages |
+| C2 | `ScrapeReason` enum + `ProviderResult` — zero bare `return []` in provider interface |
+| D1 | `company_registry.py` deleted → `workday_registry.json` (JSON, no Python edit needed) |
 
 ---
 

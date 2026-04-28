@@ -237,7 +237,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
                 "company": company,
                 "ats": ats,
                 "raw_jobs": len(raw_jobs),
-                "validation_drops": len(validation_drops),
+                "validation_drops": g1.drop_count + g2.drop_count,
                 "saved_new": new_count,
                 "status": "ok",
             })

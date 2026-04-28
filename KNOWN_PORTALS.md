@@ -38,7 +38,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Shell | https://www.shell.com/careers | shell | wd3 | ShellCareers | ~188 | ✅ working |
 | Synopsys | https://careers.synopsys.com/ | synopsys | wd1 | SynopsysCareers | ? | ✅ working — Firecrawl fallback uses careers_url (fixed 2026-04-11) |
 | Wells Fargo | https://www.wellsfargojobs.com/en/jobs/ | wf | wd1 | WellsFargoJobs | ~300+ | ✅ working |
-| Philips | https://www.careers.philips.com/global/en | philips | wd3 | jobs-and-careers | ~48 | ✅ working — uses locationHierarchy1 facet (not locationCountry); hardcoded IDs in company_registry.py 2026-04-12 |
+| Philips | https://www.careers.philips.com/global/en | philips | wd3 | jobs-and-careers | ~48 | ✅ working — uses locationHierarchy1 facet (not locationCountry); facet + UUIDs in workday_registry.json |
 | BrowserStack | https://www.browserstack.com/careers | browserstack | wd3 | External | ? | 🔴 no India UUID — India facet not found in tenant; skip |
 | Baker Hughes | https://careers.bakerhughes.com/global/en/search-results?qcountry=India | bakerhughes | wd5 | BakerHughes | ? | 🔴 no India UUID — India facet not found in tenant; skip |
 | Dell | https://jobs.dell.com/en-us/search-jobs/India | dell | wd1 | External | ? | ✅ Workday tenant confirmed via XHR inspection 2026-04-16 |
@@ -46,7 +46,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Capgemini | https://www.capgemini.com/in-en/careers/job-search/ | capgemini | wd3 | ⚠️ career site name unconfirmed | ? | ⚠️ Workday tenant found, correct career_site slug needed — try: Capgemini_Careers, CapgeminiCareers |
 | HCL Technologies | https://careers.hcltech.com/go/India/9553955/ | hcltech | wd3 | ⚠️ career site name unconfirmed | ? | ⚠️ Workday tenant found, correct career_site slug needed — try: HCLTech_Careers, HCL_Careers |
 | MSCI | https://careers.msci.com/ | msci | wd3 | ⚠️ career site name unconfirmed | ? | ⚠️ Old portal (careers.msci.com) is 404. Moved to Workday (msci.wd3) — career_site slug unknown. Try: MSCI, MSCIExternal, MSCI_External |
-| Intel | https://jobs.intel.com/en/search | intel | wd1 | External | ~84 | ✅ working — searchText="india" mode (no India UUID in tenant); company_registry.py hardcoded; is_india() Python filter applied; fixed 2026-04-19 |
+| Intel | https://jobs.intel.com/en/search | intel | wd1 | External | ~84 | ✅ working — searchText="india" mode (no India UUID in tenant); override in workday_registry.json; is_india() Python filter applied |
 | State Street | https://careers.statestreet.com | statestreet | wd1 | Global | 351 | ✅ working — 351 India jobs scraped with full JDs via CXS; probed 2026-04-19 |
 | DBS Bank | https://www.dbs.com/dbstechindia/index.html | dbs | wd3 | DBS_Careers | 285 | ✅ working — 285 India jobs scraped with full JDs via CXS; probed 2026-04-19 |
 | BlackBerry | https://www.blackberry.com/us/en/company/careers | bb | wd3 | BlackBerry | ~39 total | 🟡 Workday CXS confirmed wd3/BlackBerry — India UUID TBD; probed 2026-04-19 |
@@ -68,7 +68,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Intuit | https://careers.intuit.com/job-search-results/?location=India | intuit | wd5 | Intuit | ? | 🟡 Workday tenant confirmed — CXS 422 blocked; careers.intuit.com returns only 212 chars (antibot); FC fallback on India-filtered URL; probed 2026-04-19 |
 | Samsung | https://job.samsung.com/en/search/?search_keyword=&career_type=1&search_country=IND | samsungelectronics | wd3 | ⚠️ career_site unconfirmed | ? | 🟡 Workday suspected (`samsungelectronics.wd3`) — CXS 422 blocked; job.samsung.com also FC-blocked; FC fallback via careers_url TBD; probed 2026-04-19 |
 | Carelon Global Solutions | https://www.carelonglobal.in/careers | elevancehealth | wd1 | carelonglobal_in | ? | 🟡 Workday confirmed (`elevancehealth.wd1/carelonglobal_in`) — only 7 total jobs, no India UUID found; FC fallback via careers_url; probed 2026-04-19 |
-| Target | https://careers.target.com/jobs | target | wd5 | TargetCareers | ~265 | ✅ working — searchText="india" mode (no India UUID in tenant); company_registry.py hardcoded; is_india() Python filter applied; fixed 2026-04-19 |
+| Target | https://careers.target.com/jobs | target | wd5 | TargetCareers | ~265 | ✅ working — searchText="india" mode (no India UUID in tenant); override in workday_registry.json; is_india() Python filter applied |
 | Broadcom | https://careers.broadcom.com/careers?query=&location=India | broadcom | wd1 | ⚠️ career_site unconfirmed | ? | 🟡 Workday suspected — all career_site slugs 404; broadcom.wd1 tenant confirmed; correct slug TBD (try: External, BroadcomCareers, BCICareers); FC-blocked; probed 2026-04-19 |
 | 3M | https://www.3m.com/3M/en_US/careers-us/ | 3m | wd1 | Search | 81 | ✅ working — 81 India jobs, 100% JD; facet=Location_Country; scraped 2026-04-19 |
 | NXP Semiconductors | https://careers.nxp.com | nxp | wd3 | careers | 161 | ✅ working — 161 India jobs, 100% JD; facet=Location_Country; scraped 2026-04-19 |
