@@ -98,6 +98,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Societe Generale | https://careers.societegenerale.com/en/search | SocieteGenerale4 | ? | ✅ no_country_filter — `country=in` returns 0 for this tenant; portal fetches all postings, is_india() Python filter applied; fixed 2026-04-19 |
 | Freshworks | https://careers.smartrecruiters.com/freshworks | freshworks | 4 | ✅ working — 4 India jobs; Chennai/Bengaluru; scraped 2026-04-19 |
 | Publicis Sapient | https://careers.publicissapient.com | PublicisSapient | 0 | 🔴 SmartRecruiters returns 0 for all known IDs; careers site is SPA (ATS unidentified); investigate via XHR before re-adding |
+| Dr. Reddy's | https://careers.drreddys.com | DrReddysLaboratoriesLtdSBX | 142 | ✅ cracked 2026-04-29 — slug found via smrtr.io shortlink redirect on career page; 142 India jobs; API public, no auth; SmartRecruiters Attrax (Springboard) platform |
 
 ---
 
@@ -245,7 +246,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Philips | https://www.careers.philips.com/global/en | Phenom / TalentBrew | India filter in URL | ⚠️ broken — Firecrawl crawled generic homepage (no India listing); needs India-filtered URL 2026-04-11 |
 | SAP | https://jobs.sap.com | SAP (own platform) | `GET https://jobs.sap.com/search/?q=&locationsearch=India` | 🟡 js-required | ⚠️ broken — Firecrawl crawl timeout (95s) as of 2026-04-11 |
 | Tech Mahindra | https://www.techmahindra.com/en-in/careers/ | Custom | URL may have changed from careers.techmahindra.com | ⚠️ broken — verify URL |
-| Dr. Reddy's | https://careers.drreddys.com | Custom (SaaS ATS) | careers.drreddys.com — JS-rendered; SmartRecruiters API returns 0; custom ATS | 🟡 js-required — custom ATS confirmed; probed 2026-04-19 |
+| Dr. Reddy's | https://careers.drreddys.com | SmartRecruiters | ✅ MOVED — see SmartRecruiters section; slug=DrReddysLaboratoriesLtdSBX; 142 India jobs; cracked 2026-04-29 |
 | Boeing | https://jobs.boeing.com | Custom | `https://jobs.boeing.com/boeing/jobs/India` — custom career portal (TalentNet integration) | 🟡 js-required — custom ATS; probed 2026-04-19 |
 | Uber | https://www.uber.com/careers/list/ | Custom | `https://www.uber.com/careers/list/` — custom SPA; no ATS fingerprint detected | 🟡 js-required — custom ATS; probed 2026-04-19 |
 | Align Technology | https://www.aligntech.com/careers | Pinpoint | `https://app.pinpointhq.com` — Pinpoint ATS detected in page assets; slug TBD | 🟡 js-required — Pinpoint ATS confirmed; India filter TBD; probed 2026-04-19 |

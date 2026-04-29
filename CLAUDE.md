@@ -321,6 +321,53 @@ All 7 architecture chunks completed. Architecture V3 is production-ready.
 
 ---
 
+### ⚡ NEXT SESSION TASK — ATS Crack Hunt (one by one, human + Claude)
+
+**Workflow (Perplexity Comet style):**
+1. Human opens company career page in Chrome → devtools → Network → XHR/Fetch tab
+2. Let jobs load → find request returning JSON with job titles
+3. Right-click → "Copy as cURL" or paste API URL + key params here
+4. Claude tests, saves to registry, moves company to correct KNOWN_PORTALS.md section
+5. Never touch again.
+
+**How to find the slug:** Look for `smrtr.io` shortlinks, `join.smartrecruiters.com/{SLUG}`, Workday `tenant.wd1.myworkdayjobs.com`, or any `.icims.com` / `.greenhouse.io` / `lever.co` pattern in redirects or network calls.
+
+**Priority queue (61 companies returning 0 jobs — work through these):**
+
+| # | Company | Career URL | Suspected ATS | Status |
+|---|---|---|---|---|
+| 1 | ✅ Dr. Reddy's | careers.drreddys.com | SmartRecruiters `DrReddysLaboratoriesLtdSBX` | **CRACKED 2026-04-29** — 142 India jobs |
+| 2 | LTIMindtree | ltimindtree.com/careers/job-openings | Unknown | Inspect XHR |
+| 3 | Swiggy | careers.swiggy.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
+| 4 | Flipkart | flipkartcareers.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
+| 5 | Myntra | careers.myntra.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
+| 6 | AMD | amd.com/en/corporate/careers | iCIMS (`amd.icims.com`) | Find exact XHR endpoint |
+| 7 | Netflix | jobs.netflix.com | Custom (Next.js) | Find JSON API |
+| 8 | Meta | metacareers.com/jobs | Custom GraphQL | Find GraphQL endpoint + params |
+| 9 | McKinsey | mckinsey.com/careers/search-jobs | Unknown | Inspect XHR |
+| 10 | Deutsche Bank | careers.db.com | SAP SuccessFactors | Find tenant + OData endpoint |
+| 11 | Standard Chartered | sc.com/en/global-careers | Workday (`scb.wd3`) CF-blocked | Find India UUID |
+| 12 | Keysight Technologies | jobs.keysight.com | SAP SF suspected | Inspect XHR |
+| 13 | ANZ Bank | careers.anz.com | Workday (`anz.wd3`) CF-blocked | Find India UUID |
+| 14 | Eli Lilly | careers.lilly.com | Phenom People | CF-blocks `/api/jobs` |
+| 15 | Societe Generale | careers.societegenerale.com | Workday (`societegenerale.wd3`) CF-blocked | Update from SR |
+| 16 | Rakuten India | corp.rakuten.co.in/careers | Unknown | Inspect XHR |
+| 17 | OYO | oyorooms.com/about/ | Darwinbox | Angular SPA + CF |
+| 18 | IIFL Finance | iifl.darwinbox.in | Darwinbox | Angular SPA + CF |
+| 19 | IndusInd Bank | indusind.bank.in | Unknown | Inspect XHR |
+| 20 | Adani Group | adani.com/careers | Unknown | Inspect XHR |
+| 21 | Aditya Birla Group | careers.adityabirla.com | Unknown | Inspect XHR |
+| 22 | Mu Sigma | mu-sigma.com/careers | Unknown | Inspect XHR |
+| 23 | Ola Electric | olaelectric.com/careers | Unknown | Inspect XHR |
+| 24 | Align Technology | aligntech.com/careers | Unknown | Inspect XHR |
+| 25 | Kearney | kearney.com/about/locations/india | Unknown | Inspect XHR |
+
+**Workday CF-blocked companies** (have correct Workday slug, blocked API — need India UUID via browser):
+Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit.
+These fall back to Firecrawl which gets cookie overlay. Crack = find India UUID then add to workday_registry.json.
+
+---
+
 ### Chunk 2 — Fix broken direct scrapers (next priority)
 - Verify Phenom REST endpoints: BCG, PMI, Oliver Wyman (unverified API paths)
 - Fix Workday slugs: Capgemini, HCL Technologies, MSCI
