@@ -47,10 +47,17 @@ def _get_app() -> Firecrawl:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def scrape(url: str) -> str:
-    """Scrape a URL via Playwright and return markdown. Works on Docker + cloud."""
+def scrape(url: str, actions: list[dict] | None = None) -> str:
+    """Scrape a URL via Playwright and return markdown. Works on Docker + cloud.
+    actions: optional Firecrawl action list (click, wait, scroll) run before extraction.
+    Actions require Fire Engine (cloud only) — silently ignored when using Docker.
+    """
     try:
-        doc = _get_app().scrape(url, formats=["markdown"], only_main_content=True)
+        kwargs: dict = {"formats": ["markdown"], "only_main_content": True}
+        # actions require Fire Engine (cloud). Skip silently when using Docker.
+        if actions and not _is_local(FIRECRAWL_URL):
+            kwargs["actions"] = actions
+        doc = _get_app().scrape(url, **kwargs)
         return doc.markdown or ""
     except Exception as e:
         print(f"    [FC SCRAPE ERROR] {url}: {e}")

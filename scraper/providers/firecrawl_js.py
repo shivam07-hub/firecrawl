@@ -14,6 +14,20 @@ _log = logging.getLogger("mirror")
 _NOISE_EXT   = ('.svg', '.png', '.jpg', '.css', '.js', '.ico', '.woff', '.gif', '.webp')
 _NOISE_WORDS = ('menu', 'search', 'home', 'cookie', 'nav', 'sign in', 'log in', 'privacy', 'about us')
 
+# Cookie consent click actions — run before scraping to dismiss modal
+# Selector tries common consent button patterns; Firecrawl ignores unknown selectors safely.
+_COOKIE_DISMISS_ACTIONS = [
+    {"type": "wait", "milliseconds": 1500},
+    {"type": "click", "selector": "button#onetrust-accept-btn-handler"},
+    {"type": "click", "selector": "button.cookie-accept"},
+    {"type": "click", "selector": "button[data-cookiebanner='accept_button']"},
+    {"type": "click", "selector": "button[aria-label='Accept cookies']"},
+    {"type": "click", "selector": "#accept-all-cookies"},
+    {"type": "click", "selector": ".cookiebot button[data-cookiebot='accept']"},
+    {"type": "click", "selector": "button.js-accept-cookie"},
+    {"type": "wait", "milliseconds": 800},
+]
+
 _LINK_PATTERNS = [
     # Workday human-facing detail pages
     re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/details/\d+[^\)]*)\)'),
@@ -100,8 +114,19 @@ def scrape_extract(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
     url     = portal.get('endpoint') or portal.get('careers_url', '')
     company = portal.get('company', '')
 
+    # Use cookie-dismiss actions if portal has a known selector, or use universal fallback
+    cookie_selector = portal.get('cookie_accept_selector')
+    if cookie_selector:
+        actions = [
+            {"type": "wait", "milliseconds": 1500},
+            {"type": "click", "selector": cookie_selector},
+            {"type": "wait", "milliseconds": 800},
+        ]
+    else:
+        actions = _COOKIE_DISMISS_ACTIONS
+
     _log.info(f"    Firecrawl scrape (Docker): {url}")
-    markdown = fc.scrape(url)
+    markdown = fc.scrape(url, actions=actions)
     if not markdown or len(markdown) < 200:
         return None
 
