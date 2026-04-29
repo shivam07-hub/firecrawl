@@ -2,14 +2,44 @@ from __future__ import annotations
 
 from schema import Portal
 
+import json
 import logging
 import requests
+from pathlib import Path
 
 from config import REQUEST_TIMEOUT
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
 from utils import is_india, job_hash, strip_html
 
 _log = logging.getLogger("mirror")
+_GENERIC_REGISTRY_PATH = Path(__file__).parent.parent / "generic_registry.json"
+_generic_registry: dict | None = None
+
+
+def _load_generic_registry() -> dict:
+    global _generic_registry
+    if _generic_registry is None:
+        if _GENERIC_REGISTRY_PATH.exists():
+            try:
+                _generic_registry = json.loads(_GENERIC_REGISTRY_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                _generic_registry = {}
+        else:
+            _generic_registry = {}
+    return _generic_registry
+
+
+def _persist_field_map(company: str, field_map: dict) -> None:
+    """Persist which JSON keys worked for this company — next run uses registry directly."""
+    reg = _load_generic_registry()
+    if company in reg:
+        return  # already known
+    reg[company] = field_map
+    try:
+        _GENERIC_REGISTRY_PATH.write_text(json.dumps(reg, indent=2, ensure_ascii=False), encoding="utf-8")
+        _log.info(f"    [REGISTRY] Persisted field map for {company}: {field_map}")
+    except Exception as e:
+        _log.warning(f"    [REGISTRY] Failed to persist field map for {company}: {e}")
 
 _HEADERS = {
     "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -31,6 +61,15 @@ class GenericJSONProvider:
     ) -> ProviderResult:
         raw = scrape_get(portal, max_jobs=max_jobs)
 
+        # Oracle HCM REST is auth-gated — 400 or empty both mean fall to careers_url
+        if (raw is None or not raw) and portal.get("ats") == "oracle" and portal.get("careers_url"):
+            fc_portal = {**portal, "endpoint": portal["careers_url"]}
+            return ProviderResult.fallback(
+                policy=FALLBACK_FIRECRAWL_EXTRACT,
+                reason="oracle_api_empty_fallback_careers_url",
+                portal=fc_portal,
+            )
+
         if raw is None:
             return ProviderResult.error(ScrapeReason.API_BLOCKED)
 
@@ -39,15 +78,6 @@ class GenericJSONProvider:
                 policy=FALLBACK_FIRECRAWL_EXTRACT,
                 reason="generic_get_requires_firecrawl",
                 portal=portal,
-            )
-
-        # Oracle HCM REST can be auth-gated; keep historical fallback behavior.
-        if not raw and portal.get("ats") == "oracle" and portal.get("careers_url"):
-            fc_portal = {**portal, "endpoint": portal["careers_url"]}
-            return ProviderResult.fallback(
-                policy=FALLBACK_FIRECRAWL_EXTRACT,
-                reason="oracle_api_empty_fallback_careers_url",
-                portal=fc_portal,
             )
 
         return ProviderResult.success(raw)
@@ -81,17 +111,41 @@ def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None
              '_platform': portal.get('ats', 'Custom')}]
 
 
-def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | None = None) -> list[dict]:
-    """Walk common JSON structures to extract job listings."""
-    platform = portal.get('ats', 'Custom').title()
+_ITEMS_KEYS = ['jobPostings', 'jobs', 'results', 'data']
 
-    items = (
-        data.get('jobPostings') or
-        data.get('jobs') or
-        data.get('results') or
-        data.get('data') or
-        (data if isinstance(data, list) else [])
-    )
+
+def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | None = None) -> list[dict]:
+    """Walk common JSON structures to extract job listings.
+    Checks generic_registry.json first — skips discovery for known companies.
+    Persists successful key-path after first discovery so next run is instant.
+    """
+    platform = portal.get('ats', 'Custom').title()
+    company = portal.get('company', '')
+
+    # Registry fast-path: use known key if available
+    reg = _load_generic_registry().get(company, {})
+    items_key = reg.get('items_key')
+    if items_key:
+        items = data.get(items_key) if items_key != '__list__' else (data if isinstance(data, list) else [])
+    else:
+        # Discovery: try each key in order
+        items = None
+        discovered_key = None
+        for k in _ITEMS_KEYS:
+            v = data.get(k)
+            if isinstance(v, list) and v:
+                items = v
+                discovered_key = k
+                break
+        if items is None:
+            if isinstance(data, list) and data:
+                items = data
+                discovered_key = '__list__'
+            else:
+                items = []
+        if discovered_key and company:
+            _persist_field_map(company, {'items_key': discovered_key})
+
     if not isinstance(items, list):
         return []
 

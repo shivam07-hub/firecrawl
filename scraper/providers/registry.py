@@ -66,7 +66,7 @@ def _apply_fallback(
     fallback_portal = result.fallback_portal or portal
     reason = result.fallback_reason or "fallback_requested"
 
-    if reason == "workday_api_blocked":
+    if reason in ("workday_api_blocked", "workday_cloudflare_blocked"):
         log.info("    Workday direct API blocked -> falling back to Firecrawl")
     elif reason == "oracle_api_empty_fallback_careers_url":
         log.info("    Oracle REST returned 0 -> falling back to Firecrawl on careers_url")

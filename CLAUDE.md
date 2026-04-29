@@ -1,4 +1,4 @@
-# CLAUDE.md — v2.0
+# CLAUDE.md — v2.1
 
 Guidance for Claude Code in this repository.
 Run history → `RUN_HISTORY.md`. Portal config → `KNOWN_PORTALS.md`.
@@ -9,8 +9,15 @@ Run history → `RUN_HISTORY.md`. Portal config → `KNOWN_PORTALS.md`.
 
 | Version | Date | Summary |
 |---------|------|---------|
+| **v2.1** | 2026-04-29 | "Crack once, reuse forever" principle codified. Oracle fix, architecture candidates documented. |
 | **v2.0** | 2026-04-28 | Architecture V3 complete (A1–D1). First production run under modular provider architecture. |
 | v1.x | 2026-04-19 | V2 scraper with monolithic scrapers.py + company_registry.py (deprecated). |
+
+**v2.1 changes:**
+- Oracle HCM `q=` filter removed (always returns 400) → empty response → Firecrawl fallback (JPMC: 6 jobs, BNY Mellon: 1 job)
+- `generic_json.py`: oracle 400/empty both now fall through to careers_url Firecrawl fallback
+- Workday global 422 → India UUID retry logic added to `WorkdayProvider.scrape()`
+- "Crack once, reuse forever" architecture principle documented
 
 **v2.0 architecture changes:**
 - `scrapers.py` deleted → all ATS logic in `providers/` modules
@@ -263,6 +270,22 @@ Credits are finite. Rules:
 
 ---
 
+## "CRACK IT ONCE, REUSE FOREVER" — CORE PRINCIPLE
+
+Every company solved is solved forever. When we discover HOW to scrape a company (UUID, endpoint, field map), that knowledge is persisted to a registry file — next run reads it and never re-discovers. The three registries:
+
+| Registry | Purpose | Auto-written? |
+|---|---|---|
+| `workday_registry.json` | Per-tenant: India UUID, facet params, `blocked=true` flag | Yes (UUID discovery) |
+| `generic_registry.json` | Per-company: which JSON keys worked for `items`, `title`, `id` etc. | Yes (first successful parse) |
+| `company_industries.json` | Company → Industry mapping | Manual |
+
+**`blocked=true` in workday_registry.json** = Cloudflare blocks ALL POSTs to this tenant. Scraper skips API on every subsequent run and goes straight to Firecrawl careers_url. Verified companies (2026-04-29): Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, AMD, ANZ Bank, Keysight Technologies, Deutsche Bank, Standard Chartered Bank, Eli Lilly.
+
+**UUID auto-persist**: When `_workday_india_uuid()` discovers a UUID successfully, it writes `{india_facet_param, india_uuid}` to `workday_registry.json` (thread-safe, only if no existing entry). Next run reads from registry, skips discovery entirely.
+
+---
+
 ## KNOWN ISSUES
 
 - Workday India UUID structure varies per tenant — if 0 jobs, run `--company` with debug prints
@@ -270,6 +293,11 @@ Credits are finite. Rules:
 - Goldman Sachs (TAL.NET) requires browser JS — Firecrawl handles it but markdown quality varies
 - MSCI: `careers.msci.com` is 404; Workday slug unknown (skipped)
 - Capgemini, HCL: Workday slugs unconfirmed (skipped)
+- Dell: Workday returns 200+empty on global mode, UUID discovery returns nothing — suspected Cloudflare-blocked despite no 422; add to workday_registry.json `blocked=true` if confirmed
+
+**Cloudflare-blocked Workday (all verified 2026-04-29):** Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, AMD, ANZ Bank, Keysight, Deutsche Bank, Standard Chartered Bank, Eli Lilly. These go straight to Firecrawl fallback via `workday_registry.json#blocked=true`.
+
+**Darwinbox companies (no public API):** Swiggy, Flipkart, Myntra, OYO, IIFL Finance — Darwinbox returns HTML for all API requests including `/ms/candidatev2/main/careers/allJobs`. Must use browser automation or accept 0 jobs until Darwinbox provider is implemented.
 
 **Recommended test order:** Stripe → ServiceNow → Salesforce → Goldman Sachs / Eightfold portals.
 
@@ -293,22 +321,40 @@ All 7 architecture chunks completed. Architecture V3 is production-ready.
 
 ---
 
-### Chunk 2 — Fix broken direct scrapers
+### Chunk 2 — Fix broken direct scrapers (next priority)
 - Verify Phenom REST endpoints: BCG, PMI, Oliver Wyman (unverified API paths)
 - Fix Workday slugs: Capgemini, HCL Technologies, MSCI
 - Fix SmartRecruiters: Zomato, S&P Global, CRISIL (unconfirmed IDs)
 - Re-add Atlassian to Greenhouse (find new board token)
-- Fix Oracle HCM: EXL Digital (verify India filter)
+- Fix HP HPE Phenom endpoint (currently returning HTML — needs correct Phenom API slug)
 - Target: every direct-API company returns ≥5 jobs with populated `job_description`
 
-### Chunk 3 — New ATS scrapers
-- **Workable**: `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
-- **Darwinbox**: POST to candidate search endpoint (inspect XHR on `iifl.darwinbox.in`)
-- **SAP SuccessFactors**: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json`
-  - Targets: Deloitte, GMR Group, CMA CGM, CNHI, Deutsche Bank
-- Wire all into `to_canonical()` → `save_jobs()` (5-field schema only)
+### Chunk 3 — New ATS providers ("crack once" reusable)
+Each new provider = all future companies on that ATS work for free.
 
-### Chunk 4 — Archon weekly cadence (operational)
+- **Darwinbox** (Swiggy, Flipkart, Myntra, OYO, IIFL, etc. — 10+ Indian companies):
+  - API endpoint unknown (returns HTML). Inspect XHR on `iifl.darwinbox.in` using browser devtools.
+  - Likely POST to `/ms/candidatev2/main/jobs/search` or similar.
+  - Once cracked: add `providers/darwinbox.py`, register in `registry.py`, update `portal_reader.py`.
+- **Workable** (many startups):
+  - `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
+- **SAP SuccessFactors**:
+  - `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json`
+  - Targets: Deloitte, GMR Group, CMA CGM, CNHI, Deutsche Bank
+- **Ashby** (many startups, e.g. Mondee):
+  - `GET https://api.ashbyhq.com/posting-api/job-board/{slug}`
+  - Find correct slug for Mondee (the portal URL `jobs.ashbyhq.com/mondee` has the slug).
+- Wire all into `to_canonical()` → `save_jobs()` (canonical schema only)
+
+### Chunk 4 — Architecture deepening ("crack once" registries)
+Architecture candidates identified 2026-04-29 — implement in order:
+1. **UUID write-back** ✅ DONE — `_persist_uuid()` in `providers/workday.py`
+2. **Generic field registry** ✅ DONE — `generic_registry.json` + `_persist_field_map()` in `providers/generic_json.py`
+3. **Workday blocked flag** ✅ DONE — `blocked=true` in `workday_registry.json` → skip API entirely
+4. **Firecrawl result cache** (next) — `firecrawl_cache.json` keyed by URL: store last-successful extraction timestamp + job count. TTL = 7 days. Cache hit → skip re-scrape, save credits.
+5. **Unify company_scrapers/** — 32 bespoke `run_*.py` scripts in `company_scrapers/` use different schema (24 cols) and don't feed main pipeline. Delete them; represent company-specific variation as portal overrides in a new `portal_overrides.json`.
+
+### Chunk 5 — Archon weekly cadence (operational)
 - Weekly cron: `0 2 * * 0` via `.archon/workflows/scraper-weekly-run.yaml`
 - Scrape phase: `python main.py --skip-enrich --scope global --global-cap 2000`
 - After each run: update `RUN_HISTORY.md` + `KNOWN_PORTALS.md`

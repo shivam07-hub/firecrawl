@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from schema import Portal
 
+import json
 import logging
+import threading
 import requests
+from pathlib import Path
 
 import firecrawl_client as fc
 from config import REQUEST_TIMEOUT, WORKDAY_PAGE_SIZE, WORKDAY_MAX_JOBS, WORKDAY_JD_FETCH_LIMIT
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
 from utils import is_india, job_hash, strip_html
+
+_REGISTRY_PATH = Path(__file__).parent.parent / "workday_registry.json"
+_registry_lock = threading.Lock()
 
 _log = logging.getLogger("mirror")
 
@@ -32,7 +38,43 @@ class WorkdayProvider:
         max_jobs: int | None = None,
         validate_mode: bool = False,
     ) -> ProviderResult:
+        # Skip API entirely for Cloudflare-blocked tenants — go straight to Firecrawl
+        if portal.get('workday_blocked'):
+            _log.info(f"    [BLOCKED] {portal.get('company','')} — Cloudflare-blocked Workday, skip to Firecrawl")
+            fallback_portal = dict(portal)
+            if portal.get("careers_url"):
+                fallback_portal["endpoint"] = portal["careers_url"]
+            return ProviderResult.fallback(
+                policy=FALLBACK_FIRECRAWL_EXTRACT,
+                reason="workday_cloudflare_blocked",
+                portal=fallback_portal,
+            )
+
         jobs, reason = scrape_workday(portal, max_jobs=max_jobs)
+
+        # Global mode returned 0 or blocked → retry with India UUID before giving up
+        if not portal.get('india_only', True):
+            should_retry = (
+                (jobs is None and reason == ScrapeReason.API_BLOCKED) or
+                (isinstance(jobs, list) and len(jobs) == 0 and reason == ScrapeReason.NO_JOBS)
+            )
+            if should_retry:
+                _log.info(f"    [RETRY] Global 0/422 — retrying {portal.get('company','')} with India UUID")
+                india_portal = {**portal, 'india_only': True}
+                jobs2, reason2 = scrape_workday(india_portal, max_jobs=max_jobs)
+                if jobs2 is not None and (len(jobs2) > 0 or jobs is None):
+                    return ProviderResult(jobs=jobs2, reason=reason2)
+                # India UUID also failed → fall through to Firecrawl
+                if jobs is None or reason == ScrapeReason.API_BLOCKED:
+                    fallback_portal = dict(portal)
+                    if portal.get("careers_url"):
+                        fallback_portal["endpoint"] = portal["careers_url"]
+                    return ProviderResult.fallback(
+                        policy=FALLBACK_FIRECRAWL_EXTRACT,
+                        reason="workday_api_blocked",
+                        portal=fallback_portal,
+                    )
+
         if jobs is None:
             if reason == ScrapeReason.API_BLOCKED:
                 fallback_portal = dict(portal)
@@ -43,7 +85,7 @@ class WorkdayProvider:
                     reason="workday_api_blocked",
                     portal=fallback_portal,
                 )
-            # CONFIG_ERROR: no India UUID — skip, no Firecrawl fallback
+            # CONFIG_ERROR: no India UUID found — skip, no Firecrawl fallback
             return ProviderResult.error(reason)
         return ProviderResult(jobs=jobs, reason=reason)
 
@@ -79,6 +121,8 @@ def scrape_workday(
                 return None, ScrapeReason.CONFIG_ERROR
             facet_param, india_uuid = uuid_result
             india_uuids = [india_uuid]
+            # Persist discovered UUID → next run skips discovery entirely
+            _persist_uuid(company, facet_param, india_uuid)
     else:
         use_search_text = False
         search_text_val = ""
@@ -113,6 +157,8 @@ def scrape_workday(
             data = r.json()
         except Exception as e:
             _log.error(f"    [ERROR] Workday {portal['company']} offset={offset}: {e}")
+            if offset == 0:
+                return None, ScrapeReason.API_BLOCKED
             break
 
         postings = data.get('jobPostings', [])
@@ -164,6 +210,22 @@ def scrape_workday(
     _fetch_workday_jds(jobs, portal)
     reason = ScrapeReason.SUCCESS if jobs else ScrapeReason.NO_JOBS
     return jobs, reason
+
+
+def _persist_uuid(company: str, facet_param: str, india_uuid: str) -> None:
+    """Write discovered India UUID back to workday_registry.json (thread-safe).
+    Only writes if company has no existing registry entry — never overwrites manual entries.
+    """
+    with _registry_lock:
+        try:
+            registry = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8")) if _REGISTRY_PATH.exists() else {}
+            if company in registry:
+                return  # manual entry takes precedence
+            registry[company] = {"india_facet_param": facet_param, "india_uuid": india_uuid}
+            _REGISTRY_PATH.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
+            _log.info(f"    [REGISTRY] Persisted India UUID for {company} ({facet_param}={india_uuid[:8]}…)")
+        except Exception as e:
+            _log.warning(f"    [REGISTRY] Failed to persist UUID for {company}: {e}")
 
 
 def _workday_india_uuid(endpoint: str):

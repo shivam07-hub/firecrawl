@@ -198,6 +198,9 @@ def _workday(rows) -> list[Portal]:
             )
             portal['workday_it_facet_param'] = reg.get('it_facet_param', '')
             portal['workday_it_uuids']       = reg.get('it_uuids', [])
+            # blocked=true: Cloudflare blocks all POSTs — skip API, go straight to Firecrawl
+            if reg.get('blocked'):
+                portal['workday_blocked'] = True
         out.append(portal)
     return out
 
@@ -333,8 +336,8 @@ def _oracle(rows) -> list[Portal]:
                 f"https://{host}/hcmRestApi/resources/latest"
                 "/recruitingCEJobRequisitions"
                 "?limit=25&offset=0&onlyData=true"
-                '&q=PrimaryLocation.CountryName%3D%22India%22'
             ),
+            'india_only':  True,
             'careers_url': r.get('Careers URL', '').strip() or None,
             'js_required': False,
             'status':      status,

@@ -1,7 +1,9 @@
 {
   "_comment": "Workday tenant overrides — edit here, no Python change needed. See portal_reader.py:_load_workday_registry(). Keys must match Company column in KNOWN_PORTALS.md exactly.",
+  "_blocked_comment": "blocked=true: Cloudflare rejects ALL POSTs even with valid India UUID. Scraper skips API immediately, falls straight to Firecrawl on careers_url. Verified 2026-04-29.",
   "Intel":  { "search_text": "india" },
   "Target": { "search_text": "india" },
+  "Dell":   { "search_text": "india" },
   "3M":               { "india_facet_param": "Location_Country",    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e" },
   "NXP Semiconductors":{ "india_facet_param": "Location_Country",   "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e" },
   "Autodesk":         { "india_facet_param": "locationCountry",     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e" },
@@ -39,5 +41,16 @@
     "4e4d26638c450107879f5562654c0000", "4e4d26638c45010787a37d5e5ad00000",
     "0829310dd78f100197add0dc5cc90000", "4e4d26638c45010787a25b0edea60000",
     "4e4d26638c45010787a25f43fa5f0000", "4e4d26638c45010787a265e08d260000"
-  ]}
+  ]},
+  "_blocked_workday_verified_2026_04_29": {
+    "note": "All below: Cloudflare blocks POST (422) even with valid India UUID AND full browser headers. Verified by adding CF-Ray header check. Fall straight to careers_url Firecrawl."
+  },
+  "Engie":           { "blocked": true },
+  "GE Aerospace":    { "blocked": true },
+  "Bank of America": { "blocked": true },
+  "Ford":            { "blocked": true },
+  "Medtronic":       { "blocked": true },
+  "Inspire Brands":  { "blocked": true },
+  "Hitachi Vantara": { "blocked": true },
+  "Intuit":          { "blocked": true }
 }

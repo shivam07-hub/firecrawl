@@ -15,12 +15,24 @@ _NOISE_EXT   = ('.svg', '.png', '.jpg', '.css', '.js', '.ico', '.woff', '.gif', 
 _NOISE_WORDS = ('menu', 'search', 'home', 'cookie', 'nav', 'sign in', 'log in', 'privacy', 'about us')
 
 _LINK_PATTERNS = [
+    # Workday human-facing detail pages
     re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/details/\d+[^\)]*)\)'),
+    # /jobs/ or /job/ in path (most ATS)
     re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/job[s]?/[^\)]{5,})\)'),
+    # /careers/ with enough path to not match the listing page itself
     re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/careers?/[^\)]{10,})\)'),
+    # /openings/
     re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/opening[s]?/[^\)]{5,})\)'),
+    # /positions/ or /position/ (Oracle, SAP CandidateExperience)
+    re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/position[s]?/[^\)]{5,})\)'),
+    # /requisitions/ (Oracle HCM)
+    re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/requisition[s]?/[^\)]{5,})\)'),
+    # /apply/ with job ID
+    re.compile(r'\[([^\]]+)\]\((https?://[^\)]+/apply/[^\)]{5,})\)'),
+    # Plain URL forms (no markdown link)
     re.compile(r'(https?://[^\s\)\]\"]+/details/\d+[^\s\)\]\"]+)'),
     re.compile(r'(https?://[^\s\)\]\"]{20,}/job[s]?/[^\s\)\]\"]{8,})'),
+    re.compile(r'(https?://[^\s\)\]\"]{20,}/position[s]?/[^\s\)\]\"]{5,})'),
 ]
 
 
