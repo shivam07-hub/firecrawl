@@ -5,7 +5,18 @@ from schema import Portal
 import logging
 
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, Provider, ProviderResult, ScrapeReason
+from providers.eightfold import EightfoldProvider
 from providers.firecrawl_js import FirecrawlJSProvider
+from providers.darwinbox import DarwinboxProvider
+from providers.mynexthire import MyNextHireProvider
+from providers.icims_custom import IcimsCustomProvider
+from providers.mckinsey import McKinseyProvider
+from providers.aditya_birla import AdityaBirlaProvider
+from providers.pcsx import PCSXProvider
+from providers.taleo import TaleoProvider
+from providers.pinpoint import PinpointProvider
+from providers.spire2grow import Spire2GrowProvider
+from providers.zwayam import ZwayamProvider
 from providers.generic_json import GenericJSONProvider
 from providers.greenhouse import GreenhouseProvider
 from providers.lever import LeverProvider
@@ -22,6 +33,17 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "greenhouse": GreenhouseProvider(),
     "lever": LeverProvider(),
     "phenom_api": PhenomProvider(),
+    "eightfold": EightfoldProvider(),
+    "icims_custom": IcimsCustomProvider(),
+    "darwinbox": DarwinboxProvider(),
+    "mynexthire": MyNextHireProvider(),
+    "mckinsey": McKinseyProvider(),
+    "aditya_birla": AdityaBirlaProvider(),
+    "pinpoint": PinpointProvider(),
+    "pcsx": PCSXProvider(),
+    "taleo": TaleoProvider(),
+    "spire2grow": Spire2GrowProvider(),
+    "zwayam": ZwayamProvider(),
 }
 
 

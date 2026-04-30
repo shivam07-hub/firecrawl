@@ -12,12 +12,12 @@ Critical rule:
 ## Execution Status
 - [x] Phase 0 - Baseline Freeze
 - [x] Phase 1 - Provider Interface + Registry Skeleton
-- [ ] Phase 2 - Migrate Workday as Reference Provider
-- [ ] Phase 3 - Migrate Remaining ATS Providers
-- [ ] Phase 4 - Shared Schema/Normalization Module
-- [ ] Phase 5 - Deterministic Validation Layer
-- [ ] Phase 6 - Observability + Diagnostics Hardening
-- [ ] Phase 7 - Final Verification and Go-Live Run
+- [x] Phase 2 - Migrate Workday as Reference Provider
+- [x] Phase 3 - Migrate Remaining ATS Providers
+- [x] Phase 4 - Shared Schema/Normalization Module
+- [x] Phase 5 - Deterministic Validation Layer
+- [x] Phase 6 - Observability + Diagnostics Hardening
+- [x] Phase 7 - Final Verification and Go-Live Run
 
 ---
 

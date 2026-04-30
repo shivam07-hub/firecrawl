@@ -27,6 +27,7 @@
     "112c0542820110016377af553b050000", "112c0542820110016377c02c6ef00000",
     "1ab48a98eb7c100163465bf6c3310000", "112c05428201100163763bd6ad400000"
   ]},
+  "Deutsche Bank": { "india_facet_param": "Country", "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e" },
   "Maersk": { "india_facet_param": "locations", "india_uuids": [
     "4e4d26638c45010787a24d3a78f50000", "8df45049b43810013bfc511ded230000",
     "4e4d26638c45010787a25209b00e0000", "26c4d72049dc10009e0daf1507aa0000",

@@ -131,6 +131,20 @@ def _section_portals(header: str, lines: list[str]) -> list[dict]:
         return _greenhouse(rows)
     if 'EIGHTFOLD' in h:
         return _eightfold(rows)
+    if 'ICIMS' in h:
+        return _icims_custom(rows)
+    if 'DARWINBOX' in h:
+        return _darwinbox(rows)
+    if 'MYNEXTHIRE' in h:
+        return _mynexthire(rows)
+    if 'SPIRE2GROW' in h:
+        return _spire2grow(rows)
+    if 'ZWAYAM' in h:
+        return _zwayam(rows)
+    if 'TALEO' in h:
+        return _taleo(rows)
+    if 'MCKINSEY' in h:
+        return _mckinsey(rows)
     if 'CUSTOM' in h or 'PROPRIETARY' in h:
         return _custom(rows)
     if 'SAP' in h or 'SUCCESSFACTORS' in h:
@@ -141,8 +155,12 @@ def _section_portals(header: str, lines: list[str]) -> list[dict]:
         return _avature(rows)
     if 'LEVER' in h:
         return _lever(rows)
+    if 'PCSX' in h or 'PHENOM CX' in h:
+        return _pcsx(rows)
     if 'PHENOM' in h:
         return _phenom_api(rows, india_only=False)
+    if 'PINPOINT' in h:
+        return _pinpoint(rows)
     # Industry-organised sections (CONSULTING, BFSI, CONGLOMERATES, CONSUMER, IT, RETAIL, etc.)
     # and the catch-all OTHER section — all use the same _other() parser (Careers URL + Status).
     # These sections don't have reliable India-only filters, so india_only=False: we capture
@@ -256,21 +274,59 @@ def _greenhouse(rows) -> list[Portal]:
 
 
 def _eightfold(rows) -> list[Portal]:
-    """Eightfold API is broken → always use Firecrawl."""
     out = []
     for r in rows:
-        status  = r.get('Status', '')
-        domain  = r.get('Eightfold Domain', '').strip()
-        company = r.get('Company', '').strip()
+        status      = r.get('Status', '')
+        ef_domain   = r.get('Eightfold Domain', '').strip()   # e.g. netflix.eightfold.ai
+        api_domain  = r.get('API Domain', '').strip()         # e.g. netflix.com
+        company     = r.get('Company', '').strip()
         careers_url = r.get('Careers URL', '').strip()
+        if not _is_active(status):
+            continue
+        # Derive tenant from Eightfold Domain (strip .eightfold.ai suffix)
+        tenant = ef_domain.replace('.eightfold.ai', '').strip()
+        # Use direct API if we have tenant + api_domain; otherwise Firecrawl
+        has_api = bool(tenant and api_domain)
         out.append({
+            'company':           company,
+            'ats':               'eightfold',
+            'endpoint':          careers_url or f"https://{ef_domain}/careers",
+            'js_required':       not has_api,
+            'eightfold_tenant':  tenant,
+            'eightfold_domain':  api_domain,
+            'status':            status,
+            'industry':          _industry(company),
+        })
+    return out
+
+
+# Per-company overrides for iCIMS Custom portals that deviate from the default
+# country=India filter (e.g. portals that use location=india instead).
+_ICIMS_OVERRIDES: dict[str, dict] = {
+    "Keysight Technologies": {"icims_location_param": "location"},
+}
+
+
+def _icims_custom(rows) -> list[Portal]:
+    out = []
+    for r in rows:
+        status      = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company     = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        portal: Portal = {
             'company':     company,
-            'ats':         'eightfold',
-            'endpoint':    careers_url or f"https://{domain}/careers",
-            'js_required': True,
+            'ats':         'icims_custom',
+            'endpoint':    careers_url,
+            'careers_url': careers_url,
+            'js_required': False,
+            'india_only':  True,
             'status':      status,
             'industry':    _industry(company),
-        })
+        }
+        portal.update(_ICIMS_OVERRIDES.get(company, {}))
+        out.append(portal)
     return out
 
 
@@ -319,6 +375,19 @@ def _sap(rows, india_only: bool = True) -> list[Portal]:
     return out
 
 
+_ORACLE_EXPAND = (
+    "requisitionList.workLocation,"
+    "requisitionList.otherWorkLocations,"
+    "requisitionList.secondaryLocations,"
+    "flexFieldsFacet.values,"
+    "requisitionList.requisitionFlexFields"
+)
+_ORACLE_FACETS = (
+    "LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3B"
+    "CATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS"
+)
+
+
 def _oracle(rows) -> list[Portal]:
     out = []
     for r in rows:
@@ -329,19 +398,35 @@ def _oracle(rows) -> list[Portal]:
         company = r.get('Company', '').strip()
         if not host or 'existing scraper' in host.lower() or not re.match(r'^[\w\.\-]+$', host):
             continue
+
+        site_num  = r.get('Site Number', '').strip()
+        loc_id    = r.get('India Location ID', '').strip()
+        base      = f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+
+        if site_num:
+            # Cracked: use finder=findReqs; locationId optional (omit for India-only portals)
+            loc_filter = f",locationId={loc_id}" if loc_id else ""
+            endpoint = (
+                f"{base}?onlyData=true&expand={_ORACLE_EXPAND}"
+                f"&finder=findReqs;siteNumber={site_num},"
+                f"facetsList={_ORACLE_FACETS},"
+                f"limit=25{loc_filter},sortBy=POSTING_DATES_DESC"
+            )
+            oracle_nested = True
+        else:
+            endpoint = f"{base}?limit=25&offset=0&onlyData=true"
+            oracle_nested = False
+
         out.append({
-            'company':     company,
-            'ats':         'oracle',
-            'endpoint':    (
-                f"https://{host}/hcmRestApi/resources/latest"
-                "/recruitingCEJobRequisitions"
-                "?limit=25&offset=0&onlyData=true"
-            ),
-            'india_only':  True,
-            'careers_url': r.get('Careers URL', '').strip() or None,
-            'js_required': False,
-            'status':      status,
-            'industry':    _industry(company),
+            'company':       company,
+            'ats':           'oracle',
+            'endpoint':      endpoint,
+            'oracle_nested': oracle_nested,
+            'india_only':    True,
+            'careers_url':   r.get('Careers URL', '').strip() or None,
+            'js_required':   False,
+            'status':        status,
+            'industry':      _industry(company),
         })
     return out
 
@@ -364,23 +449,36 @@ def _avature(rows) -> list[Portal]:
     return out
 
 
+_ATS_OVERRIDES: dict[str, str] = {
+    'Aditya Birla Group':    'aditya_birla',
+    'McKinsey & Company':    'mckinsey',
+    'Standard Chartered Bank': 'taleo',
+}
+
+_TALEO_V1: set[str] = {'Standard Chartered Bank'}
+
+
 def _other(rows, india_only: bool = True) -> list[Portal]:
     out = []
     for r in rows:
         status  = r.get('Status', '')
         if not _is_active(status):
             continue
-        js_req  = '🟡' in status or '🔍' in status
         company = r.get('Company', '').strip()
-        out.append({
+        ats     = _ATS_OVERRIDES.get(company, 'other')
+        js_req  = '🟡' in status or '🔍' in status
+        portal: dict = {
             'company':     company,
-            'ats':         'other',
+            'ats':         ats,
             'endpoint':    r.get('Careers URL', '').strip(),
             'js_required': js_req,
             'status':      status,
             'industry':    _industry(company),
             'india_only':  india_only,
-        })
+        }
+        if company in _TALEO_V1:
+            portal['taleo_v1'] = True
+        out.append(portal)
     return out
 
 
@@ -428,6 +526,211 @@ def _phenom_api(rows, india_only: bool = True) -> list[Portal]:
             'status':      status,
             'industry':    _industry(company),
             'india_only':  india_only,
+        })
+    return out
+
+
+def _pcsx(rows) -> list[Portal]:
+    """Phenom CX (pcsx) — list API + per-job HTML JSON-LD for full JD."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company = r.get('Company', '').strip()
+        base_url = r.get('Base URL', '').strip().rstrip('/')
+        pcsx_domain = r.get('Domain', '').strip()
+        if not base_url or not pcsx_domain:
+            continue
+        out.append({
+            'company':     company,
+            'ats':         'pcsx',
+            'endpoint':    base_url,
+            'careers_url': r.get('Careers URL', '').strip(),
+            'pcsx_domain': pcsx_domain,
+            'js_required': False,
+            'status':      status,
+            'industry':    _industry(company),
+        })
+    return out
+
+
+def _darwinbox(rows) -> list[Portal]:
+    """Darwinbox ATS — CF-protected POST API; falls back to Firecrawl without cookies."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        if not careers_url:
+            continue
+        out.append({
+            'company':    company,
+            'ats':        'darwinbox',
+            'endpoint':   careers_url,
+            'careers_url': careers_url,
+            'js_required': False,
+            'status':     status,
+            'industry':   _industry(company),
+        })
+    return out
+
+
+def _mynexthire(rows) -> list[Portal]:
+    """MyNextHire ATS — POST per-category API; workspaceid + tenant from portal config."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company     = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        tenant      = r.get('Tenant Domain', '').strip()
+        workspace   = r.get('Workspace ID', '').strip()
+        if not careers_url:
+            continue
+        out.append({
+            'company':                  company,
+            'ats':                      'mynexthire',
+            'endpoint':                 careers_url,
+            'careers_url':              careers_url,
+            'mynexthire_tenant':        tenant,
+            'js_required':              False,
+            'india_only':               True,
+            'status':                   status,
+            'industry':                 _industry(company),
+        })
+    return out
+
+
+def _spire2grow(rows) -> list[Portal]:
+    """Spire2Grow / IES ATS — GET with workspaceid header."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company      = r.get('Company', '').strip()
+        careers_url  = r.get('Careers URL', '').strip()
+        workspace_id = r.get('Workspace ID', '').strip()
+        workflow_id  = r.get('Workflow ID', '').strip()
+        if not careers_url or not workspace_id:
+            continue
+        out.append({
+            'company':                   company,
+            'ats':                       'spire2grow',
+            'endpoint':                  careers_url,
+            'careers_url':               careers_url,
+            'spire2grow_workspace_id':   workspace_id,
+            'spire2grow_workflow_id':    workflow_id,
+            'js_required':               False,
+            'india_only':                True,
+            'status':                    status,
+            'industry':                  _industry(company),
+        })
+    return out
+
+
+def _zwayam(rows) -> list[Portal]:
+    """Zwayam ATS — multipart POST with companyId (base64) and domain."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company    = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        domain     = r.get('Zwayam Domain', '').strip()
+        company_id = r.get('Company ID (b64)', '').strip()
+        if not careers_url or not company_id:
+            continue
+        out.append({
+            'company':           company,
+            'ats':               'zwayam',
+            'endpoint':          careers_url,
+            'careers_url':       careers_url,
+            'zwayam_domain':     domain,
+            'zwayam_company_id': company_id,
+            'js_required':       False,
+            'india_only':        True,
+            'status':            status,
+            'industry':          _industry(company),
+        })
+    return out
+
+
+def _taleo(rows) -> list[Portal]:
+    """Oracle Taleo TBE — POST /services/jobs/search/ with locationsearch=india."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company     = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        if not careers_url:
+            continue
+        out.append({
+            'company':     company,
+            'ats':         'taleo',
+            'endpoint':    careers_url,
+            'careers_url': careers_url,
+            'js_required': False,
+            'india_only':  True,
+            'status':      status,
+            'industry':    _industry(company),
+        })
+    return out
+
+
+def _mckinsey(rows) -> list[Portal]:
+    """McKinsey gateway API — GET with countries=India param."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company     = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        if not careers_url:
+            continue
+        out.append({
+            'company':     company,
+            'ats':         'mckinsey',
+            'endpoint':    careers_url,
+            'careers_url': careers_url,
+            'js_required': False,
+            'india_only':  True,
+            'status':      status,
+            'industry':    _industry(company),
+        })
+    return out
+
+
+def _pinpoint(rows) -> list[Portal]:
+    """Pinpoint ATS — /en/postings.json with location_id[] India filter."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company = r.get('Company', '').strip()
+        base_url = r.get('Base URL', '').strip().rstrip('/')
+        india_ids_raw = r.get('India Location IDs', '').strip()
+        if not base_url or not india_ids_raw:
+            continue
+        india_ids = [i.strip() for i in india_ids_raw.split(',') if i.strip()]
+        out.append({
+            'company':                     company,
+            'ats':                         'pinpoint',
+            'endpoint':                    base_url,
+            'careers_url':                 r.get('Careers URL', '').strip(),
+            'pinpoint_india_location_ids': india_ids,
+            'js_required':                 False,
+            'status':                      status,
+            'industry':                    _industry(company),
         })
     return out
 

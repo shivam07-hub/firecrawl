@@ -1,4 +1,4 @@
-# CLAUDE.md — v2.1
+# CLAUDE.md — v2.4
 
 Guidance for Claude Code in this repository.
 Run history → `RUN_HISTORY.md`. Portal config → `KNOWN_PORTALS.md`.
@@ -9,9 +9,54 @@ Run history → `RUN_HISTORY.md`. Portal config → `KNOWN_PORTALS.md`.
 
 | Version | Date | Summary |
 |---------|------|---------|
+| **v2.4** | 2026-04-30 | Session 2: 20+ portals cracked. Oracle×6 (Adani 5-entity), Infosys, Aditya Birla, StanChart, Haleon, McKinsey confirmed. generic_json hardened. |
+| **v2.3** | 2026-04-30 | Session 1: Oracle×5, Pinpoint, PCSX, Darwinbox, Taleo, AdityaBirla. Oracle HTML JD fallback. E2E verified. |
+| **v2.2** | 2026-04-29 | BNY Mellon Oracle HCM cracked — finder=findReqs + India locationId. Oracle nested parser added. |
 | **v2.1** | 2026-04-29 | "Crack once, reuse forever" principle codified. Oracle fix, architecture candidates documented. |
 | **v2.0** | 2026-04-28 | Architecture V3 complete (A1–D1). First production run under modular provider architecture. |
 | v1.x | 2026-04-19 | V2 scraper with monolithic scrapers.py + company_registry.py (deprecated). |
+
+**v2.4 changes (2026-04-30 session 2):**
+
+**New portals cracked:**
+| Company | ATS | Jobs | Key |
+|---------|-----|------|-----|
+| JPMC | Oracle HCM | 25+ | siteNumber=CX_1001, locationId=300000000289360 |
+| Honeywell | Oracle HCM | 25+ | siteNumber=CX_1, locationId=300000000469485 |
+| Texas Instruments | Oracle HCM | 114 | siteNumber=CX, locationId=300000000361484 |
+| Nokia | Oracle HCM | 261 | siteNumber=CX_1, locationId=300000000471745 |
+| Technip Energies | Oracle HCM | 9+ | siteNumber=CX_1, locationId=300000000345142 |
+| Adani Group | Oracle HCM | ? | siteNumber=CX_2027, India-only (no locationId) |
+| Adani Solar | Oracle HCM | ? | siteNumber=CX_2033, same host eibd.fa.em2 |
+| Adani Power Transmission | Oracle HCM | ? | siteNumber=CX_2023 |
+| Adani Thermal Power | Oracle HCM | ? | siteNumber=CX_3003 |
+| Adani Gas | Oracle HCM | 61 | siteNumber=CX_2025 |
+| Infosys | Custom gateway | 1285 | intapgateway.infosysapps.com; flat JSON list; origin header required |
+| Aditya Birla Group | Custom REST | 793 | /api/v3/jobs + /api/v3/job/{jobCode}; static Bearer token |
+| Standard Chartered Bank | Taleo v1 | 530 | POST /services/recruiting/v1/jobs; keywords=india; no auth |
+| McKinsey & Company | Custom (mckinsey) | ? | dedicated provider; ats=mckinsey |
+| Haleon | PCSX | 25 | careers.haleon.com; JSON-LD per-job JD |
+
+**Code changes:**
+- `generic_json.py`: flat bare-list crash fixed (`data.get()` on list → `isinstance` short-circuit first)
+- `generic_json.py`: `_EXTRA_HEADERS` dict — domain-keyed extra headers; Infosys needs `origin`+`referer`+`x-correlation-id`
+- `generic_json.py`: field lookups extended — `postingTitle`, `referenceCode`, `postingId`, `postingDescription`, `createdOn`, `unit`, `functionalArea`
+- `providers/aditya_birla.py`: new provider; static Bearer token; paginated list + per-job JD fetch
+- `providers/taleo.py`: `_scrape_taleo_v1()` added for Taleo Enterprise v1 REST API (`jobSearchResult[].response` shape)
+- `portal_reader.py`: `_ATS_OVERRIDES` dict — maps company names to ATS keys without needing new table sections; `_TALEO_V1` set for v1 detection; `_oracle()` locationId now optional (India-only portals use siteNumber alone)
+- `registry.py`: `AdityaBirlaProvider` registered
+- `company_industries.json`: added Adani Solar/Power Transmission/Thermal Power/Gas, Procter & Gamble + 5 others from session 1
+
+**P&G (Procter & Gamble):** Phenom SSR — no jobs XHR exists. Tenant=PGBPGNGLOBAL. Added to PHENOM REST section as `🟡 js-required` FC fallback.
+
+**Swiggy/Flipkart/OYO (Darwinbox):** CF Turnstile — session cookie IP-bound, 30-min TTL. Cannot automate. Skip until manual cookie injection workflow built.
+
+**v2.2 changes:**
+- BNY Mellon Oracle HCM cracked: `finder=findReqs;siteNumber=CX_3001,...,locationId=300000000378365` → 15+ India jobs
+- `portal_reader.py` `_oracle()`: reads `Site Number` + `India Location ID` columns → builds finder URL; sets `oracle_nested=True`
+- `generic_json.py`: Oracle nested path — `items[0].requisitionList[]` extraction + `Title`/`Id`/`PrimaryLocation` field mapping
+- `generic_json.py`: added `'items'` to `_ITEMS_KEYS` (was missing — Oracle flat responses also affected)
+- KNOWN_PORTALS.md Oracle table: added `Site Number` + `India Location ID` columns; BNY row updated ✅
 
 **v2.1 changes:**
 - Oracle HCM `q=` filter removed (always returns 400) → empty response → Firecrawl fallback (JPMC: 6 jobs, BNY Mellon: 1 job)
@@ -238,6 +283,12 @@ CREATE TABLE jobs (
 | Greenhouse | Direct GET — India filter in Python — full JD in response |
 | Lever | Direct GET `?location=india` |
 | Phenom | REST API per tenant |
+| PCSX (Phenom CX) | GET `/api/pcsx/search?domain=X&location=india&start=N` + per-job HTML JSON-LD |
+| Pinpoint | GET `/en/postings.json?location_id[]=ID1&location_id[]=ID2` — full JD in response |
+| Darwinbox | POST `/ms/candidateapi/job/alljobs` — requires CF cookies in env vars |
+| Oracle HCM | GET finder=findReqs + India locationId; JD from API or HTML `og:description` fallback |
+| Taleo (Oracle TBE) | POST `/services/jobs/search/` + per-job HTML BeautifulSoup scrape |
+| Aditya Birla (custom) | GET `/api/v3/jobs` + per-job `/api/v3/job/{jcode}` — Bearer token |
 | Custom/SAP/Oracle | Direct GET — fallback to Firecrawl extract if HTML |
 | JS-heavy (Eightfold, Avature, SPAs) | `scrape_extract()` via Firecrawl (Docker first, cloud last resort) |
 
@@ -297,7 +348,7 @@ Every company solved is solved forever. When we discover HOW to scrape a company
 
 **Cloudflare-blocked Workday (all verified 2026-04-29):** Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, AMD, ANZ Bank, Keysight, Deutsche Bank, Standard Chartered Bank, Eli Lilly. These go straight to Firecrawl fallback via `workday_registry.json#blocked=true`.
 
-**Darwinbox companies (no public API):** Swiggy, Flipkart, Myntra, OYO, IIFL Finance — Darwinbox returns HTML for all API requests including `/ms/candidatev2/main/careers/allJobs`. Must use browser automation or accept 0 jobs until Darwinbox provider is implemented.
+**Darwinbox companies (CF Turnstile-protected):** Swiggy, Flipkart, Myntra, OYO, IIFL Finance — `providers/darwinbox.py` implemented (POST `/ms/candidateapi/job/alljobs`). Needs `DARWINBOX_CF_BM` + `DARWINBOX_SESSION` env vars from browser devtools. Cookies expire in 30 min, are IP-bound. Without them → Firecrawl fallback. To get cookies: open `iifl.darwinbox.in` in Chrome → DevTools Network → find `alljobs` POST → Copy as cURL → extract `__cf_bm` and `session` cookie values → export as env vars before running scraper.
 
 **Recommended test order:** Stripe → ServiceNow → Salesforce → Goldman Sachs / Eightfold portals.
 
@@ -337,30 +388,37 @@ All 7 architecture chunks completed. Architecture V3 is production-ready.
 | # | Company | Career URL | Suspected ATS | Status |
 |---|---|---|---|---|
 | 1 | ✅ Dr. Reddy's | careers.drreddys.com | SmartRecruiters `DrReddysLaboratoriesLtdSBX` | **CRACKED 2026-04-29** — 142 India jobs |
-| 2 | LTIMindtree | ltimindtree.com/careers/job-openings | Unknown | Inspect XHR |
-| 3 | Swiggy | careers.swiggy.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
-| 4 | Flipkart | flipkartcareers.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
-| 5 | Myntra | careers.myntra.com | Darwinbox | Angular SPA + CF Turnstile (bot-protected) |
-| 6 | AMD | amd.com/en/corporate/careers | iCIMS (`amd.icims.com`) | Find exact XHR endpoint |
-| 7 | Netflix | jobs.netflix.com | Custom (Next.js) | Find JSON API |
-| 8 | Meta | metacareers.com/jobs | Custom GraphQL | Find GraphQL endpoint + params |
-| 9 | McKinsey | mckinsey.com/careers/search-jobs | Unknown | Inspect XHR |
-| 10 | Deutsche Bank | careers.db.com | SAP SuccessFactors | Find tenant + OData endpoint |
-| 11 | Standard Chartered | sc.com/en/global-careers | Workday (`scb.wd3`) CF-blocked | Find India UUID |
-| 12 | Keysight Technologies | jobs.keysight.com | SAP SF suspected | Inspect XHR |
-| 13 | ANZ Bank | careers.anz.com | Workday (`anz.wd3`) CF-blocked | Find India UUID |
-| 14 | Eli Lilly | careers.lilly.com | Phenom People | CF-blocks `/api/jobs` |
-| 15 | Societe Generale | careers.societegenerale.com | Workday (`societegenerale.wd3`) CF-blocked | Update from SR |
-| 16 | Rakuten India | corp.rakuten.co.in/careers | Unknown | Inspect XHR |
-| 17 | OYO | oyorooms.com/about/ | Darwinbox | Angular SPA + CF |
-| 18 | IIFL Finance | iifl.darwinbox.in | Darwinbox | Angular SPA + CF |
-| 19 | IndusInd Bank | indusind.bank.in | Unknown | Inspect XHR |
-| 20 | Adani Group | adani.com/careers | Unknown | Inspect XHR |
-| 21 | Aditya Birla Group | careers.adityabirla.com | Unknown | Inspect XHR |
-| 22 | Mu Sigma | mu-sigma.com/careers | Unknown | Inspect XHR |
-| 23 | Ola Electric | olaelectric.com/careers | Unknown | Inspect XHR |
-| 24 | Align Technology | aligntech.com/careers | Unknown | Inspect XHR |
-| 25 | Kearney | kearney.com/about/locations/india | Unknown | Inspect XHR |
+| 2 | ✅ Align Technology | aligntech.com/careers | Pinpoint — 6 India location IDs | **CRACKED 2026-04-29** — 44 India jobs |
+| 3 | ✅ Haleon | careers.haleon.com | PCSX (Phenom CX) `pcsx_domain=haleon.com` | **CRACKED 2026-04-29** — 25 India jobs, JD 6000+ chars |
+| 4 | ✅ Nokia | jobs.nokia.com | Oracle HCM `fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com` CX_1 | **CRACKED 2026-04-29** — 261 India jobs |
+| 5 | ✅ Texas Instruments | careers.ti.com | Oracle HCM `edbz.fa.us2.oraclecloud.com` CX | **CRACKED 2026-04-29** — 114 India jobs; JD via HTML og:description |
+| 6 | ✅ JP Morgan Chase | careers.jpmorgan.com | Oracle HCM `jpmc.fa.oraclecloud.com` CX_1001 | **CRACKED 2026-04-29** — 25+ India jobs |
+| 7 | ✅ BNY Mellon | bny.com/careers | Oracle HCM `eofe.fa.us2.oraclecloud.com` CX_3001 | **CRACKED 2026-04-29** — 26 India jobs; JD via HTML og:description |
+| 8 | ✅ Honeywell | careers.honeywell.com | Oracle HCM `ibqbjb.fa.ocs.oraclecloud.com` CX_1 | **CRACKED 2026-04-30** — 392 India jobs |
+| 9 | ✅ Technip Energies | technipenergies.com/careers | Oracle HCM `hcxg.fa.em2.oraclecloud.com` CX_1 | **CRACKED 2026-04-29** — 21 India jobs |
+| 10 | ✅ Aditya Birla Group | careers.adityabirla.com | Custom REST `/api/v3/jobs` + Bearer token | **CRACKED 2026-04-30** — provider built, E2E pending |
+| 11 | 🟡 IIFL Finance | iifl.darwinbox.in | Darwinbox | Provider built — needs CF cookies (30-min TTL). Get from browser devtools. |
+| 12 | LTIMindtree | ltimindtree.com/careers/job-openings | Unknown | Inspect XHR |
+| 13 | Swiggy | careers.swiggy.com | Darwinbox | Provider ready — needs CF cookies |
+| 14 | Flipkart | flipkartcareers.com | Darwinbox | Provider ready — needs CF cookies |
+| 15 | Myntra | careers.myntra.com | Darwinbox | Provider ready — needs CF cookies |
+| 16 | OYO | oyorooms.com/about/ | Darwinbox | Provider ready — needs CF cookies |
+| 17 | AMD | amd.com/en/corporate/careers | iCIMS (`amd.icims.com`) | Find exact XHR endpoint |
+| 18 | Netflix | jobs.netflix.com | Custom (Next.js) | Find JSON API |
+| 19 | Meta | metacareers.com/jobs | Custom GraphQL | Find GraphQL endpoint + params |
+| 20 | McKinsey | mckinsey.com/careers/search-jobs | Custom JSON | `mckinsey.com/careers/search-jobs?countries=India` — inspect XHR |
+| 21 | Deutsche Bank | careers.db.com | SAP SuccessFactors | Find tenant + OData endpoint |
+| 22 | Standard Chartered | sc.com/en/global-careers | Workday (`scb.wd3`) CF-blocked | Find India UUID |
+| 23 | Keysight Technologies | jobs.keysight.com | SAP SF suspected | Inspect XHR |
+| 24 | ANZ Bank | careers.anz.com | Workday (`anz.wd3`) CF-blocked | Find India UUID |
+| 25 | Eli Lilly | careers.lilly.com | Phenom People | CF-blocks `/api/jobs` |
+| 26 | Societe Generale | careers.societegenerale.com | Workday CF-blocked | Inspect XHR |
+| 27 | Rakuten India | corp.rakuten.co.in/careers | Unknown | Inspect XHR |
+| 28 | IndusInd Bank | indusind.bank.in | Unknown | Inspect XHR |
+| 29 | Adani Group | adani.com/careers | Unknown | Inspect XHR |
+| 30 | Mu Sigma | mu-sigma.com/careers | Unknown | Inspect XHR |
+| 31 | Ola Electric | olaelectric.com/careers | Unknown | Inspect XHR |
+| 32 | Kearney | kearney.com/about/locations/india | Unknown | Inspect XHR |
 
 **Workday CF-blocked companies** (have correct Workday slug, blocked API — need India UUID via browser):
 Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit.
@@ -379,10 +437,14 @@ These fall back to Firecrawl which gets cookie overlay. Crack = find India UUID 
 ### Chunk 3 — New ATS providers ("crack once" reusable)
 Each new provider = all future companies on that ATS work for free.
 
-- **Darwinbox** (Swiggy, Flipkart, Myntra, OYO, IIFL, etc. — 10+ Indian companies):
-  - API endpoint unknown (returns HTML). Inspect XHR on `iifl.darwinbox.in` using browser devtools.
-  - Likely POST to `/ms/candidatev2/main/jobs/search` or similar.
-  - Once cracked: add `providers/darwinbox.py`, register in `registry.py`, update `portal_reader.py`.
+**✅ BUILT (2026-04-30):**
+- **Darwinbox** — `providers/darwinbox.py` ✅ — POST `/ms/candidateapi/job/alljobs`; CF cookie injection via env vars; Firecrawl fallback when absent
+- **Pinpoint** — `providers/pinpoint.py` ✅ — GET `/en/postings.json?location_id[]=...`
+- **PCSX (Phenom CX)** — `providers/pcsx.py` ✅ — list API + per-job HTML JSON-LD
+- **Taleo (Oracle TBE)** — `providers/taleo.py` ✅ — POST search + per-job HTML BeautifulSoup
+- **Aditya Birla custom** — `providers/aditya_birla.py` ✅ — REST `/api/v3/jobs`
+
+**Still needed:**
 - **Workable** (many startups):
   - `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
 - **SAP SuccessFactors**:

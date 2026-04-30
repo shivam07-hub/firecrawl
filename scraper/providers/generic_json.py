@@ -4,6 +4,7 @@ from schema import Portal
 
 import json
 import logging
+import re
 import requests
 from pathlib import Path
 
@@ -83,6 +84,16 @@ class GenericJSONProvider:
         return ProviderResult.success(raw)
 
 
+_EXTRA_HEADERS: dict[str, dict] = {
+    # Infosys gateway requires origin + referer + a correlation ID
+    'infosysapps.com': {
+        'origin':           'https://career.infosys.com',
+        'referer':          'https://career.infosys.com/',
+        'x-correlation-id': 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    },
+}
+
+
 def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
     """Best-effort GET-based scraper for Amazon, Microsoft, Apple, SAP, etc.
     Returns None on hard request error (caller maps to ScrapeReason.API_BLOCKED).
@@ -93,8 +104,14 @@ def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None
         _log.warning(f"    [SKIP] {portal['company']}: endpoint not a URL")
         return None
 
+    headers = dict(_HEADERS)
+    for domain, extra in _EXTRA_HEADERS.items():
+        if domain in url:
+            headers.update(extra)
+            break
+
     try:
-        r = requests.get(url, headers=_HEADERS, timeout=REQUEST_TIMEOUT)
+        r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
     except Exception as e:
         _log.error(f"    [ERROR] GET {portal['company']}: {e}")
@@ -111,7 +128,52 @@ def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None
              '_platform': portal.get('ats', 'Custom')}]
 
 
-_ITEMS_KEYS = ['jobPostings', 'jobs', 'results', 'data']
+_ITEMS_KEYS = ['jobPostings', 'jobs', 'results', 'data', 'items']
+
+
+_ORACLE_HTML_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html",
+}
+
+
+def _fetch_oracle_html_jd(host: str, site_num: str, jid: str) -> str:
+    """Fetch Oracle CandidateExperience job page; extract og:description when API JD is empty."""
+    url = f"https://{host}/hcmUI/CandidateExperience/en/sites/{site_num}/job/{jid}"
+    try:
+        r = requests.get(url, headers=_ORACLE_HTML_HEADERS, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            return ""
+        m = re.search(r'<meta property="og:description" content="(.*?)"', r.text)
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
+def _extract_oracle_nested(data: dict) -> list[dict]:
+    """Oracle HCM finder=findReqs response: jobs at items[0].requisitionList[]."""
+    wrapper = data.get('items')
+    if not isinstance(wrapper, list) or not wrapper:
+        return []
+    req_list = wrapper[0].get('requisitionList') if isinstance(wrapper[0], dict) else None
+    return req_list if isinstance(req_list, list) else []
+
+
+def _parse_oracle_job(p: dict, host: str) -> dict:
+    """Map Oracle HCM field names (Title, Id, PrimaryLocation) to canonical shape."""
+    title = p.get('Title') or p.get('title') or ''
+    loc_raw = p.get('PrimaryLocation') or p.get('primaryLocation') or ''
+    loc = loc_raw if isinstance(loc_raw, str) else ''
+    jid = str(p.get('Id') or p.get('requisitionId') or p.get('id') or job_hash(title, ''))
+    job_url = f"https://{host}/hcmUI/CandidateExperience/en/sites/careers/job/{jid}" if jid else ''
+    return {
+        '_title': title,
+        '_loc':   loc,
+        '_jid':   jid,
+        '_url':   job_url,
+        '_jd':    strip_html(p.get('ExternalDescriptionStr') or p.get('ShortDescriptionStr') or p.get('jobDescription') or ''),
+        '_date':  p.get('PostedDate') or p.get('ExternalPostedStartDate') or '',
+    }
 
 
 def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | None = None) -> list[dict]:
@@ -120,7 +182,42 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
     Persists successful key-path after first discovery so next run is instant.
     """
     platform = portal.get('ats', 'Custom').title()
-    company = portal.get('company', '')
+    company  = portal.get('company', '')
+
+    # Oracle HCM nested response (finder=findReqs): items[0].requisitionList[]
+    if portal.get('oracle_nested'):
+        raw_items = _extract_oracle_nested(data)
+        host = source_url.split('/hcmRestApi')[0].removeprefix('https://').removeprefix('http://')
+        site_m = re.search(r'siteNumber=([^,&]+)', source_url)
+        site_num = site_m.group(1) if site_m else ''
+        jobs = []
+        for p in raw_items:
+            if not isinstance(p, dict):
+                continue
+            mapped = _parse_oracle_job(p, host)
+            if not mapped['_title']:
+                continue
+            india_only = portal.get('india_only', True)
+            if india_only and not is_india(mapped['_loc']):
+                continue
+            jd = mapped['_jd']
+            if not jd and site_num and mapped['_jid']:
+                jd = _fetch_oracle_html_jd(host, site_num, mapped['_jid'])
+            jobs.append({
+                'job_id':          mapped['_jid'],
+                'title':           mapped['_title'],
+                'job_url':         mapped['_url'],
+                'source_api_url':  source_url,
+                'business_unit':   None,
+                'raw_jd_text':     jd,
+                'location_city':   mapped['_loc'],
+                'date_posted':     mapped['_date'],
+                'source_platform': 'Oracle',
+                'industry':        portal.get('industry', ''),
+            })
+            if max_jobs and len(jobs) >= max_jobs:
+                break
+        return jobs
 
     # Registry fast-path: use known key if available
     reg = _load_generic_registry().get(company, {})
@@ -128,15 +225,20 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
     if items_key:
         items = data.get(items_key) if items_key != '__list__' else (data if isinstance(data, list) else [])
     else:
-        # Discovery: try each key in order
-        items = None
-        discovered_key = None
-        for k in _ITEMS_KEYS:
-            v = data.get(k)
-            if isinstance(v, list) and v:
-                items = v
-                discovered_key = k
-                break
+        # Discovery: flat list short-circuit (e.g. Infosys returns bare [])
+        if isinstance(data, list):
+            items = data
+            discovered_key = '__list__'
+        else:
+            # Discovery: try each key in order
+            items = None
+            discovered_key = None
+            for k in _ITEMS_KEYS:
+                v = data.get(k)
+                if isinstance(v, list) and v:
+                    items = v
+                    discovered_key = k
+                    break
         if items is None:
             if isinstance(data, list) and data:
                 items = data
@@ -154,13 +256,20 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
         if not isinstance(p, dict):
             continue
 
-        title = p.get('title') or p.get('name') or p.get('jobTitle') or ''
+        # Unwrap single-key {data: {...}} envelope (ZS Associates pattern)
+        if list(p.keys()) == ['data'] and isinstance(p.get('data'), dict):
+            p = p['data']
+
+        title = (
+            p.get('title') or p.get('name') or p.get('jobTitle') or
+            p.get('postingTitle') or ''
+        )
         if not title:
             continue
 
         raw_loc = (
             p.get('normalized_location') or p.get('location') or
-            p.get('city') or p.get('country') or ''
+            p.get('full_location') or p.get('city') or p.get('country') or ''
         )
         loc = raw_loc if isinstance(raw_loc, str) else (
             raw_loc.get('city') or raw_loc.get('name') or ''
@@ -172,21 +281,27 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
 
         raw_jd = strip_html(
             p.get('description') or p.get('jobDescription') or
-            p.get('content') or p.get('summary') or ''
+            p.get('content') or p.get('summary') or
+            p.get('postingDescription') or ''
         )
         job_path = p.get('job_path', '')
+        ref_code = p.get('referenceCode') or ''
         job_url = (
             p.get('url') or p.get('job_url') or p.get('absolute_url') or
-            p.get('ref') or
+            p.get('apply_job_url') or p.get('ref') or
+            (f"https://jobs.zs.com/all/jobs/{p.get('slug')}" if p.get('slug') else '') or
+            (f"https://career.infosys.com/jobdesc?referenceCode={ref_code}" if ref_code else '') or
             (f"https://www.amazon.jobs{job_path}" if job_path else '') or ''
         )
         jid = str(
-            p.get('id_icims') or p.get('id') or p.get('jobId') or
+            p.get('referenceCode') or p.get('id_icims') or p.get('id') or
+            p.get('jobId') or p.get('postingId') or p.get('slug') or p.get('req_id') or
             job_hash(title, job_url)
         )
         bu = (
             p.get('business_category') or p.get('department') or
-            p.get('team') or p.get('category')
+            p.get('team') or p.get('category') or p.get('unit') or
+            p.get('functionalArea')
         )
         if isinstance(bu, dict):
             bu = bu.get('label') or bu.get('name')
@@ -201,7 +316,8 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
             'location_city':   loc,
             'date_posted':     (
                 p.get('posted_date') or p.get('date_posted') or
-                p.get('updated_at') or p.get('releasedDate')
+                p.get('updated_at') or p.get('releasedDate') or
+                p.get('createdOn')
             ),
             'source_platform': platform,
             'industry':        portal.get('industry', ''),
