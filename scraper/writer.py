@@ -8,6 +8,11 @@ Schema (v2, Dump 4+):
   company_name, apply_url,
   main_skills, side_skills,       ← LLM-derived
   batch_date                      ← auto-stamped integer YYYYMMDD
+
+Completion contract:
+  jobs.complete is written ONLY after both jobs.json and jobs.csv succeed.
+  already_scraped() in main.py uses this marker as the canonical signal.
+  Legacy runs (no marker) are detected via date-folder comparison.
 """
 import json
 import csv
@@ -19,6 +24,20 @@ from schema import CANONICAL_FIELDS, RAW_FIELD_MAP
 
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
 SCHEMA = CANONICAL_FIELDS
+
+COMPLETE_MARKER_NAME = "jobs.complete"
+
+
+def write_complete_marker(folder: Path, job_count: int, new_count: int, run_id: str = "") -> None:
+    """Write jobs.complete after both JSON and CSV are confirmed written."""
+    payload: dict = {
+        "completed_at": datetime.now().isoformat(),
+        "job_count":    job_count,
+        "new_jobs":     new_count,
+    }
+    if run_id:
+        payload["run_id"] = run_id
+    (folder / COMPLETE_MARKER_NAME).write_text(json.dumps(payload), encoding='utf-8')
 
 def _today() -> int:
     return int(datetime.now().strftime("%Y%m%d"))
@@ -44,10 +63,19 @@ def to_canonical(raw: dict, company_name: str) -> dict:
     }
 
 
-def save_jobs(company_name: str, jobs: list[dict], write_csv: bool = True, output_base: str = OUTPUT_BASE) -> tuple[str, int]:
+def save_jobs(
+    company_name: str,
+    jobs: list[dict],
+    write_csv: bool = True,
+    output_base: str = OUTPUT_BASE,
+    write_marker: bool = True,
+    run_id: str = "",
+) -> tuple[str, int]:
     """
-    Write jobs to All_CSV_Outputs/{Company}/Outputs/YYYY_MM_DD/jobs.json.
+    Write jobs to All_CSV_Outputs/{Company}/Outputs/YYYY_MM_DD/jobs.json (+ CSV).
     Deduplicates by job_id within the same date folder.
+    write_marker=True (default): writes jobs.complete after both JSON and CSV succeed.
+    write_marker=False: intermediate/page-level save — no marker (run still in progress).
     Returns (json_path, new_jobs_count).
     """
     folder = (
@@ -57,7 +85,13 @@ def save_jobs(company_name: str, jobs: list[dict], write_csv: bool = True, outpu
         / datetime.now().strftime("%Y_%m_%d")
     )
     folder.mkdir(parents=True, exist_ok=True)
-    json_path = folder / "jobs.json"
+    json_path      = folder / "jobs.json"
+    tmp_path       = folder / "jobs.tmp.json"
+    complete_marker = folder / COMPLETE_MARKER_NAME
+
+    # Remove stale marker — this save is in progress
+    if complete_marker.exists():
+        complete_marker.unlink()
 
     existing: list[dict] = []
     if json_path.exists():
@@ -70,10 +104,9 @@ def save_jobs(company_name: str, jobs: list[dict], write_csv: bool = True, outpu
     new_jobs     = [j for j in jobs if j.get('job_id') not in existing_ids]
     all_jobs     = existing + new_jobs
 
-    json_path.write_text(
-        json.dumps(all_jobs, indent=2, ensure_ascii=False),
-        encoding='utf-8',
-    )
+    # Atomic JSON write: tmp → rename (POSIX atomic)
+    tmp_path.write_text(json.dumps(all_jobs, indent=2, ensure_ascii=False), encoding='utf-8')
+    tmp_path.rename(json_path)
 
     if write_csv and all_jobs:
         csv_path = folder / "jobs.csv"
@@ -85,5 +118,9 @@ def save_jobs(company_name: str, jobs: list[dict], write_csv: bool = True, outpu
                 row['main_skills'] = ', '.join(job.get('main_skills') or [])
                 row['side_skills'] = ', '.join(job.get('side_skills') or [])
                 w.writerow(row)
+
+    # Marker written only after BOTH JSON and CSV succeed (skipped for page-level saves)
+    if write_marker:
+        write_complete_marker(folder, len(all_jobs), len(new_jobs), run_id=run_id)
 
     return str(json_path), len(new_jobs)

@@ -4,7 +4,7 @@ Parse KNOWN_PORTALS.md into a list of portal config dicts.
 Each dict has at minimum:
   company       str
   ats           str   workday | smartrecruiters | greenhouse | eightfold |
-                      custom | sap | oracle | avature | other
+                      custom | sap | oracle | avature | talentbrew | other
   endpoint      str   URL to hit (API or careers page)
   js_required   bool  True → route through Firecrawl browser rendering
   status        str   raw status emoji string from the file
@@ -353,6 +353,31 @@ def _custom(rows) -> list[Portal]:
     return out
 
 
+_SAP_ATS_OVERRIDES: dict[str, str] = {
+    # Alstom SAP Jobs2Web HTML listing pages are directly parseable.
+    "Alstom": "sap_jobs2web_html",
+    # Deloitte South Asia (India search) is direct Jobs2Web HTML with startrow pagination.
+    "Monitor Deloitte": "sap_jobs2web_html",
+    # apply.deloitte.com exposes Avature-style SearchJobs/JobDetail HTML.
+    "Deloitte India": "deloitte_usi",
+    # EY careers moved from old SuccessFactors URL to Yello board (Recsolu).
+    "EY India": "yello",
+    # Separate experienced-professionals stream on careers.ey.com (Jobs2Web HTML).
+    "EY India Experienced": "sap_jobs2web_html",
+    # jobs.pepsicojobs.com exposes direct JSON API with India filter.
+    "PepsiCo": "pepsico_jobs_api",
+}
+
+_SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
+    "Alstom": "https://jobsearch.alstom.com/search/?createNewAlert=false&q=&locationsearch=india&optionsFacetsDD_country=&optionsFacetsDD_department=&optionsFacetsDD_shifttype=",
+    "Monitor Deloitte": "https://southasiacareers.deloitte.com/search/?createNewAlert=false&q=&locationsearch=india&optionsFacetsDD_city=&optionsFacetsDD_customfield2=",
+    "Deloitte India": "https://apply.deloitte.com/en_US/careersUSI/SearchJobs/?jobRecordsPerPage=10&jobOffset=0",
+    "EY India": "https://eyglobal.yello.co/job_boards/1",
+    "EY India Experienced": "https://careers.ey.com/ey/search/?createNewAlert=false&q=india&optionsFacetsDD_customfield1=&optionsFacetsDD_country=IN&optionsFacetsDD_city=",
+    "PepsiCo": "https://www.pepsicojobs.com/api/jobs?page=1&sortBy=relevance&descending=false&internal=false&country=India",
+}
+
+
 def _sap(rows, india_only: bool = True) -> list[Portal]:
     out = []
     for r in rows:
@@ -363,10 +388,12 @@ def _sap(rows, india_only: bool = True) -> list[Portal]:
         careers = r.get('Careers URL', '').strip()
         endpoint = ep or careers
         company  = r.get('Company', '').strip()
+        endpoint = _SAP_ENDPOINT_OVERRIDES.get(company, endpoint)
         out.append({
             'company':     company,
-            'ats':         'sap',
+            'ats':         _SAP_ATS_OVERRIDES.get(company, 'sap'),
             'endpoint':    endpoint,
+            'careers_url': careers,
             'js_required': ep is None,
             'status':      status,
             'industry':    _industry(company),
@@ -453,9 +480,30 @@ _ATS_OVERRIDES: dict[str, str] = {
     'Aditya Birla Group':    'aditya_birla',
     'McKinsey & Company':    'mckinsey',
     'Standard Chartered Bank': 'taleo',
+    'Deloitte India (BrassRing)': 'deloitte_usi',
+    'Deloitte India': 'deloitte_usi',
+    'ADP': 'talentbrew',
+    'H&M': 'hm_wp_jobs',
+    'Intuit': 'talentbrew',
+    'Adobe': 'phenom_ssr',
+    'Siemens': 'siemens_externaljobs',
+    'ABB': 'phenom_ssr',
+    'Nykaa': 'skima_careers',
 }
 
-_TALEO_V1: set[str] = {'Standard Chartered Bank'}
+_TALEO_V1: set[str] = {'Standard Chartered Bank', 'Wipro'}
+_TALEO_USE_LOCATION: set[str] = {'Wipro'}  # use location=india instead of keywords=india
+_INDIA_ONLY_OVERRIDES: dict[str, bool] = {
+    'Deloitte India (BrassRing)': True,
+    'Deloitte India': True,
+    'ADP': True,
+    'H&M': True,
+    'Intuit': True,
+    'Adobe': True,
+    'Siemens': True,
+    'ABB': True,
+    'Nykaa': True,
+}
 
 
 def _other(rows, india_only: bool = True) -> list[Portal]:
@@ -474,7 +522,7 @@ def _other(rows, india_only: bool = True) -> list[Portal]:
             'js_required': js_req,
             'status':      status,
             'industry':    _industry(company),
-            'india_only':  india_only,
+            'india_only':  _INDIA_ONLY_OVERRIDES.get(company, india_only),
         }
         if company in _TALEO_V1:
             portal['taleo_v1'] = True
@@ -509,15 +557,32 @@ def _lever(rows) -> list[Portal]:
 
 def _phenom_api(rows, india_only: bool = True) -> list[Portal]:
     """Phenom REST API companies — paginated JSON with full JDs."""
+    phenom_ssr_overrides: dict[str, str] = {
+        # P&G search pages are Phenom SSR HTML with embedded eagerLoadRefineSearch,
+        # not the JSON /api/jobs shape used by PhenomProvider.
+        "Procter & Gamble": "https://www.pgcareers.com/in/en/search-results?qcountry=India",
+    }
     out = []
     for r in rows:
         status = r.get('Status', '')
         if not _is_active(status):
             continue
+        company = r.get('Company', '').strip()
+        if company in phenom_ssr_overrides:
+            out.append({
+                'company':     company,
+                'ats':         'phenom_ssr',
+                'endpoint':    phenom_ssr_overrides[company],
+                'careers_url': r.get('Careers URL', '').strip(),
+                'js_required': False,
+                'status':      status,
+                'industry':    _industry(company),
+                'india_only':  True,
+            })
+            continue
         ep = _clean_ep(r.get('API Endpoint', ''))
         if not ep:
             continue
-        company = r.get('Company', '').strip()
         out.append({
             'company':     company,
             'ats':         'phenom_api',
@@ -662,7 +727,7 @@ def _zwayam(rows) -> list[Portal]:
 
 
 def _taleo(rows) -> list[Portal]:
-    """Oracle Taleo TBE — POST /services/jobs/search/ with locationsearch=india."""
+    """Oracle Taleo TBE (classic) and Taleo v1 REST — auto-detected from endpoint path."""
     out = []
     for r in rows:
         status = r.get('Status', '')
@@ -672,7 +737,7 @@ def _taleo(rows) -> list[Portal]:
         careers_url = r.get('Careers URL', '').strip()
         if not careers_url:
             continue
-        out.append({
+        portal: dict = {
             'company':     company,
             'ats':         'taleo',
             'endpoint':    careers_url,
@@ -681,7 +746,12 @@ def _taleo(rows) -> list[Portal]:
             'india_only':  True,
             'status':      status,
             'industry':    _industry(company),
-        })
+        }
+        if company in _TALEO_V1:
+            portal['taleo_v1'] = True
+        if company in _TALEO_USE_LOCATION:
+            portal['taleo_use_location'] = True
+        out.append(portal)
     return out
 
 

@@ -5,6 +5,127 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-05-02 — Procter & Gamble cracked via Phenom SSR embed
+
+**Scope:** Parser + portal docs update for P&G direct route (no Firecrawl fallback).
+
+**Validation evidence:**
+- `GET https://www.pgcareers.com/in/en/search-results?m=3&location=MUMBAI%2C%20India` returns embedded `phApp.ddo.eagerLoadRefineSearch.data.jobs`.
+- Same page embeds fields needed by scraper: `jobSeqNo`, `jobId/reqId`, `title`, `location/country`, `applyUrl`, `descriptionTeaser`.
+- Country aggregation in snapshot confirms India results are available; global India facet count observed as `23`.
+
+**Code/docs updated:**
+- `scraper/portal_reader.py`: PHENOM section override added for `Procter & Gamble` → `ats=phenom_ssr`, endpoint `https://www.pgcareers.com/in/en/search-results?qcountry=India`.
+- `KNOWN_PORTALS.md`: P&G row updated to `✅ CRACKED 2026-05-02` with route details.
+
+**Targeted run result:**
+- Command: `python3 scraper/main.py --company \"Procter & Gamble\" --skip-enrich --company-cap 200`
+- Result: `23 raw` scraped, `23` saved.
+- Output: `All_CSV_Outputs_thru_firecrawl/Procter_Gamble/Outputs/2026_05_02/jobs.json`
+
+---
+
+## Session 2026-05-02 — H&M cracked via WordPress jobs API
+
+**Scope:** Added direct provider route for H&M (no manual DevTools cURL required at runtime).
+
+**Validation evidence:**
+- Careers URL observed: `https://career.hm.com/in-en/search/?l=cou%3Ain`
+- Jobs endpoint confirmed: `POST https://career.hm.com/in-en/wp-json/hm/v1/sr/jobs/search?_locale=user`
+- India payload filter confirmed: `{"locations":["cou:in"],"page":N}`
+- API response contains `jobs[]` + `total`; snapshot observed `111` India jobs.
+
+**Code/docs updated:**
+- Added provider: `scraper/providers/hm_wp_jobs.py`
+- Registered provider: `scraper/providers/registry.py` (`hm_wp_jobs`)
+- Parser mapping: `scraper/portal_reader.py` (`H&M -> ats=hm_wp_jobs`, `india_only=True`)
+- Schema comment updated: `scraper/schema.py`
+- Industry mapping updated: `scraper/company_industries.json` (`"H&M": "Retail"`)
+- Portal registry updated: `KNOWN_PORTALS.md` (OTHER PLATFORMS row + tracker entry)
+- Handoff updated: `CODEX_HANDOFF.md` (progress table + validation signal)
+
+**Targeted run result:**
+- Command: `python main.py --company "H&M" --skip-enrich --company-cap 300`
+- Result: `111 raw` scraped, `111` saved.
+- Output: `All_CSV_Outputs_thru_firecrawl/HM/Outputs/2026_05_02/jobs.json`
+- Run summary: `logs/run_summary_20260502_132049.json`
+
+---
+
+## Session 2026-05-02 — Nykaa cracked via Skima careers SSR HTML
+
+**Scope:** Code + registry + docs update for direct Nykaa route (no Firecrawl fallback).
+
+**Validation evidence:**
+- `GET https://careers.nykaa.com/` returns server-rendered job listing HTML with UUID links (no auth/cookies).
+- Pagination confirmed via `data-last-page` + query param `?page=N` (snapshot: 2 pages, 11 jobs).
+- Job detail pages (`/{job_uuid}`) return full JD in `.job-description-panel`.
+
+**Code/docs updated:**
+- Added provider: `scraper/providers/skima_careers.py` (listing + pagination + detail scraping).
+- Routed Nykaa to provider: `portal_reader.py` (`Nykaa -> ats=skima_careers`, `india_only=True`).
+- Registered provider in `scraper/providers/registry.py`.
+- `KNOWN_PORTALS.md`: Nykaa changed to `✅ CRACKED 2026-05-02` with Skima route notes.
+
+**Targeted run result:**
+- Command: `python3 scraper/main.py --company \"Nykaa\" --skip-enrich --company-cap 200`
+- Result: `11 raw` scraped, `11` saved.
+- Output: `All_CSV_Outputs_thru_firecrawl/Nykaa/Outputs/2026_05_02/jobs.json`
+
+---
+
+## Session 2026-05-02 — Atlassian route confirmed from browser cURL + bundle inspection
+
+**Scope:** Parser + documentation update for direct JSON route.
+
+**Validation evidence:**
+- `https://www.atlassian.com/company/careers/all-jobs?team=Interns%2CGraduates&location=&search=` resolves as JS-rendered careers shell.
+- Bundled careers code points production listings to `GET /endpoint/careers/listings`.
+- `GET https://www.atlassian.com/endpoint/careers/listings` returns JSON array (82 jobs in snapshot).
+- Job objects include `id`, `title`, `locations`, `overview`, `responsibilities`, `qualifications`, `applyUrl`.
+
+**Code/docs updated:**
+- `scraper/providers/generic_json.py`: added support for `locations[]`, sectioned JD fields, and `applyUrl` mapping.
+- `KNOWN_PORTALS.md`: Atlassian moved from broken Greenhouse row to `CUSTOM / PROPRIETARY APIs` as `✅ CRACKED 2026-05-02`.
+- `KNOWN_PORTALS.md`: Atlassian removed from `SCRAPE_QUEUE`.
+- `AGENTS.md` and `CODEX_HANDOFF.md`: updated with Atlassian validation notes.
+
+---
+
+## Session 2026-05-02 — Cisco route confirmed from browser cURL
+
+**Scope:** Documentation + handoff status update (no scraper code change in this session).
+
+**Validation evidence:**
+- `https://careers.cisco.com/global/en/search-results?qcountry=India` returns embedded `phApp.ddo.eagerLoadRefineSearch` payload.
+- India filter present in payload: `ui_selections.country=["India"]`; country aggregation reports `India=226`.
+- Pagination confirmed with `from=10&s=1` (10 jobs/page payload).
+- Job objects include `jobId/reqId`, `title`, `location`, `descriptionTeaser`, `applyUrl`.
+
+**Docs updated:**
+- `KNOWN_PORTALS.md`: Cisco changed from `🔍 needs investigation` to `✅ cracked 2026-05-02`; queue item removed.
+- `AGENTS.md`: new run-history entry for Cisco crack confirmation.
+- `CODEX_HANDOFF.md`: progress table and validation notes updated with Cisco route.
+
+---
+
+## Session 2026-05-02 — Tech Mahindra route confirmed
+
+**Scope:** Documentation + handoff status update (no scraper code change in this session).
+
+**Validation evidence:**
+- `https://www.techmahindra.com/en-in/careers/` is 404.
+- `https://www.techmahindra.com/careers/` is live and links out to `https://careers.techmahindra.com/`.
+- `https://careers.techmahindra.com/` returns listing cards with direct `JobDetails.aspx?JobCode=...` links.
+- `JobDetails.aspx` pages include full JD sections and apply controls; suitable for direct scrape + India filter by location text.
+
+**Docs updated:**
+- `KNOWN_PORTALS.md`: Tech Mahindra moved from broken/url-changed to `✅ cracked 2026-05-02`.
+- `KNOWN_PORTALS.md`: removed Tech Mahindra from `SCRAPE_QUEUE`.
+- `AGENTS.md`: run-history entry added for Tech Mahindra crack.
+
+---
+
 ## Session 2026-04-27 — Global scope controls + lifecycle/versioning + diagnostics
 
 **Code changes:**

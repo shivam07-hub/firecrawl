@@ -288,6 +288,81 @@ CREATE TABLE jobs (
 
 ## RUN HISTORY & CURRENT STATE
 
+### Session 2026-05-02 — Procter & Gamble cracked via Phenom SSR
+
+**Objective:** Move P&G from ambiguous SSR/manual fallback state to a direct, repeatable route.
+
+**Validation performed:**
+- Confirmed `https://www.pgcareers.com/in/en/search-results?m=3&location=MUMBAI%2C%20India` embeds `phApp.ddo.eagerLoadRefineSearch.data.jobs` in HTML.
+- Confirmed embedded records include `jobSeqNo`, `jobId/reqId`, `title`, `country/location`, `applyUrl`, `descriptionTeaser`.
+- Targeted run passed: `python3 scraper/main.py --company "Procter & Gamble" --skip-enrich --company-cap 200` → `23 raw`, `23 saved`.
+
+**Code + docs updated:**
+- `scraper/portal_reader.py` PHENOM override added: `Procter & Gamble -> ats=phenom_ssr`, endpoint `https://www.pgcareers.com/in/en/search-results?qcountry=India`.
+- `KNOWN_PORTALS.md` P&G row updated to `✅ CRACKED 2026-05-02`.
+- `RUN_HISTORY.md` and `CODEX_HANDOFF.md` updated with this route.
+
+### Session 2026-05-02 — Nykaa cracked via Skima careers SSR HTML
+
+**Objective:** Convert Nykaa from `js-required` to a direct, repeatable scraper route.
+
+**Validation performed:**
+- Confirmed `GET https://careers.nykaa.com/` returns server-rendered listings with UUID detail links.
+- Confirmed pagination via `?page=N` and `data-last-page` (snapshot: 2 pages).
+- Confirmed detail pages `/{job_uuid}` contain full JD in `.job-description-panel`.
+- Targeted run passed: `python3 scraper/main.py --company "Nykaa" --skip-enrich --company-cap 200` → `11 raw`, `11 saved`.
+
+**Code + docs updated:**
+- Added provider `scraper/providers/skima_careers.py` (listing + pagination + detail parser).
+- Registered provider in `scraper/providers/registry.py` as `ats=skima_careers`.
+- Routed Nykaa in `scraper/portal_reader.py` (`_ATS_OVERRIDES` + `india_only=True` override).
+- Updated `KNOWN_PORTALS.md` Nykaa row to `✅ CRACKED 2026-05-02`.
+
+### Session 2026-05-02 — Tech Mahindra cracked (URL + endpoint fix)
+
+**Objective:** Resolve Tech Mahindra from `url-changed`/broken to a stable scrape route.
+
+**Validation performed:**
+- Confirmed `https://www.techmahindra.com/en-in/careers/` returns 404.
+- Confirmed `https://www.techmahindra.com/careers/` returns 200 and links `Join Us` to `https://careers.techmahindra.com/`.
+- Confirmed `GET https://careers.techmahindra.com/` returns 200 with HTML job cards and direct detail links: `JobDetails.aspx?JobCode=...`.
+- Confirmed `GET JobDetails.aspx?...` pages contain full `Job Description`, `Location`, and apply controls.
+
+**Docs updated:**
+- `KNOWN_PORTALS.md` Tech Mahindra row updated to `✅ cracked 2026-05-02` with new URL and extraction path.
+- `KNOWN_PORTALS.md` `SCRAPE_QUEUE` pending line for Tech Mahindra removed.
+
+### Session 2026-05-02 — Cisco cracked via browser cURL (Phenom SSR)
+
+**Objective:** Resolve Cisco from "needs investigation" to a reproducible direct scrape route.
+
+**Validation performed:**
+- Confirmed `https://careers.cisco.com/global/en/search-results?qcountry=India` returns embedded structured payload in page HTML: `phApp.ddo.eagerLoadRefineSearch`.
+- Confirmed India filter is active in payload: `ui_selections.country=["India"]`; country aggregation shows `India=226`.
+- Confirmed pagination works with `from=10&s=1` (10 jobs/page in embedded payload).
+- Confirmed job objects include scraper-ready fields: `jobId/reqId`, `title`, `location`, `descriptionTeaser`, `applyUrl`.
+
+**Docs updated:**
+- `KNOWN_PORTALS.md` Cisco row updated to `✅ cracked 2026-05-02` with endpoint + parsing notes.
+- `KNOWN_PORTALS.md` `SCRAPE_QUEUE` entry for Cisco removed (no longer pending).
+- `CODEX_HANDOFF.md` progress table/addendum updated with Cisco route details.
+
+### Session 2026-05-02 — Atlassian cracked via careers endpoint JSON
+
+**Objective:** Resolve Atlassian from broken Greenhouse token to a reproducible direct API route.
+
+**Validation performed:**
+- Confirmed `GET https://www.atlassian.com/company/careers/all-jobs?team=Interns%2CGraduates&location=&search=` is JS-rendered careers shell.
+- Confirmed bundled careers code resolves listing endpoint to `GET /endpoint/careers/listings` (production).
+- Confirmed `GET https://www.atlassian.com/endpoint/careers/listings` returns JSON array (`82` jobs in snapshot).
+- Confirmed records include scrapeable fields: `id`, `title`, `locations[]`, `overview`, `responsibilities`, `qualifications`, `applyUrl`.
+
+**Code + docs updated:**
+- `scraper/providers/generic_json.py` updated to parse `locations[]`, sectioned JD fields, and `applyUrl` (needed for Atlassian payload shape).
+- `KNOWN_PORTALS.md` Atlassian moved from Greenhouse to `CUSTOM / PROPRIETARY APIs` with `✅ CRACKED 2026-05-02`.
+- `KNOWN_PORTALS.md` `SCRAPE_QUEUE` Atlassian pending line removed.
+- `RUN_HISTORY.md` and `CODEX_HANDOFF.md` updated with validation notes.
+
 ### Session 2026-04-27 — Architecture V3 Phase 0 baseline freeze
 
 **Objective:** Run Phase 0 exactly as defined before Phase 1 modularization work.
@@ -514,7 +589,7 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
 - Ran `--dry-run`: **106 portals parsed** (43 direct API ⚡, 63 Firecrawl/js-required 🌐)
 - Direct API breakdown: Workday (18), SmartRecruiters (4), Greenhouse (2), Custom (5), SAP (6), Oracle (1), Phenom (4), Other-direct (3)
 - Firecrawl path: 63 companies (all [other] + eightfold + avature + some custom)
-- Missing from parse: Atlassian (broken Greenhouse token), Capgemini/HCL/MSCI (unconfirmed Workday slugs), Technip Energies (Oracle — dropped)
+- Missing from parse (historical): Atlassian (broken Greenhouse token; now resolved via custom endpoint on 2026-05-02), Capgemini/HCL/MSCI (unconfirmed Workday slugs), Technip Energies (Oracle — dropped)
 
 **Spot-check results (5-job test per ATS type):**
 
@@ -543,7 +618,7 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
 - Verify Phenom REST endpoints: BCG, PMI, Oliver Wyman (🟡 unverified API paths)
 - Fix broken Workday slugs: Capgemini, HCL Technologies, MSCI
 - Fix SmartRecruiters entries: Zomato, S&P Global, CRISIL (unconfirmed IDs)
-- Re-add Atlassian to Greenhouse (find new board token)
+- Atlassian resolved via `GET https://www.atlassian.com/endpoint/careers/listings` (custom route, not Greenhouse)
 - Fix Oracle HCM: Technip Energies (dropped from parse), EXL Digital (verify India filter)
 - Target: every ⚡ direct-API company returns ≥5 jobs with populated job_description
 

@@ -34,7 +34,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
 from providers import dispatch_scrape
 from enricher import enrich_job
-from writer import to_canonical, save_jobs, SCHEMA
+from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker
+from run_checkpoint import RunCheckpoint
+from typing import Callable
 from utils import company_slug
 from config import OUTPUT_BASE
 from validation import LOW_COUNT_THRESHOLD
@@ -43,16 +45,36 @@ from pipeline_validator import run_gate
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
 _GLOBAL_SCOPE_DEFAULT_CAP = 2000
+_DEFAULT_COMPANY_CAP = 1000
 
 _INTER_COMPANY_DELAY = 2   # seconds between companies
 
 
 def already_scraped(company: str) -> bool:
-    """Return True if this company has any jobs.json in All_CSV_Outputs."""
+    """Return True if this company has a *complete* scrape.
+
+    Priority:
+      1. jobs.complete marker present in any date folder (new system).
+      2. Legacy: jobs.json exists in a past date folder and no marker
+         (pre-marker era runs — assume complete if not today).
+    A partial jobs.json in today's folder without a marker = incomplete.
+    """
     outputs_dir = Path(OUTPUT_BASE) / company_slug(company) / "Outputs"
     if not outputs_dir.exists():
         return False
-    return any(p.name == "jobs.json" for p in outputs_dir.rglob("jobs.json"))
+
+    today = datetime.now().strftime("%Y_%m_%d")
+
+    for date_dir in outputs_dir.iterdir():
+        if not date_dir.is_dir():
+            continue
+        if (date_dir / COMPLETE_MARKER_NAME).exists():
+            return True
+        # Legacy fallback: past date folder with jobs.json but no marker
+        if date_dir.name < today and (date_dir / "jobs.json").exists():
+            return True
+
+    return False
 
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
@@ -78,12 +100,13 @@ def setup_logging(log_dir: str = "../logs") -> logging.Logger:
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 def scrape_portal(portal: dict, log: logging.Logger, max_jobs: int | None = None,
-                  validate_mode: bool = False) -> list[dict]:
+                  validate_mode: bool = False, on_page_complete=None) -> list[dict]:
     return dispatch_scrape(
         portal,
         log,
         max_jobs=max_jobs,
         validate_mode=validate_mode,
+        on_page_complete=on_page_complete,
     )
 
 
@@ -121,14 +144,53 @@ def run_company_scrapers(log: logging.Logger) -> set[str]:
     return done
 
 
+# ── Page-flush callback ───────────────────────────────────────────────────────
+
+def _make_page_callback(
+    company: str,
+    output_base: str,
+    checkpoint: RunCheckpoint | None,
+    log: logging.Logger,
+) -> Callable[[list[dict], int], None]:
+    """Return a callback that normalises + saves a raw page chunk to disk.
+
+    Called by Workday/Taleo after each page's JDs are fetched.
+    Writes jobs.complete=False (write_marker=False) so already_scraped() correctly
+    sees the run as incomplete until the final save_jobs() stamps the marker.
+    """
+    pages_flushed = [0]
+
+    def on_page_complete(raw_page_jobs: list[dict], page: int) -> None:
+        if not raw_page_jobs:
+            return
+        canonical_chunk = [to_canonical(j, company) for j in raw_page_jobs]
+        canonical_chunk = [j for j in canonical_chunk if j.get("job_id")]
+        if not canonical_chunk:
+            return
+        try:
+            _, new_count = save_jobs(company, canonical_chunk,
+                                     output_base=output_base, write_marker=False)
+            pages_flushed[0] += 1
+            total_so_far = pages_flushed[0] * len(canonical_chunk)
+            if checkpoint:
+                checkpoint.update_progress(company, page=page, jobs_so_far=total_so_far)
+            if new_count:
+                log.debug(f"  [PAGE {page}] flushed {new_count} new jobs ({company})")
+        except Exception as e:
+            log.warning(f"  [PAGE FLUSH] error at page {page} for {company}: {e}")
+
+    return on_page_complete
+
+
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         max_jobs: int | None = None, output_base: str = OUTPUT_BASE,
-        validate_mode: bool = False, scope: str = "india") -> dict:
+        validate_mode: bool = False, scope: str = "india",
+        checkpoint: RunCheckpoint | None = None) -> dict:
     summary = {
         "scope": scope,
-        "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "run_id": checkpoint.run_id if checkpoint else datetime.now().strftime("%Y%m%d_%H%M%S"),
         "processed": 0, "skipped": 0, "total_new": 0,
         "total_validation_drops": 0,
         "unresolved": [],
@@ -144,11 +206,18 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         js_flag = "  [JS/Firecrawl extract]" if portal.get("js_required") else ""
         log.info(f"[{idx}/{total}] {company}  ({ats}){js_flag}")
 
+        if checkpoint:
+            checkpoint.start(company, ats)
+
         # ── Scrape ────────────────────────────────────────────────────────────
+        page_cb = _make_page_callback(company, output_base, checkpoint, log)
         try:
-            raw_jobs = scrape_portal(portal, log, max_jobs=max_jobs, validate_mode=validate_mode)
+            raw_jobs = scrape_portal(portal, log, max_jobs=max_jobs, validate_mode=validate_mode,
+                                     on_page_complete=page_cb)
         except Exception as e:
             log.error(f"  FATAL scrape error — {company}: {e}")
+            if checkpoint:
+                checkpoint.mark_failed(company, reason=f"scrape_exception: {e}")
             summary["errors"].append({"company": company, "stage": "scrape", "error": str(e)})
             summary["unresolved"].append({
                 "company": company,
@@ -162,6 +231,8 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
 
         if not raw_jobs:
             log.info(f"  0 {scope} jobs — skipping")
+            if checkpoint:
+                checkpoint.mark_failed(company, reason="no_jobs_returned")
             summary["unresolved"].append({
                 "company": company,
                 "ats": ats,
@@ -221,9 +292,12 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             log.info(f"  LLM enrichment: {ok} ok  {fail} failed")
 
         # ── Save ──────────────────────────────────────────────────────────────
+        _run_id = checkpoint.run_id if checkpoint else ""
         try:
-            path, new_count = save_jobs(company, enriched, output_base=output_base)
+            path, new_count = save_jobs(company, enriched, output_base=output_base, run_id=_run_id)
             log.info(f"  Saved {new_count} new jobs → {path}")
+            if checkpoint:
+                checkpoint.mark_complete(company, job_count=len(enriched))
             if len(raw_jobs) < LOW_COUNT_THRESHOLD:
                 log.warning(f"  LOW COUNT: {len(raw_jobs)} scraped job(s) for {company}")
                 summary["low_count"].append({
@@ -245,6 +319,8 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             summary["total_new"] += new_count
         except Exception as e:
             log.error(f"  FATAL save error — {company}: {e}")
+            if checkpoint:
+                checkpoint.mark_failed(company, reason=f"save_exception: {e}")
             summary["unresolved"].append({
                 "company": company,
                 "ats": ats,
@@ -372,8 +448,10 @@ def enrich_only_run(log: logging.Logger) -> None:
         total_enriched += ok
         total_failed   += fail
 
-        # Write back JSON
-        json_path.write_text(json.dumps(jobs, indent=2, ensure_ascii=False), encoding='utf-8')
+        # Write back JSON (atomic: tmp → rename)
+        tmp_path = json_path.with_name("jobs.tmp.json")
+        tmp_path.write_text(json.dumps(jobs, indent=2, ensure_ascii=False), encoding='utf-8')
+        tmp_path.rename(json_path)
 
         # Rewrite CSV
         csv_path = json_path.with_name("jobs.csv")
@@ -385,6 +463,9 @@ def enrich_only_run(log: logging.Logger) -> None:
                 row['main_skills'] = ', '.join(job.get('main_skills') or [])
                 row['side_skills'] = ', '.join(job.get('side_skills') or [])
                 w.writerow(row)
+
+        # Marker after both JSON and CSV succeed
+        write_complete_marker(json_path.parent, len(jobs), ok)
 
     log.info(f"Enrich-only complete — {total_enriched} enriched, {total_failed} failed")
 
@@ -402,8 +483,13 @@ def main():
     parser.add_argument("--with-company-scrapers", action="store_true", help="Run company_scrapers/ scripts before KNOWN_PORTALS phase")
     parser.add_argument("--scope", choices=["india", "global"], default="india",
                         help="Job geography scope (default: india).")
-    parser.add_argument("--global-cap", type=int, default=_GLOBAL_SCOPE_DEFAULT_CAP,
-                        help=f"Max jobs per company when --scope global (default: {_GLOBAL_SCOPE_DEFAULT_CAP}).")
+    parser.add_argument("--company-cap", type=int, default=_DEFAULT_COMPANY_CAP,
+                        help=f"Max jobs per company for all runs (default: {_DEFAULT_COMPANY_CAP}). Set 0 for no cap.")
+    parser.add_argument("--global-cap", type=int, default=None,
+                        help=f"Alias for --company-cap (kept for backward compat).")
+    parser.add_argument("--resume-run", metavar="RUN_ID",
+                        help="Resume a specific interrupted run by its run_id "
+                             "(e.g. 20260430_141922). Skips companies marked complete in that run.")
     parser.add_argument("--validate",              action="store_true",
                         help=f"Validation run: scrape {_VALIDATE_MAX_JOBS} jobs/company, no enrichment, "
                              f"write to validation_outputs/ — use to verify column coverage across all portals")
@@ -416,19 +502,19 @@ def main():
         return
 
     # --validate: cap to 5 jobs/company, no enrichment, separate output folder
-    # --scope global: cap company output to avoid unbounded runs
+    # --company-cap: per-company limit applied on all runs (default 1000); 0 = unlimited
     validate_mode = args.validate
     if validate_mode:
         max_jobs = _VALIDATE_MAX_JOBS
-    elif args.scope == "global":
-        max_jobs = args.global_cap
     else:
-        max_jobs = None
-    output_base   = _VALIDATE_OUTPUT_BASE if validate_mode else OUTPUT_BASE
+        # --global-cap is a backward-compat alias; explicit --company-cap wins
+        raw_cap = args.global_cap if args.global_cap is not None else args.company_cap
+        max_jobs = raw_cap if raw_cap else None
+    output_base = _VALIDATE_OUTPUT_BASE if validate_mode else OUTPUT_BASE
     if validate_mode:
         log.info(f"VALIDATE MODE: max {_VALIDATE_MAX_JOBS} jobs/company → {output_base}")
-    elif args.scope == "global":
-        log.info(f"GLOBAL MODE: cap {max_jobs} jobs/company")
+    elif max_jobs:
+        log.info(f"Cap: {max_jobs} jobs/company")
 
     scraped_slugs: set[str] = set()
     if args.with_company_scrapers:
@@ -446,11 +532,30 @@ def main():
         portals = [p for p in portals if args.company.lower() in p["company"].lower()]
     if args.ats:
         portals = [p for p in portals if p["ats"] == args.ats.lower()]
-    if args.resume:
+    # ── Determine resume checkpoint (--resume-run or auto-detect via --resume) ──
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    resume_checkpoint: RunCheckpoint | None = None
+
+    if args.resume_run:
+        resume_checkpoint = RunCheckpoint.load(args.resume_run, log_dir)
+        if not resume_checkpoint:
+            log.warning(f"--resume-run: checkpoint {args.resume_run} not found — running fresh")
+    elif args.resume:
+        resume_checkpoint = RunCheckpoint.load_latest_partial(log_dir)
+        if resume_checkpoint:
+            log.info(f"--resume: auto-detected partial run {resume_checkpoint.run_id}")
+
+    # ── Filter already-done companies ─────────────────────────────────────────
+    if resume_checkpoint:
+        before = len(portals)
+        portals = [p for p in portals if not resume_checkpoint.is_complete(p["company"])]
+        label = f"--resume-run {resume_checkpoint.run_id}" if args.resume_run else "--resume (checkpoint)"
+        log.info(f"{label}: skipping {before - len(portals)} complete, {len(portals)} remaining")
+    elif args.resume:
+        # No checkpoint found — fall back to file-date comparison
         before = len(portals)
         portals = [p for p in portals if not already_scraped(p["company"])]
-        skipped = before - len(portals)
-        log.info(f"--resume: skipping {skipped} already-scraped companies, {len(portals)} remaining")
+        log.info(f"--resume (file-date): skipping {before - len(portals)} already-scraped, {len(portals)} remaining")
 
     # Scope override:
     # india  -> force India filtering across adapters
@@ -467,18 +572,31 @@ def main():
     if args.dry_run:
         return
 
+    # Create checkpoint for this run (always — not only on --resume)
+    run_id  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    checkpoint = resume_checkpoint or RunCheckpoint.new(run_id, log_dir)
+    if resume_checkpoint:
+        log.info(f"Resuming run_id={checkpoint.run_id}")
+    else:
+        log.info(f"Checkpoint: logs/checkpoint_{run_id}.json")
+
     log.info("─" * 60)
     summary = run(portals, skip_enrich=args.skip_enrich or validate_mode, log=log,
                   max_jobs=max_jobs, output_base=output_base,
-                  validate_mode=validate_mode, scope=args.scope)
+                  validate_mode=validate_mode, scope=args.scope,
+                  checkpoint=checkpoint)
 
     log.info("─" * 60)
     log.info(f"RUN COMPLETE")
+    log.info(f"  Run ID              : {checkpoint.run_id}")
     log.info(f"  Companies processed : {summary['processed']}")
     log.info(f"  Companies skipped   : {summary['skipped']}")
     log.info(f"  Total new jobs      : {summary['total_new']}")
     log.info(f"  Started             : {summary['start']}")
     log.info(f"  Ended               : {summary['end']}")
+    cp_summary = checkpoint.summary()
+    log.info(f"  Checkpoint states   : complete={cp_summary['complete']} "
+             f"failed={cp_summary['failed']} partial={cp_summary['in_progress']}")
 
     if summary["errors"]:
         log.warning(f"  Errors ({len(summary['errors'])}):")

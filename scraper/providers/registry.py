@@ -14,6 +14,15 @@ from providers.mckinsey import McKinseyProvider
 from providers.aditya_birla import AdityaBirlaProvider
 from providers.pcsx import PCSXProvider
 from providers.taleo import TaleoProvider
+from providers.talentbrew import TalentBrewProvider
+from providers.phenom_ssr import PhenomSSRProvider
+from providers.siemens_externaljobs import SiemensExternalJobsProvider
+from providers.deloitte_usi import DeloitteUSIProvider
+from providers.yello import YelloProvider
+from providers.sap_jobs2web_html import SAPJobs2WebHTMLProvider
+from providers.pepsico_jobs_api import PepsiCoJobsAPIProvider
+from providers.skima_careers import SkimaCareersProvider
+from providers.hm_wp_jobs import HMWordPressJobsProvider
 from providers.pinpoint import PinpointProvider
 from providers.spire2grow import Spire2GrowProvider
 from providers.zwayam import ZwayamProvider
@@ -42,6 +51,15 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "pinpoint": PinpointProvider(),
     "pcsx": PCSXProvider(),
     "taleo": TaleoProvider(),
+    "talentbrew": TalentBrewProvider(),
+    "phenom_ssr": PhenomSSRProvider(),
+    "siemens_externaljobs": SiemensExternalJobsProvider(),
+    "deloitte_usi": DeloitteUSIProvider(),
+    "yello": YelloProvider(),
+    "sap_jobs2web_html": SAPJobs2WebHTMLProvider(),
+    "pepsico_jobs_api": PepsiCoJobsAPIProvider(),
+    "skima_careers": SkimaCareersProvider(),
+    "hm_wp_jobs": HMWordPressJobsProvider(),
     "spire2grow": Spire2GrowProvider(),
     "zwayam": ZwayamProvider(),
 }
@@ -109,6 +127,7 @@ def dispatch_scrape(
     *,
     max_jobs: int | None = None,
     validate_mode: bool = False,
+    on_page_complete=None,  # Callable[[list[dict], int], None] | None — Workday/Taleo only
 ) -> list[dict]:
     provider = _provider_for_portal(portal)
 
@@ -121,7 +140,13 @@ def dispatch_scrape(
             validate_mode=validate_mode,
         )
 
-    result = provider.scrape(portal, max_jobs=max_jobs, validate_mode=validate_mode)
+    # Only Workday and Taleo support page-level callbacks — others ignore the param safely
+    supports_callback = isinstance(provider, (WorkdayProvider, TaleoProvider))
+    scrape_kwargs: dict = {"max_jobs": max_jobs, "validate_mode": validate_mode}
+    if on_page_complete and supports_callback:
+        scrape_kwargs["on_page_complete"] = on_page_complete
+
+    result = provider.scrape(portal, **scrape_kwargs)
 
     # Log typed reason for non-success outcomes (aids debugging without log-string parsing)
     if result.reason not in (ScrapeReason.SUCCESS, ScrapeReason.NO_JOBS, ScrapeReason.FALLBACK):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Firecrawl cloud API client — uses the official firecrawl-py SDK.
 

@@ -37,6 +37,7 @@ class WorkdayProvider:
         *,
         max_jobs: int | None = None,
         validate_mode: bool = False,
+        on_page_complete=None,
     ) -> ProviderResult:
         # Skip API entirely for Cloudflare-blocked tenants — go straight to Firecrawl
         if portal.get('workday_blocked'):
@@ -50,7 +51,7 @@ class WorkdayProvider:
                 portal=fallback_portal,
             )
 
-        jobs, reason = scrape_workday(portal, max_jobs=max_jobs)
+        jobs, reason = scrape_workday(portal, max_jobs=max_jobs, on_page_complete=on_page_complete)
 
         # Global mode returned 0 or blocked → retry with India UUID before giving up
         if not portal.get('india_only', True):
@@ -61,7 +62,7 @@ class WorkdayProvider:
             if should_retry:
                 _log.info(f"    [RETRY] Global 0/422 — retrying {portal.get('company','')} with India UUID")
                 india_portal = {**portal, 'india_only': True}
-                jobs2, reason2 = scrape_workday(india_portal, max_jobs=max_jobs)
+                jobs2, reason2 = scrape_workday(india_portal, max_jobs=max_jobs, on_page_complete=on_page_complete)
                 if jobs2 is not None and (len(jobs2) > 0 or jobs is None):
                     return ProviderResult(jobs=jobs2, reason=reason2)
                 # India UUID also failed → fall through to Firecrawl
@@ -91,7 +92,9 @@ class WorkdayProvider:
 
 
 def scrape_workday(
-    portal: Portal, max_jobs: int | None = None
+    portal: Portal,
+    max_jobs: int | None = None,
+    on_page_complete=None,  # Callable[[list[dict], int], None] | None
 ) -> tuple[list[dict] | None, ScrapeReason]:
     """
     Returns (jobs, reason):
@@ -134,7 +137,7 @@ def scrape_workday(
     referer = '/'.join(parts[:3]) + '/' + parts[-2] if len(parts) >= 8 else endpoint
     headers = {**_HEADERS, "Referer": referer}
 
-    jobs, offset = [], 0
+    jobs, offset, page_num = [], 0, 0
     seen_ids: set[str] = set()
     while True:
         if not india_only:
@@ -162,6 +165,7 @@ def scrape_workday(
             break
 
         postings = data.get('jobPostings', [])
+        page_jobs: list[dict] = []
         new_on_page = 0
         for p in postings:
             jid = p.get('jobReqId') or ''
@@ -180,7 +184,7 @@ def scrape_workday(
                 continue
             bf  = p.get('bulletFields') or []
             bu  = bf[1] if len(bf) > 1 else None
-            jobs.append({
+            job = {
                 'job_id':          jid or job_hash(p.get('title', ''), url),
                 'title':           p.get('title', ''),
                 'job_url':         url,
@@ -192,7 +196,16 @@ def scrape_workday(
                 'source_platform': 'Workday',
                 'industry':        portal.get('industry', ''),
                 '_ext':            ext,
-            })
+            }
+            page_jobs.append(job)
+            jobs.append(job)
+
+        # Per-page JD fetch + flush when callback is wired (durability mode)
+        if on_page_complete and page_jobs:
+            _fetch_workday_jds(page_jobs, portal)
+            on_page_complete(page_jobs, page_num)
+
+        page_num += 1
 
         if new_on_page == 0 or len(postings) < WORKDAY_PAGE_SIZE:
             break
@@ -207,6 +220,7 @@ def scrape_workday(
     if max_jobs:
         jobs = jobs[:max_jobs]
 
+    # Bulk JD fetch for jobs still missing JDs (no-callback path, or jobs added before callback era)
     _fetch_workday_jds(jobs, portal)
     reason = ScrapeReason.SUCCESS if jobs else ScrapeReason.NO_JOBS
     return jobs, reason

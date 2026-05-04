@@ -26,7 +26,9 @@ class Portal(TypedDict, total=False):
     # Universal
     company:      str   # display name — must match company_industries.json key
     ats:          str   # workday | smartrecruiters | greenhouse | lever | phenom_api
-                        # | sap | oracle | eightfold | avature | custom | other
+                        # | phenom_ssr | yello | sap_jobs2web_html | pepsico_jobs_api
+                        # | skima_careers | hm_wp_jobs | deloitte_usi
+                        # | sap | oracle | eightfold | avature | talentbrew | custom | other
     endpoint:     str   # URL to hit
     careers_url:  str   # human-facing careers page (fallback / reference)
     js_required:  bool  # True → route through FirecrawlJSProvider
@@ -63,9 +65,12 @@ CANONICAL_FIELDS: list[str] = [
     "job_title",
     "job_description",
     "industry",
+    "industry_group",
     "company_name",
     "location",
+    "location_city",
     "apply_url",
+    "role_domain",
     "main_skills",
     "side_skills",
     "batch_date",

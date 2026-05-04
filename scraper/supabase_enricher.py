@@ -50,6 +50,31 @@ PAGE_SIZE = 500
 MIN_DESC_LEN = 200
 MIN_JD_SCRAPE_LEN = 300  # minimum chars for a scraped JD to be considered valid
 
+_SKILL_ID_CACHE: dict[str, int] | None = None
+
+
+def _get_skill_id_map(sb: Client) -> dict[str, int]:
+    """Load skills.taxonomy_key → skills.id map. Cached after first call."""
+    global _SKILL_ID_CACHE
+    if _SKILL_ID_CACHE is not None:
+        return _SKILL_ID_CACHE
+    skill_map: dict[str, int] = {}
+    page, page_size = 0, 1000
+    while True:
+        batch = (
+            sb.table("skills").select("id, taxonomy_key")
+            .range(page * page_size, (page + 1) * page_size - 1)
+            .execute()
+        ).data or []
+        for row in batch:
+            if row.get("taxonomy_key") and row.get("id"):
+                skill_map[row["taxonomy_key"]] = row["id"]
+        if len(batch) < page_size:
+            break
+        page += 1
+    _SKILL_ID_CACHE = skill_map
+    return skill_map
+
 
 def _supabase() -> Client:
     url = os.getenv("SUPABASE_URL", "")
@@ -63,22 +88,36 @@ def _supabase() -> Client:
 # ── Mode 1: Skill enrichment ──────────────────────────────────────────────────
 
 def fetch_unenriched(sb: Client, company: str | None, limit: int | None) -> list[dict]:
-    """Pull rows with job_description but no main_skills."""
+    """Pull jobs that have a description but no job_skills rows."""
+    # Get all job_ids that already have skills in job_skills
+    enriched_ids: set[str] = set()
+    page, page_size = 0, 1000
+    while True:
+        batch = (
+            sb.table("job_skills").select("job_id")
+            .range(page * page_size, (page + 1) * page_size - 1)
+            .execute()
+        ).data or []
+        enriched_ids.update(r["job_id"] for r in batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+
     results: list[dict] = []
     page = 0
     while True:
         q = (
             sb.table(TABLE)
             .select("job_id,job_title,job_description,company_name,location,industry,apply_url")
-            .or_("main_skills.is.null,main_skills.eq.{}")
             .gt("job_description", "")
             .order("company_name")
             .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
         )
         if company:
             q = q.eq("company_name", company)
-        batch = q.execute().data
-        results.extend(batch)
+        batch = q.execute().data or []
+        # Filter out already-enriched jobs
+        results.extend(r for r in batch if r["job_id"] not in enriched_ids)
         if len(batch) < PAGE_SIZE:
             break
         if limit and len(results) >= limit:
@@ -91,10 +130,36 @@ def fetch_unenriched(sb: Client, company: str | None, limit: int | None) -> list
     return results
 
 
-def update_skills(sb: Client, job_id: str, main_skills: list[str], side_skills: list[str]) -> None:
-    sb.table(TABLE).update(
-        {"main_skills": main_skills, "side_skills": side_skills}
-    ).eq("job_id", job_id).execute()
+def write_job_skills(
+    sb: Client, job_id: str, main_skills: list[str], side_skills: list[str]
+) -> tuple[int, list[str]]:
+    """
+    Resolve skill names → skill_ids and upsert to job_skills.
+    Returns (rows_written, list_of_unresolved_skill_names).
+    Skills not found in the `skills` table are logged as taxonomy drift and skipped.
+    """
+    skill_id_map = _get_skill_id_map(sb)
+    rows: list[dict] = []
+    unresolved: list[str] = []
+
+    for skill in main_skills:
+        sid = skill_id_map.get(skill)
+        if sid:
+            rows.append({"job_id": job_id, "skill_id": sid, "is_primary": True})
+        else:
+            unresolved.append(skill)
+
+    for skill in side_skills:
+        sid = skill_id_map.get(skill)
+        if sid:
+            rows.append({"job_id": job_id, "skill_id": sid, "is_primary": False})
+        else:
+            unresolved.append(skill)
+
+    if rows:
+        sb.table("job_skills").upsert(rows, on_conflict="job_id,skill_id").execute()
+
+    return len(rows), unresolved
 
 
 def _enrich_one(job: dict) -> tuple[str, list[str], list[str]]:
@@ -127,7 +192,9 @@ def run_enrich(sb: Client, jobs: list[dict], dry_run: bool, workers: int) -> Non
             try:
                 job_id, ms, ss = fut.result()
                 if ms:
-                    update_skills(sb, job_id, ms, ss)
+                    written, drift = write_job_skills(sb, job_id, ms, ss)
+                    if drift:
+                        log.warning(f"  [{i}] Taxonomy drift for {job.get('job_title')}: {drift}")
                     ok += 1
                 else:
                     log.warning(f"  [{i}] No skills: {job.get('job_title')} ({job['job_id']})")

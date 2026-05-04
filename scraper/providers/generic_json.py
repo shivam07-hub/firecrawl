@@ -269,11 +269,23 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
 
         raw_loc = (
             p.get('normalized_location') or p.get('location') or
-            p.get('full_location') or p.get('city') or p.get('country') or ''
+            p.get('full_location') or p.get('city') or p.get('country') or
+            p.get('locations') or ''
         )
-        loc = raw_loc if isinstance(raw_loc, str) else (
-            raw_loc.get('city') or raw_loc.get('name') or ''
-        )
+        if isinstance(raw_loc, str):
+            loc = raw_loc
+        elif isinstance(raw_loc, dict):
+            loc = raw_loc.get('city') or raw_loc.get('name') or raw_loc.get('label') or ''
+        elif isinstance(raw_loc, list):
+            loc_parts = []
+            for x in raw_loc:
+                if isinstance(x, str):
+                    loc_parts.append(x)
+                elif isinstance(x, dict):
+                    loc_parts.append(x.get('city') or x.get('name') or x.get('label') or '')
+            loc = ' | '.join([s for s in loc_parts if s])
+        else:
+            loc = ''
 
         india_only = portal.get('india_only', True)
         if india_only and not is_india(loc):
@@ -284,11 +296,21 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
             p.get('content') or p.get('summary') or
             p.get('postingDescription') or ''
         )
+        if not raw_jd:
+            # Atlassian / similar portals split JD across multiple sections.
+            jd_parts = []
+            if p.get('overview'):
+                jd_parts.append(f"Overview: {p.get('overview')}")
+            if p.get('responsibilities'):
+                jd_parts.append(f"Responsibilities: {p.get('responsibilities')}")
+            if p.get('qualifications'):
+                jd_parts.append(f"Qualifications: {p.get('qualifications')}")
+            raw_jd = strip_html('\n\n'.join(jd_parts))
         job_path = p.get('job_path', '')
         ref_code = p.get('referenceCode') or ''
         job_url = (
             p.get('url') or p.get('job_url') or p.get('absolute_url') or
-            p.get('apply_job_url') or p.get('ref') or
+            p.get('apply_job_url') or p.get('applyUrl') or p.get('ref') or
             (f"https://jobs.zs.com/all/jobs/{p.get('slug')}" if p.get('slug') else '') or
             (f"https://career.infosys.com/jobdesc?referenceCode={ref_code}" if ref_code else '') or
             (f"https://www.amazon.jobs{job_path}" if job_path else '') or ''

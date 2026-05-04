@@ -42,10 +42,11 @@ class TaleoProvider:
         *,
         max_jobs: int | None = None,
         validate_mode: bool = False,
+        on_page_complete=None,
     ) -> ProviderResult:
         # Detect v1 REST API (StanChart pattern) vs classic Taleo TBE
         if portal.get("taleo_v1") or "/recruiting/v1/" in portal.get("endpoint", ""):
-            jobs = _scrape_taleo_v1(portal, max_jobs=max_jobs)
+            jobs = _scrape_taleo_v1(portal, max_jobs=max_jobs, on_page_complete=on_page_complete)
         else:
             jobs = _scrape_taleo(portal, max_jobs=max_jobs)
         if jobs is None:
@@ -122,7 +123,7 @@ def _scrape_taleo(portal: Portal, max_jobs: int | None = None) -> list[dict] | N
     return jobs
 
 
-def _scrape_taleo_v1(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
+def _scrape_taleo_v1(portal: Portal, max_jobs: int | None = None, on_page_complete=None) -> list[dict] | None:
     """Taleo Enterprise v1 REST API — used by Standard Chartered and similar.
     POST /services/recruiting/v1/jobs → jobSearchResult[].response
     Pagination via pageNumber (0-indexed, 10 results/page default).
@@ -138,13 +139,15 @@ def _scrape_taleo_v1(portal: Portal, max_jobs: int | None = None) -> list[dict] 
     jobs: list[dict] = []
     page = 0
 
+    use_location = portal.get("taleo_use_location", False)
+
     while True:
         body = {
-            "locale": "en_GB",
+            "locale": "en_US",
             "pageNumber": page,
             "sortBy": "",
-            "keywords": "india" if india_only else "",
-            "location": "",
+            "keywords": "" if use_location else ("india" if india_only else ""),
+            "location": ("india" if india_only else "") if use_location else "",
             "facetFilters": {},
             "brand": "",
             "skills": [],
@@ -164,15 +167,26 @@ def _scrape_taleo_v1(portal: Portal, max_jobs: int | None = None) -> list[dict] 
         if not results:
             break
 
+        page_jobs: list[dict] = []
         for item in results:
             resp = item.get("response", item)
             title = (resp.get("unifiedStandardTitle") or "").strip()
             if not title:
                 continue
 
-            locs = resp.get("jobLocationShort") or []
-            countries = resp.get("jobLocationCountry") or []
-            loc = (locs[0] if locs else "") or (countries[0] if countries else "")
+            def _first(v):
+                if isinstance(v, list):
+                    for x in v:
+                        if x:
+                            return str(x).strip()
+                    return ""
+                if isinstance(v, str):
+                    return v.strip()
+                return ""
+
+            city = _first(resp.get("jobLocationShort")) or _first(resp.get("custprimecity"))
+            country = _first(resp.get("jobLocationCountry")) or _first(resp.get("custCountryRegion"))
+            loc = ", ".join([x for x in (city, country) if x]) if city and country else (city or country)
 
             if india_only and not is_india(loc):
                 continue
@@ -180,25 +194,49 @@ def _scrape_taleo_v1(portal: Portal, max_jobs: int | None = None) -> list[dict] 
             jid = str(resp.get("id") or "")
             urltitle = resp.get("unifiedUrlTitle") or jid
             apply_url = f"{base}/job/{urltitle}/{jid}/" if jid else ""
+            raw_jd = ""
+            if jid:
+                # Some SAP/Jobs2Web tenants use locale-suffixed paths (/1705-en_US).
+                # Try canonical URL first, then locale variants and keep the one that works.
+                variants = [
+                    apply_url,
+                    f"{base}/job/{urltitle}/{jid}-en_US",
+                    f"{base}/job/{urltitle}/{jid}-en_US/",
+                ]
+                for u in variants:
+                    raw_jd = _fetch_jd(session, u)
+                    if raw_jd:
+                        apply_url = u
+                        break
 
-            raw_jd = _fetch_jd(session, apply_url) if apply_url else ""
+            bu = resp.get("mfield1")
+            if isinstance(bu, list):
+                bu = bu[0] if bu else None
 
-            jobs.append({
+            job = {
                 "job_id":          jid,
                 "title":           title,
                 "job_url":         apply_url,
                 "source_api_url":  endpoint,
-                "business_unit":   (resp.get("mfield1") or [None])[0],
+                "business_unit":   bu,
                 "raw_jd_text":     raw_jd,
                 "location_city":   loc,
                 "date_posted":     resp.get("unifiedStandardStart"),
                 "source_platform": "TaleoV1",
                 "industry":        portal.get("industry", ""),
-            })
+            }
+            page_jobs.append(job)
+            jobs.append(job)
 
             if max_jobs and len(jobs) >= max_jobs:
+                if on_page_complete and page_jobs:
+                    on_page_complete(page_jobs, page)
                 _log.info(f"    {len(jobs)} India jobs via Taleo v1 ({portal['company']})")
                 return jobs
+
+        # Flush this page to disk before fetching the next (JDs already inline above)
+        if on_page_complete and page_jobs:
+            on_page_complete(page_jobs, page)
 
         total = data.get("totalJobs", 0)
         if len(jobs) >= total or len(results) < 10:
@@ -216,16 +254,43 @@ def _fetch_jd(session: requests.Session, job_url: str) -> str:
     except Exception:
         return ""
 
+    final_url = (r.url or "").lower()
+    if "/errorpage/" in final_url or "errortype=exception" in final_url:
+        return ""
+
     soup = BeautifulSoup(r.text, "html.parser")
     # Remove scripts/styles
     for tag in soup(["script", "style", "nav", "header", "footer"]):
         tag.decompose()
+
+    # Drop common consent/OneTrust blocks so cookie text doesn't dominate JD extraction.
+    for tag in list(soup.find_all(True)):
+        if not getattr(tag, "attrs", None):
+            continue
+        class_tokens = [c.lower() for c in tag.get("class", [])]
+        id_token = (tag.get("id") or "").lower()
+        blob = " ".join(class_tokens + [id_token])
+        if any(k in blob for k in ("cookie", "consent", "optanon", "ot-sdk")):
+            tag.decompose()
+
+    # Prefer known job-content containers (SAP/Jobs2Web pattern on HCL and similar sites).
+    for sel in ("div.joblayouttoken", "div.jobColumnOne", "div.jobDisplay", "div.jobDisplayShell"):
+        for node in soup.select(sel):
+            text = node.get_text(separator=" ", strip=True)
+            if len(text) < 200:
+                continue
+            low = text.lower()
+            if "job summary" in low or "job description" in low or "responsibilities" in low:
+                return text[:8000]
 
     # Look for largest meaningful text block
     candidates = []
     for tag in soup.find_all(["div", "section", "article"]):
         text = tag.get_text(separator=" ", strip=True)
         if len(text) > 200:
+            low = text.lower()
+            if "cookie policy" in low and "accept all cookies" in low:
+                continue
             candidates.append(text)
 
     if not candidates:

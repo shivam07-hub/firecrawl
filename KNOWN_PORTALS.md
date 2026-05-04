@@ -1,5 +1,5 @@
 # KNOWN_PORTALS.md — Careers Portal Registry
-**Last verified: 2026-04-19 (Part 4) — 1-job investigation: Zomato confirmed 1 real job (⬇️); Wipro corrected ATS → SAP SF hcm55.sapsf.eu (auth-gated 🔴); Infosys confirmed Angular SPA (🔴 no direct API); Swiggy/Walmart confirmed JS-only (no public API). 10 small boutiques marked ⬇️ low-priority. Oracle _oracle() fix: careers_url now read → Firecrawl fallback unblocked for JP Morgan/Honeywell/TI/BNY.**
+**Last verified: 2026-05-02.** Crack session history → `RUN_HISTORY.md`.
 
 Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint | India Filter Param | Status | Notes
 
@@ -43,9 +43,8 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Baker Hughes | https://careers.bakerhughes.com/global/en/search-results?qcountry=India | bakerhughes | wd5 | BakerHughes | ? | 🔴 no India UUID — India facet not found in tenant; skip |
 | Dell | https://jobs.dell.com/en-us/search-jobs/India | dell | wd1 | External | ? | ✅ Workday tenant confirmed via XHR inspection 2026-04-16 |
 | Deutsche Bank | https://careers.db.com | db | wd3 | DBWebsite | ~521 | ✅ cracked 2026-04-29 — Country facet UUID in workday_registry.json; 521 India jobs |
-| Haleon | https://careers.haleon.com | gsknch | wd3 | GSKCareers | 25 | → moved to PHENOM CX section; primary portal is careers.haleon.com/api/pcsx/search; cracked 2026-04-29 |
 | Capgemini | https://www.capgemini.com/in-en/careers/job-search/ | ⚠️ NOT Workday | ⚠️ | ⚠️ NOT Workday — custom Azure API; see CUSTOM section | 921 | ✅ CRACKED — see CUSTOM / PROPRIETARY section |
-| HCL Technologies | https://careers.hcltech.com/go/India/9553955/ | hcltech | wd3 | ⚠️ career site name unconfirmed | ? | ⚠️ Workday tenant found, correct career_site slug needed — try: HCLTech_Careers, HCL_Careers |
+| HCL Technologies | https://careers.hcltech.com/go/India/9553955/ | hcltech | wd3 | — | 60 | 🔴 wrong ATS — endpoint confirmed as SAP SuccessFactors/Jobs2Web v1 (`/services/recruiting/v1/jobs`); moved to TALEO COMPANIES on 2026-04-30 |
 | MSCI | https://careers.msci.com/ | msci | wd3 | ⚠️ career site name unconfirmed | ? | ⚠️ Old portal (careers.msci.com) is 404. Moved to Workday (msci.wd3) — career_site slug unknown. Try: MSCI, MSCIExternal, MSCI_External |
 | Intel | https://jobs.intel.com/en/search | intel | wd1 | External | ~84 | ✅ working — searchText="india" mode (no India UUID in tenant); override in workday_registry.json; is_india() Python filter applied |
 | State Street | https://careers.statestreet.com | statestreet | wd1 | Global | 351 | ✅ working — 351 India jobs scraped with full JDs via CXS; probed 2026-04-19 |
@@ -57,16 +56,16 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Medtronic | https://www.medtronic.com/en-us/about/careers.html | medtronic | wd3 | MedtronicCareers | ? | 🟡 Workday confirmed via FC scrape — CXS returns 422 (Cloudflare); Firecrawl fallback via careers_url; probed 2026-04-19 |
 | Oracle | https://www.oracle.com/careers | oracle | wd1 | OracleJobs | ? | 🟡 Workday confirmed via FC scrape — CXS returns 422 (Cloudflare); Firecrawl fallback via careers_url; probed 2026-04-19 |
 | Bank of America | https://careers.bankofamerica.com | bankofamerica | wd1 | Global | ? | 🟡 Workday confirmed via FC scrape — CXS returns 422 (Cloudflare); Firecrawl fallback via careers_url; probed 2026-04-19 |
-| Siemens | https://new.siemens.com/global/en/company/jobs.html | siemens | wd3 | External | ? | 🟡 Workday confirmed via FC scrape on wd3 — CXS returns 401; Firecrawl fallback via careers_url; probed 2026-04-19 |
+| Siemens | https://new.siemens.com/global/en/company/jobs.html | siemens | wd3 | External | ? | 🔴 wrong ATS — jobs.siemens.com runs Siemens ExternalJobs (`/en_US/externaljobs/SearchJobs` + `/JobDetail/{id}`), not Workday CXS; moved to OTHER PLATFORMS on 2026-05-01 |
 | Inspire Brands | https://careers.inspirebrands.com | inspirebrands | wd1 | InspireBrandsCareers | ? | 🟡 Workday confirmed via FC scrape — CXS returns 422 (Cloudflare); Firecrawl fallback via careers_url; probed 2026-04-19 |
 | Ford | https://www.ford.com/careers/ | fordcareers | wd12 | Ford_Careers | ? | 🟡 Workday confirmed via FC scrape — CXS 422; FC fallback via `https://fordcareers.wd12.myworkdayjobs.com/en-US/Ford_Careers?q=india`; probed 2026-04-19 |
 | Unilever | https://careers.unilever.com/job-search?search%5B%5D=IN | unilever | wd3 | ⚠️ career_site unconfirmed | ? | 🟡 Workday confirmed — CXS 403; FC fallback via India-filtered careers.unilever.com URL; probed 2026-04-19 |
-| Adobe | https://careers.adobe.com/us/en/india | adobe | wd5 | external_experienced | ? | 🟡 Workday confirmed via page source (`adobe.wd5.myworkdayjobs.com/en-US/external_experienced`) — CXS 422; FC fallback; probed 2026-04-19 |
+| Adobe | https://careers.adobe.com/us/en/search-results | adobe | wd5 | external_experienced | ? | 🔴 wrong ATS for listing flow — careers.adobe.com is Phenom SSR (`refNum=ADOBUS`, `content-us.phenompeople.com`); moved to OTHER PLATFORMS on 2026-05-01 |
 | Hitachi Vantara | https://hitachivantara.wd3.myworkdayjobs.com/HitachiVantaraCareers | hitachivantara | wd3 | HitachiVantaraCareers | ? | 🟡 Workday confirmed — CXS 422 blocked; FC fallback via en-US URL with India filter; probed 2026-04-19 |
-| Thomson Reuters | https://thomsonreuters.com/en/careers.html | thomsonreuters | wd3 | tr_External_Applicant | ? | 🟡 Workday confirmed (`thomsonreuters.wd3/tr_External_Applicant`) — CXS 422; FC fallback; probed 2026-04-19 |
+| Thomson Reuters | https://thomsonreuters.com/en/careers.html | thomsonreuters | wd5 | External_Career_Site | 67 | ✅ cracked 2026-05-01 — CXS POST confirmed from browser (`/wday/cxs/thomsonreuters/External_Career_Site/jobs`); India facet `Location_Country=c4f78be1a8f14da0ab49ce1162348a5e` |
 | CGI | https://www.cgi.com/en/careers | cgicareers | wd3 | CGI | ? | 🟡 Workday confirmed (`cgicareers.wd3/CGI`) — CXS 422; FC fallback via careers_url; probed 2026-04-19 |
-| ADP | https://jobs.adp.com | adp | wd5 | ADP | ? | 🟡 Workday confirmed (`adp.wd5/ADP`) — CXS 422; FC fallback; probed 2026-04-19 |
-| Intuit | https://careers.intuit.com/job-search-results/?location=India | intuit | wd5 | Intuit | ? | 🟡 Workday tenant confirmed — CXS 422 blocked; careers.intuit.com returns only 212 chars (antibot); FC fallback on India-filtered URL; probed 2026-04-19 |
+| ADP | https://jobs.adp.com | adp | wd5 | ADP | ? | 🔴 wrong ATS — jobs.adp.com is Happydance/TalentBrew flow (server-rendered listings + detail pages); moved to OTHER PLATFORMS on 2026-05-01 |
+| Intuit | https://careers.intuit.com/job-search-results/?location=India | intuit | wd5 | Intuit | ? | 🔴 wrong ATS — jobs now confirmed on TalentBrew/Avature surface (`jobs.intuit.com`); moved to OTHER PLATFORMS on 2026-05-01 |
 | Samsung | https://job.samsung.com/en/search/?search_keyword=&career_type=1&search_country=IND | samsungelectronics | wd3 | ⚠️ career_site unconfirmed | ? | 🟡 Workday suspected (`samsungelectronics.wd3`) — CXS 422 blocked; job.samsung.com also FC-blocked; FC fallback via careers_url TBD; probed 2026-04-19 |
 | Carelon Global Solutions | https://www.carelonglobal.in/careers | elevancehealth | wd1 | carelonglobal_in | ? | 🟡 Workday confirmed (`elevancehealth.wd1/carelonglobal_in`) — only 7 total jobs, no India UUID found; FC fallback via careers_url; probed 2026-04-19 |
 | Target | https://careers.target.com/jobs | target | wd5 | TargetCareers | ~265 | ✅ working — searchText="india" mode (no India UUID in tenant); override in workday_registry.json; is_india() Python filter applied |
@@ -79,7 +78,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Barclays | https://search.jobs.barclays | barclays | wd3 | External_Career_Site_Barclays | 500+ | ✅ working — 500 India jobs (cap), 100% JD; 12 India office UUIDs via locations facet; scraped 2026-04-19 |
 | Maersk | https://www.maersk.com/careers/vacancies | maersk | wd3 | Maersk_Careers | 97 | ✅ working — 97 India jobs, 100% JD; 26 India office UUIDs via locations facet; scraped 2026-04-19 |
 | DXC Technology | https://careers.dxc.com | dxctechnology | wd1 | DXCJobs | 211 | ✅ working — 211 India jobs, 100% JD; facet=locationCountry; scraped 2026-04-19 |
-| ABB | https://careers.abb/global/en | abb | wd3 (suspected) | ⚠️ career_site unconfirmed | ? | ⚠️ Workday confirmed (official docs confirm Workday ATS) — tenant `abb.wd3` suspected; career_site slug TBD (try: ABBcareers, External, ABB_Careers); probe CXS; probed 2026-04-19 |
+| ABB | https://careers.abb/global/en | abb | wd3 (suspected) | — | 261 | 🔴 wrong ATS for listing flow — careers.abb runs Phenom SSR (`refNum=ABB1GLOBAL`) with embedded `phApp.ddo.eagerLoadRefineSearch.data.jobs`; moved to OTHER PLATFORMS on 2026-05-02 |
 | Juniper Networks | https://www.juniper.net/us/en/company/careers.html | ⚠️ HPE merger Jan 2024 | — | — | ? | ⚠️ Acquired by HPE (closed Jan 2024) — careers likely redirect to HPE Workday (`hpe.wd3`); verify if Juniper-branded portal still active or redirect to HPE; probed 2026-04-19 |
 
 ---
@@ -109,7 +108,6 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 | Company | Careers URL | Board Token | India Jobs | Status |
 |---------|-------------|-------------|-----------|--------|
-| Atlassian | https://www.atlassian.com/company/careers | atlassian | ? | ⚠️ broken — Greenhouse board token "atlassian" returns 404 as of 2026-04-11; token may have changed |
 | General Atlantic | https://www.generalatlantic.com/careers/ | generalatlantic | 0 | 🔴 0 India jobs — Greenhouse board confirmed but no India listings found; moved to end of registry |
 | Stripe | https://stripe.com/in/jobs | stripe | ~20 | ✅ working |
 | Storable | https://www.storable.com/careers | storable | ? | 🟡 Greenhouse board confirmed active (boards.greenhouse.io/storable); India jobs TBD; probed 2026-04-19 |
@@ -211,12 +209,15 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 ---
 
 ## TALEO COMPANIES
-*API: `POST https://{careers_domain}/services/jobs/search/` with `{"locationsearch":"india","recordsperpage":100}`*
-*JD: fetched from individual HTML page `/job/{urltitle}/{id}/`. No auth required (JSESSIONID auto-set).*
+*Classic TBE: `POST https://{careers_domain}/services/jobs/search/` with `{"locationsearch":"india","recordsperpage":100}`*
+*v1 REST: `POST https://{careers_domain}/services/recruiting/v1/jobs` with `{"location":"india","pageNumber":N}` — auto-detected from endpoint path `/recruiting/v1/`.*
+*JD: fetched from individual HTML page `/job/{urltitle}/{id}/`. No auth required.*
 
 | Company | Careers URL | India Jobs | Status |
 |---------|-------------|-----------|--------|
 | ANZ Bank | https://careers.anz.com | 7 | ✅ cracked 2026-04-30 — Oracle Taleo TBE; no auth; JD from HTML page fetch; ats=taleo |
+| Wipro | https://careers.wipro.com/services/recruiting/v1/jobs | 9176 | ✅ CRACKED 2026-04-30 — Taleo v1 REST; no auth; `location=india`; paginated 10/page; JD from HTML job page; ats=taleo; taleo_use_location=True |
+| HCL Technologies | https://careers.hcltech.com/services/recruiting/v1/jobs | 42 | ✅ cracked 2026-04-30 — SAP SuccessFactors/Jobs2Web v1 REST; JD URL format is `/job/{urltitle}/{id}-en_US` (plain `/id/` redirects to error page); full JDs now extracted |
 
 ---
 
@@ -235,6 +236,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Company | Careers URL | ATS / Platform | Scraping Endpoint | India Filter | India Jobs | Status |
 |---------|-------------|----------------|------------------|-------------|-----------|--------|
 | Amazon | https://www.amazon.jobs | Custom (AWS Jobs) | `GET https://www.amazon.jobs/en/search.json?base_query=&loc_query=India&country=IND&result_limit=100` | `country=IND` param | ~2,963 | ✅ working — clean JSON API |
+| Atlassian | https://www.atlassian.com/company/careers/all-jobs?team=Interns%2CGraduates&location=&search= | Atlassian Careers API (iCIMS-backed) | `GET https://www.atlassian.com/endpoint/careers/listings` | Python `is_india()` on `locations[]` strings | 1 | ✅ CRACKED 2026-05-02 — direct JSON array (82 global jobs in snapshot); fields include `id`, `title`, `locations`, `overview`, `responsibilities`, `qualifications`, `applyUrl`; no auth required |
 | Apple | https://jobs.apple.com/en-in/search | Apple Jobs | `GET https://jobs.apple.com/en-in/search?location=india-INDC` | location param | ~100+ | 🟡 js-required — old /api/role/search returns 301→404 as of 2026-04-11; use Firecrawl on careers page |
 | Cognizant | https://careers.cognizant.com/india-en/jobs | XML Feed | `GET https://careers.cognizant.com/india-en/jobs/xml/?rss=true` | Already India-only feed | 2 | ✅ working via Firecrawl — 2 India jobs extracted + enriched 2026-04-11 |
 | Google | https://careers.google.com | GCS | `GET https://www.google.com/about/careers/applications/jobs/results?location=India` | `location=India` param | 3 | ✅ working via Firecrawl — 3 India jobs extracted + enriched 2026-04-11 |
@@ -242,8 +244,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | L'Oréal | https://careers.loreal.com | Phenom | `GET https://careers.loreal.com/en_US/jobs/SearchJobs/India` | URL path | 3 | ✅ working via Firecrawl — 3 India jobs extracted + enriched 2026-04-11 |
 | Microsoft | https://careers.microsoft.com/professionals/us/en/l-india | GCS (Microsoft) | India-filtered listing page | `l-india` path | ? | 🟡 js-required — updated to India landing page 2026-04-19 |
 | Stellantis | https://www.stellantis.com/en/careers | Custom | careers page | JS-rendered | 3 | ✅ working via Firecrawl — 3 India jobs extracted + enriched 2026-04-11 |
-| Wipro | https://careers.wipro.com | SAP SuccessFactors (hcm55.sapsf.eu) | `GET https://hcm55.sapsf.eu/careers?company=wipro` — OData API requires OAuth | URL param | 1 | 🔴 auth-gated — CSP header reveals real backend is `hcm55.sapsf.eu` (SAP SF), NOT Radancy; OData `/odata/v2/Posting_Search` returns `[LGN0003] Authentication information is missing`; FC scrape on careers.wipro.com returns only 1 job; needs OAuth flow or Docker browser XHR; investigated 2026-04-19 |
-| TCS | https://www.tcs.com/careers | iBegin (custom) | `GET https://ibegin.tcs.com/iBegin/...` — inspect XHR | — | 3 | ⚠️ broken — tcs.com antibot block (document_antibot) as of 2026-04-17; was working 2026-04-11 |
+| TCS | https://www.tcs.com/careers | iBegin (custom) | `GET https://ibegin.tcs.com/iBegin/...` — inspect XHR | — | 0 | ⬇️ deprioritized — career page shows no visible jobs; antibot block (document_antibot); investigated 2026-04-30 |
 | Capgemini | https://www.capgemini.com/in-en/careers/job-search/ | Custom Azure API | `GET https://cg-jobstream-api.azurewebsites.net/api/job-search?country_code=in-en&page=1&size=100` | country_code=in-en | 921 | ✅ CRACKED 2026-04-30 — no auth; full JD in description field; apply_job_url included; ats=custom |
 | ZS Associates | https://jobs.zs.com/all/jobs | Custom (iCIMS) | `GET https://jobs.zs.com/api/jobs?page=1&country=India&sortBy=relevance&descending=false&internal=false` | country=India | 89 | ✅ CRACKED 2026-04-30 — no auth; full JD in jobs[].data.description; slug → apply URL; ats=custom |
 
@@ -254,15 +255,16 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 | Company | Careers URL | ATS | Scraping Endpoint | India Jobs | Status |
 |---------|-------------|-----|------------------|-----------|--------|
-| Alstom | https://jobsearch.alstom.com | SAP SuccessFactors | `GET https://jobsearch.alstom.com/search/jobs?country=India&startrow=0&sortColumn=referencedate&sortDirection=desc` | ~200+ | 🟡 js-required — India-filtered SAP Jobs2Web URL; Firecrawl extract 2026-04-12 |
-| Monitor Deloitte | https://southasiacareers.deloitte.com/go/Deloitte-India/718244/ | SAP SuccessFactors | `GET https://southasiacareers.deloitte.com/go/Deloitte-India/718244/` | ? | 🟡 js-required — SAP SuccessFactors confirmed via XHR inspection 2026-04-16 |
+| Alstom | https://jobsearch.alstom.com | SAP SuccessFactors / Jobs2Web (HTML) | `GET https://jobsearch.alstom.com/search/?createNewAlert=false&q=&locationsearch=india&optionsFacetsDD_country=&optionsFacetsDD_department=&optionsFacetsDD_shifttype=&startrow=N` | `locationsearch=india` | ✅ CRACKED 2026-05-02 — routed to `ats=sap_jobs2web_html`; direct HTML table parse + per-job detail JD extraction; run validated with 196 saved jobs |
+| Monitor Deloitte | https://southasiacareers.deloitte.com/go/Deloitte-India/718244/ | SAP SuccessFactors / Jobs2Web (HTML) | `GET https://southasiacareers.deloitte.com/search/?createNewAlert=false&q=&locationsearch=india&optionsFacetsDD_city=&optionsFacetsDD_customfield2=` | ~1,772 | ✅ CRACKED 2026-05-02 — direct paginated HTML listing (`startrow=N`) + detail `/job/.../{id}` pages with full JD (`data-careersite-propertyid=\"description\"`) and apply URL; routed to `ats=sap_jobs2web_html` |
 | GMR Group | https://careers.gmrgroup.in | SAP SuccessFactors | `GET https://careers.gmrgroup.in` | ? | 🟡 js-required — SAP SuccessFactors confirmed via XHR inspection 2026-04-16; tenant on career2.successfactors.eu |
 | CMA CGM | https://jobs.cmacgm-group.com | SAP SuccessFactors / Jobs2Web | `GET https://jobs.cmacgm-group.com/search/jobs?country=India&startrow=0&sortColumn=referencedate&sortDirection=desc` | ~100+ | 🟡 js-required — India-filtered SAP Jobs2Web URL; Firecrawl extract 2026-04-12 |
 | CNHI | https://join.cnh.com | SAP SuccessFactors / JS SPA | `https://join.cnh.com/search/?q=india` | India-filtered search URL | ✅ working — careers.cnh.com + join.cnh.com both live; India filter via q=india; Firecrawl extract; updated 2026-04-28 |
 | Volvo Group | https://www.volvogroup.com/en/careers | SAP SuccessFactors | `GET https://jobs.volvogroup.com/search/?q=&locationsearch=India` | ? | 🟡 js-required — India-filtered URL; Firecrawl extract 2026-04-12 |
-| Deloitte India | https://apply.deloitte.com/careers/SearchJobs/?countryCode=IN | SAP SuccessFactors | `GET https://apply.deloitte.com/careers/SearchJobs/?countryCode=IN` | countryCode=IN | 🟡 js-required — separate from Monitor Deloitte; 853 India jobs confirmed on page; probed 2026-04-19 |
-| EY India | https://careers.ey.com/ey/search/?q=&countryCode=IN | SAP SuccessFactors | `GET https://careers.ey.com/ey/search/?q=&countryCode=IN` | countryCode=IN | 🟡 js-required — SAP SF confirmed via `rmkcdn.successfactors.com` CDN assets; India-filtered URL confirmed; route via Firecrawl scrape; probed 2026-04-19 |
-| PepsiCo | https://www.pepsicojobs.com/main/jobs?location=India | iCIMS | `https://globalcareers-pepsico.icims.com` | location=India | 🟡 iCIMS confirmed (`globalcareers-pepsico.icims.com`) — India jobs confirmed in page; iCIMS returns HTML not JSON; route via Firecrawl scrape on pepsicojobs.com India URL; probed 2026-04-19 |
+| Deloitte India | https://apply.deloitte.com/en_US/careersUSI/SearchJobs | Avature SearchJobs HTML (USI mirror) | `GET https://apply.deloitte.com/en_US/careersUSI/SearchJobs/?jobRecordsPerPage=10&jobOffset=N` | India feed (268 listings in latest snapshot) | ✅ CRACKED 2026-05-03 — direct paginated HTML listings + JobDetail pages with JSON-LD JD and apply URL; routed to `ats=deloitte_usi` |
+| EY India | https://eyglobal.yello.co/job_boards/c1riT--B2O-KySgYWsZO1Q | Yello (Recsolu) | `GET https://eyglobal.yello.co/job_boards/c1riT--B2O-KySgYWsZO1Q/search?query=&filters=30009&page_number=N` | Country/Region filter id `30009` (India) | ✅ CRACKED 2026-05-02 — direct JSON listing (`/search`) + full JD on `/jobs/{token}` detail pages; ats=yello |
+| EY India Experienced | https://careers.ey.com/ey/search/?createNewAlert=false&q=india&optionsFacetsDD_country=IN | SAP SuccessFactors / Jobs2Web (HTML) | `GET https://careers.ey.com/ey/search/?createNewAlert=false&q=india&optionsFacetsDD_customfield1=&optionsFacetsDD_country=IN&optionsFacetsDD_city=&startrow=N` | `optionsFacetsDD_country=IN` | ✅ CRACKED 2026-05-02 — `ats=sap_jobs2web_html`; detail JDs parsed from `data-careersite-propertyid=\"description\"`; quality gate drops postings where JD is only requisition-id stub |
+| PepsiCo | https://www.pepsicojobs.com/main/jobs?location=India | PepsiCo Jobs API (JSON) | `GET https://www.pepsicojobs.com/api/jobs?page=1&sortBy=relevance&descending=false&internal=false&country=India` | `country=India` | ✅ CRACKED 2026-05-02 — direct paginated JSON listing (`jobs[].data`) includes full JD (`description`) + apply URL (`apply_url`); routed to `ats=pepsico_jobs_api` |
 
 ---
 
@@ -309,7 +311,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | BCG | https://careers.bcg.com/global/en/locations/india | `https://careers.bcg.com/global/en/search-results?keywords=india` | ⚠️ Phenom API returns empty body (JSON parse error) as of 2026-04-17; use Firecrawl Docker scrape on search-results URL |
 | Oliver Wyman | https://www.oliverwyman.com/careers.html | `https://mmc.phenompeople.com/global/en/oliver-wyman-search` | ⚠️ Phenom API returns 404 on careers.marsh.com redirect as of 2026-04-17; route via Firecrawl Docker scrape on mmc.phenompeople.com page |
 | HP (HPE) | https://careers.hpe.com/us/en/search-results?qcountry=IN | `https://careers.hpe.com/us/en/search-results?qcountry=IN` | 🟡 Phenom confirmed (`cdn.phenompeople.com/HPE1US`) — India-filtered URL works; route via Firecrawl scrape; probed 2026-04-19 |
-| Procter & Gamble | https://www.pgcareers.com | N/A — SSR | 🟡 Phenom SSR (tenant=PGBPGNGLOBAL, cdn=content-ir.phenompeople.com) — no jobs XHR; jobs baked into HTML at render; Firecrawl fallback on India-filtered URL; probed 2026-04-29 |
+| Procter & Gamble | https://www.pgcareers.com/in/en/search-results?qcountry=India | `https://www.pgcareers.com/in/en/search-results?qcountry=India` | ✅ CRACKED 2026-05-02 — Phenom SSR HTML with embedded `phApp.ddo.eagerLoadRefineSearch.data.jobs`; country facet India=23 in snapshot; routed to `ats=phenom_ssr` (no Firecrawl needed) |
 
 ---
 
@@ -350,40 +352,36 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 |---------|-------------|-----|-------|--------|
 | Air France | https://recrutement.airfrance.com | Custom | French-language portal | ⚠️ broken — Firecrawl crawl timeout (95s) as of 2026-04-11 |
 | AstraZeneca | https://careers.astrazeneca.com/search-jobs/India | Phenom / TalentBrew | URL-based India filter | ✅ working via Firecrawl — 3 India jobs extracted + enriched 2026-04-11 |
+| ADP | https://jobs.adp.com/en/jobs/?mylocation=India&orderby=0&page=1&pagesize=20&rType=0&radius=100 | Happydance / TalentBrew-style | Direct India query URL; paginate via `page=N`; per-job detail URL `/en/jobs/{job_id}/{slug}/`; apply link from `recruiting.adp.com` button | ✅ cracked 2026-05-01 — ats=talentbrew; no Workday UUID needed; direct HTML scrape with India filter |
+| H&M | https://career.hm.com/in-en/search/?l=cou%3Ain | HM Careers API (WordPress + SmartRecruiters backend) | `POST https://career.hm.com/in-en/wp-json/hm/v1/sr/jobs/search?_locale=user` with payload `{\"locations\":[\"cou:in\"],\"page\":N}`; parse `jobs[]` (`sr_id`, `title`, `job_description_text`, `apply_on_web_url`) | ✅ cracked 2026-05-02 — 111 India jobs in snapshot; routed to `ats=hm_wp_jobs` |
+| Intuit | https://jobs.intuit.com/location/india-jobs/27595/1269750/2 | TalentBrew (Avature feed) | Direct India country facet URL (no Workday UUID needed); paginated path `/.../2/{page}`; JD + apply URL from job detail page | ✅ cracked 2026-05-01 — ats=talentbrew; no auth; direct HTML/JSON-LD scrape |
+| Adobe | https://careers.adobe.com/us/en/search-results | Phenom SSR (`ADOBUS`) | Search/listing is server-rendered via `phApp.ddo.eagerLoadRefineSearch`; full JD in job page JSON-LD at `/us/en/job/{jobSeqNo}` | ✅ cracked 2026-05-01 — ats=phenom_ssr; Workday CXS not required |
+| ABB | https://careers.abb/global/en/search-results?keywords=india | Phenom SSR (`ABB1GLOBAL`) | Search page embeds `phApp.ddo.eagerLoadRefineSearch.data.jobs`; full JD available on detail pages `/global/en/job/{jobId}/{title}` with JobPosting JSON-LD | ✅ cracked 2026-05-02 — ats=phenom_ssr; no Workday UUID needed |
+| Siemens | https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?42386=%5B812053%5D&42386_format=17546&listFilterMode=1&folderRecordsPerPage=6& | Siemens ExternalJobs | India filter is `42386=[812053]`; paginate via `folderOffset`; fetch full JD from `/en_US/externaljobs/JobDetail/{job_id}` and apply URL from `/ApplicationMethods?folderId={job_id}` | ✅ cracked 2026-05-01 — ats=siemens_externaljobs; no Workday UUID needed |
 | Eli Lilly | https://careers.lilly.com/us/en/india | Phenom People | India-filtered URL — 48 India jobs confirmed in page filter; 5 extracted via FC validate 2026-04-17 | ✅ working via Firecrawl — migrated from Workday to Phenom; verified 2026-04-17 |
-| Cisco | https://jobs.cisco.com | Phenom (Cisco custom) | HTML portal — inspect XHR for JSON API | 🔍 needs investigation |
+| Cisco | https://careers.cisco.com/global/en/search-results?qcountry=India | Phenom SSR (`CISCISGLOBAL`) | Direct India URL (`qcountry=India`); parse listings from `phApp.ddo.eagerLoadRefineSearch.data.jobs`; paginate via `from={offset}&s=1`; use `jobId/reqId`, `title`, `location`, `descriptionTeaser`, `applyUrl` | ✅ cracked 2026-05-02 — no auth required; browser cURL confirmed |
 | Michelin | https://www.michelin.com/en/careers/find-a-job/ | Phenom / TalentBrew | India filter in URL | ⚠️ broken — 404 as of 2026-04-11; careers URL may have changed |
 | Philips | https://www.careers.philips.com/global/en | Phenom / TalentBrew | India filter in URL | ⚠️ broken — Firecrawl crawled generic homepage (no India listing); needs India-filtered URL 2026-04-11 |
 | SAP | https://jobs.sap.com | SAP (own platform) | `GET https://jobs.sap.com/search/?q=&locationsearch=India` | 🟡 js-required | ⚠️ broken — Firecrawl crawl timeout (95s) as of 2026-04-11 |
-| Tech Mahindra | https://www.techmahindra.com/en-in/careers/ | Custom | URL may have changed from careers.techmahindra.com | ⚠️ broken — verify URL |
-| Dr. Reddy's | https://careers.drreddys.com | SmartRecruiters | ✅ MOVED — see SmartRecruiters section; slug=DrReddysLaboratoriesLtdSBX; 142 India jobs; cracked 2026-04-29 |
+| Tech Mahindra | https://www.techmahindra.com/careers/ | Custom ASP.NET WebForms | Main site `Join Us` points to `https://careers.techmahindra.com/`; listings include `JobDetails.aspx?JobCode=...` links with full JD on detail page; filter India jobs via location text in listing/detail | ✅ cracked 2026-05-02 — old `/en-in/careers/` path is 404; use `/careers/` |
 | Boeing | https://jobs.boeing.com | Custom | `https://jobs.boeing.com/boeing/jobs/India` — custom career portal (TalentNet integration) | 🟡 js-required — custom ATS; probed 2026-04-19 |
 | Uber | https://www.uber.com/careers/list/ | Custom | `https://www.uber.com/careers/list/` — custom SPA; no ATS fingerprint detected | 🟡 js-required — custom ATS; probed 2026-04-19 |
-| Align Technology | https://jobs.aligntech.com/en/search-job | Pinpoint | → moved to PINPOINT ATS COMPANIES section; 44 India jobs; cracked 2026-04-29 | moved — see Pinpoint section |
 | Mondee Holdings | https://jobs.ashbyhq.com/mondee | Ashby | `https://jobs.ashbyhq.com/mondee` — Ashby ATS; no active India listings found as of probe | 🟡 js-required — Ashby ATS confirmed; may have 0 India jobs currently; probed 2026-04-19 |
-| AMD | https://careers.amd.com/careers-home/jobs | iCIMS Custom | → moved to ICIMS CUSTOM CAREER SITES section; 303 India jobs; cracked 2026-04-29 | moved — see iCIMS section |
 | Syneriq Global | https://www.syneriqglobal.com | Custom | No dedicated careers page found — small company; check LinkedIn or main site footer | 🟡 js-required — no careers page detected; probed 2026-04-19 |
 | ZF Lifetec | https://www.zf.com/global/en/careers | SAP SuccessFactors (suspected) | zf.com antibot-blocked; zf-lifetec.com/career.html is 404 — parent ZF Group uses SAP SF | ⚠️ blocked — antibot on zf.com; zf-lifetec.com has no careers page; re-probe via zf.com direct browser visit |
 | HMIE | https://hmie.in | Custom | hmie.in/careers and hmie.in/jobs both 404 — no independent career portal found | 🔴 no career portal — Hyundai Motor India Engineering hires via parent or LinkedIn; skip |
-| Netflix | https://explore.jobs.netflix.net/careers | Eightfold | → moved to EIGHTFOLD AI COMPANIES section; 7 India jobs; cracked 2026-04-29 | moved — see Eightfold section |
 | Meta | https://www.metacareers.com/jobs/?locations[0]=India | Custom (GraphQL) | `https://www.metacareers.com/jobs/?locations[0]=India` — custom React+GraphQL app; GraphQL 400 without session cookies | 🟡 js-required — FC-blocked; try FC scrape with stealth mode; probed 2026-04-19 |
 | Walmart | https://careers.walmart.com/results?q=india | Custom SPA | `https://careers.walmart.com/results?q=india` — custom Next.js SPA (Walmart Global Tech India) | 🟡 js-required — FC scrape returns 7K chars (JS shell, no listings); all `/_next/` API attempts redirect to HTML; needs XHR inspection via Docker browser; only 1 job returned currently; investigated 2026-04-19 |
 | DE Shaw | https://www.deshawindia.com/careers | Custom | `https://www.deshawindia.com/careers` — D.E. Shaw India custom career portal; no ATS fingerprint detected | 🟡 js-required — FC scrape returns 54K chars (full page loaded); India-specific; probed 2026-04-19 |
 | LTIMindtree | https://careers.ltimindtree.com/search/?createNewAlert=false&q=&locationsearch=india | Phenom (SSR HTML) | India-filtered URL returns ~2 India jobs (Chennai); global portal has 102 jobs mostly Mexico/Brazil/Japan; Phenom SSR, no JSON API | 🟡 js-required — Phenom SSR HTML; India filter URL confirmed 2026-04-29; ~2 India jobs only |
 | Genpact | https://careers.genpact.com | Custom | `https://careers.genpact.com` — Genpact custom career portal; SmartRecruiters 0 results; Workday 422 | 🟡 js-required — custom ATS; FC scrape of open-positions page; probed 2026-04-19 |
 | Amdocs | https://www.amdocs.com/about/careers | Workday (suspected) | `https://amdocs.wd3.myworkdayjobs.com` — Workday CXS 422 blocked; SmartRecruiters 0 results | 🟡 Workday tenant `amdocs.wd3` confirmed but CXS blocked and career_site slug TBD; FC fallback; probed 2026-04-19 |
-| Rakuten India | https://rakuten.openings.co | Zwayam | → moved to ZWAYAM COMPANIES section; 10 India jobs; cracked 2026-04-30 | moved — see Zwayam section |
-| ANZ Bank | https://careers.anz.com | Taleo | → moved to TALEO COMPANIES section; 7 India jobs; cracked 2026-04-30 | moved — see Taleo section |
-| Swiggy | https://careers.swiggy.com | MyNextHire | → moved to MYNEXTHIRE COMPANIES section; 83 India jobs; cracked 2026-04-30 | moved — see MyNextHire section |
-| Flipkart | https://flipkart.darwinbox.com/ms/candidate/careers | Darwinbox | moved — see DARWINBOX COMPANIES section; CF cookie required |
-| Zoho | https://careers.zohocorp.com/jobs/careers | Zoho Recruit (self-hosted) | `https://careers.zohocorp.com/jobs/careers` — Zoho uses own Zoho Recruit product; 1000+ India jobs; Chennai HQ | 🟡 js-required — Zoho Recruit portal; FC scrape; probed 2026-04-19 |
+| Zoho | https://careers.zohocorp.com/jobs/careers | Zoho Recruit (self-hosted) | `https://careers.zohocorp.com/jobs/careers` — Zoho uses own Zoho Recruit product; Chennai HQ | ⬇️ deprioritized — only 2 India jobs visible 2026-04-30 |
 | Tata Elxsi | https://www.tataelxsi.com/careers/job-openings | Custom | `https://www.tataelxsi.com/careers/job-openings` — Tata Elxsi custom portal; Bengaluru HQ; India-only | 🟡 js-required — custom ATS; FC scrape; probed 2026-04-19 |
-| ZS Associates | https://jobs.zs.com/all/jobs | Custom | → moved to CUSTOM section; 89 India jobs; cracked 2026-04-30 |
 | Virtusa | https://www.virtusa.com/careers | Custom | `https://www.virtusa.com/careers` — custom portal; IT services; India offices in Chennai/Bengaluru/Hyderabad | 🟡 js-required — custom ATS; FC scrape; probed 2026-04-19 |
 | Mu Sigma | https://www.mu-sigma.com/careers | Custom | `https://www.mu-sigma.com/careers` — Mu Sigma custom portal; analytics firm; Bengaluru HQ; India-only | 🟡 js-required — custom ATS; FC scrape; probed 2026-04-19 |
 | InMobi | https://www.inmobi.com/company/careers/ | Custom/Greenhouse (TBD) | `https://www.inmobi.com/company/careers/` — InMobi custom portal or Greenhouse; Bengaluru HQ; probe XHR | 🟡 js-required — ATS unconfirmed; check `boards.greenhouse.io/inmobi`; FC scrape fallback; probed 2026-04-19 |
 | Ola Electric | https://www.olaelectric.com/careers | Custom | `https://www.olaelectric.com/careers` — Ola Electric custom portal; EV company; Bengaluru HQ; India-only | 🟡 js-required — custom ATS; FC scrape; probed 2026-04-19 |
-| Keysight Technologies | https://jobs.keysight.com | iCIMS Custom | → moved to ICIMS CUSTOM CAREER SITES section; 109 India jobs; cracked 2026-04-29 | moved — see iCIMS section |
 | Telefonica | https://www.telefonica.com/en/careers/ | Custom/SAP SF | Europe/LatAm focused — India presence minimal; no confirmed India GCC | ⚠️ India presence unclear — Telefónica Tech has some India ops; verify India jobs before adding; probed 2026-04-19 |
 | Credit Suisse | — | MERGED → UBS | Acquired by UBS (March 2023); no standalone portal | 🔴 Merged into UBS — use UBS entry; careers.credit-suisse.com redirects to UBS; skip |
 
@@ -397,12 +395,9 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Bain & Company | https://www.bain.com/careers/ | Workday (unconfirmed) | 🟡 js-required — add to Workday section once tenant slug confirmed |
 | BCG | https://careers.bcg.com/global/en/search-results?keywords=india | Phenom | ✅ working via Firecrawl — 5 jobs via FC scrape on India search URL; verified 2026-04-17 |
 | EY Parthenon | https://www.ey.com/en_in/careers/parthenon | SmartRecruiters (unconfirmed) | 🟡 js-required |
-| EY India (general) | https://careers.ey.com/ey/search/?q=&countryCode=IN | SAP SuccessFactors | → tracked in SAP SUCCESSFACTORS section; probed 2026-04-19 |
-| KPMG India | https://home.kpmg/in/en/home/careers.html | Oracle HCM | → tracked in ORACLE HCM section (🔴 auth-gated); probed 2026-04-19 |
 | Kearney | https://www.kearney.com/about/locations/india/careers/india-people-careers | Custom | 🟡 js-required |
 | L.E.K. Consulting | https://www.lek.com/careers | Custom | 🟡 js-required |
-| McKinsey & Company | https://www.mckinsey.com/careers/search-jobs?countries=India | Custom (mckinsey) | moved — see MCKINSEY COMPANIES section; 46 India jobs; cracked 2026-04-30 |
-| Monitor Deloitte | https://southasiacareers.deloitte.com/go/Deloitte-India/718244/ | SAP SuccessFactors | ⚠️ moved to SAP section 2026-04-16 |
+| Deloitte India (BrassRing) | https://usijobs.deloitte.com/en_US/careersUSI/SearchJobs?jobRecordsPerPage=10&jobOffset=0 | Avature SearchJobs HTML (USI) | ✅ CRACKED 2026-05-03 — direct paginated HTML listings (`SearchJobs?jobOffset=N`) + detail pages (`/JobDetail/.../{id}`) with JSON-LD JD (`JobPosting.description`) and apply URL (`/Login?jobId={id}`); routed to `ats=deloitte_usi` |
 | Oliver Wyman | https://mmc.phenompeople.com/global/en/oliver-wyman-search | Phenom (mmc.phenompeople.com) | ✅ working via Firecrawl — 5 jobs via FC scrape on mmc.phenompeople.com; verified 2026-04-17 |
 | Practus | https://roibypractus.com/people-careers/ | Custom | ⬇️ low-priority — small boutique consulting firm; likely genuine low job count; deprioritised 2026-04-19 |
 | Praxis Global Alliance | https://www.praxisga.com/career | Custom | ⬇️ low-priority — small boutique firm; deprioritised 2026-04-19 |
@@ -424,10 +419,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Arpwood Capital | https://www.arpwood.com/careers | Custom | Small boutique IB | ⬇️ low-priority — small firm, genuine low job count; deprioritised 2026-04-19 |
 | Avendus Capital | https://www.avendus.com/careers/apply-now | Custom | India-based IB | 🟡 js-required |
 | Claypond Capital | — | None (LinkedIn / email) | Manipal Group family office | 🔒 no public portal |
-| Deutsche Bank | https://careers.db.com | Workday | → tracked in WORKDAY COMPANIES section (db | wd3 | DBWebsite); 521 India jobs; cracked 2026-04-29 | moved — see Workday section |
-| Elevation Capital | https://apply.workable.com/elevation-capital-3/ | Workable | VC firm | ⚠️ antibot blocked — all FC engines failed 2026-04-17; moved to ANTIBOT section |
 | Everstone Capital | — | None (LinkedIn) | PE firm — no dedicated portal | 🔒 no public portal |
-| General Atlantic | https://www.generalatlantic.com/careers/ | Greenhouse | Global PE/growth equity | ⚠️ moved to Greenhouse section 2026-04-16 |
 | HSBC | https://hsbc.eightfold.ai/careers?location=India&hl=en | Eightfold | SPA returns JSON config only — no job links rendered; mycareer.hsbc.com dead | ⚠️ broken — Eightfold SPA unrenderable 2026-04-19 |
 | O3 Capital | http://www.o3capital.com | None (email: careers@o3capital.com) | Boutique IB | 🔒 email-only |
 | Premji Invest | https://in.premjiinvest.com | Custom | Family office / PE | 🟡 js-required |
@@ -445,11 +437,9 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Bank of India | https://bankofindia.bank.in/career | Custom | PSU bank — limited listings | ⬇️ low-priority — PSU bank with infrequent tech openings; deprioritised 2026-04-19 |
 | Credila (HDFC Credila) | https://www.credila.com/careers | Custom | Education finance NBFC | 🟡 js-required |
 | CRISIL | https://www.crisil.com/en/home/careers.html | SmartRecruiters (LinkedIn redirect) | Ratings & analytics | 🟡 js-required |
-| IIFL Finance | https://iifl.darwinbox.in/ms/candidate/careers | Darwinbox | NBFC | → moved to DARWINBOX COMPANIES section; 41 India jobs; cracked 2026-04-29 |
 | IndusInd Bank | https://www.indusind.bank.in | Custom | Private sector bank | 🟡 js-required |
 | L&T Finance | https://www.ltfs.com/careers.html | Custom | NBFC | ⬇️ low-priority — small NBFC, limited tech roles; deprioritised 2026-04-19 |
 | Navi Technologies | https://navi.com/careers/jobs | Custom | Fintech NBFC | 🟡 js-required — direct jobs page confirmed via Firecrawl discovery 2026-04-16 |
-| S&P Global | https://www.spglobal.com/en/explore-s-p-global/careers | SmartRecruiters (unconfirmed) | Ratings & data | ⚠️ antibot blocked — document_antibot 2026-04-17; moved to ANTIBOT section |
 | FinIQ | https://www.finiq.com/JobsPage/jobs.html | Custom HTML | Fintech SaaS | ✅ working — direct HTML page |
 
 ---
@@ -458,10 +448,8 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 | Company | Careers URL | ATS | Notes | Status |
 |---------|-------------|-----|-------|--------|
-| Adani Group | https://www.adani.com/careers | Oracle HCM | → moved to ORACLE HCM section; siteNumber=CX_2027; cracked 2026-04-30 |
 | Aditya Birla Group | https://careers.adityabirla.com/job-search | Custom (aditya_birla) | India-only; 793 jobs; static Bearer token; per-job JD fetch /api/v3/job/{jobCode} | ✅ CRACKED 2026-04-30 — ats=aditya_birla; Bearer token static (no auth flow); pagination via offset |
 | CK Birla Group | https://www.ckabirlagroup.com/workingwithus | Custom | Mid-size Indian conglomerate | 🟡 js-required |
-| GMR Group | https://careers.gmrgroup.in | SAP SuccessFactors | Infrastructure conglomerate | ⚠️ moved to SAP section 2026-04-16 |
 | Lodha Ventures | https://www.instahyre.com/jobs-at-lodha-ventures/ | Instahyre | Lodha family ventures arm | 🟡 js-required |
 | Tata Administrative Services | https://www.tata.com/careers/programs/tas | Custom | Tata Group management programme | 🟡 js-required |
 
@@ -469,14 +457,10 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 ## CONSUMER GOODS (FMCG)
 
-*Note: Haleon moved to PHENOM CX section — primary portal careers.haleon.com/api/pcsx/search; 25 India jobs.*
-*Note: L'Oréal is tracked in CUSTOM / PROPRIETARY APIs section.*
 
 | Company | Careers URL | ATS | Notes | Status |
 |---------|-------------|-----|-------|--------|
 | Coromandel International | https://www.coromandel.biz/careers/ | Custom | Agri-inputs; part of Murugappa Group | 🟡 js-required |
-| Dabur | https://www.dabur.com/join-us/explore-opportunities | Custom / SAP | Large FMCG India | ⚠️ antibot blocked — all FC engines failed 2026-04-17; moved to ANTIBOT section |
-| Philip Morris International | https://join.pmicareers.com | Eightfold | FMCG / Tobacco | → tracked in EIGHTFOLD AI COMPANIES section (🔴 API broken) |
 | United Breweries | https://careers.theheinekencompany.com/India/ | Workday (Heineken) | Part of Heineken Group | ⬇️ low-priority — FMCG, low tech hiring; check if tenant=heineken wd3 if re-activating; deprioritised 2026-04-19 |
 | Wipro Consumer Care | https://wiproconsumercare.com/campus/ | Custom | Separate from Wipro IT — consumer FMCG division | ⬇️ low-priority — consumer goods arm, not tech; deprioritised 2026-04-19 |
 
@@ -486,9 +470,7 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 | Company | Careers URL | ATS | Notes | Status |
 |---------|-------------|-----|-------|--------|
-| OYO | https://www.oyorooms.com/about/ | LinkedIn / Instahyre | No dedicated portal currently | 🟡 js-required — use LinkedIn search as fallback |
-| Myntra | https://jobs.myntra.com | Spire2Grow | moved — see SPIRE2GROW COMPANIES section; 16 India jobs; cracked 2026-04-30 |
-| Nykaa | https://careers.nykaa.com | Custom | Beauty e-commerce | 🟡 js-required |
+| Nykaa | https://careers.nykaa.com | Skima Careers (SSR HTML) | Direct HTML listing + `?page=N` pagination + per-job UUID detail page with full JD panel | ✅ CRACKED 2026-05-02 — no auth/cookies required; 11 India jobs observed; routed to `ats=skima_careers` |
 
 ---
 
@@ -498,14 +480,10 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 
 | Company | Careers URL | ATS | Notes | Status |
 |---------|-------------|-----|-------|--------|
-| BrowserStack | https://www.browserstack.com/careers | Workday | Dev tools SaaS | → tracked in WORKDAY COMPANIES section (🔴 no India UUID) |
-| Coforge | https://careers.coforge.com | Custom / SmartRecruiters | Mid-size IT services | ⚠️ antibot blocked — all FC engines failed 2026-04-17; moved to ANTIBOT section |
-| EXL Digital | https://www.exlservice.com/careers | Oracle HCM | Analytics & BPO | → tracked in ORACLE HCM COMPANIES section (🔴 API auth-gated) |
 | HCL Software | https://www.hcl-software.com/careers | Custom | HCL Group software division | 🟡 js-required |
 | HiLabs | https://www.hilabs.com/careers/all-open-positions?location=india | Custom | Health-tech AI | ✅ direct URL with India filter — try GET |
 | Sanas | https://www.sanas.ai/careers | Custom | AI / speech-tech | 🟡 js-required |
 | Vehere Interactive | https://vehere.com/company/careers/ | Custom | Cybersecurity | 🟡 js-required |
-| Yubi (formerly CredAvenue) | https://go-yubi.com/careers | Custom / LinkedIn | Debt platform fintech | ⚠️ antibot blocked — document_antibot 2026-04-17; moved to ANTIBOT section |
 
 ---
 
@@ -569,284 +547,3 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Syngenta | https://www.syngenta.com/en/careers | SmartRecruiters | 2026-04-11 | SmartRecruiters API returned 0 India postings |
 | Solvay | https://careers.solvay.com | SAP SuccessFactors | 2026-04-11 | Portal explicitly confirms "no open positions matching India" |
 
----
-
-## RUN HISTORY & CURRENT STATE
-
-### Session 2026-04-19 (Part 3) — 37 Bengaluru-focused companies researched and added
-
-**No scrape run.** ATS identification via web search + known patterns. All entries need CXS probes to find India UUIDs before first scrape run.
-
-**New portals added (37 total):**
-
-| Portal | ATS | Confirmed Endpoint | Status |
-|--------|-----|--------------------|--------|
-| 3M | Workday `3m.wd1/Search` | `3m.wd1.myworkdayjobs.com/Search` | ✅ Location_Country UUID in registry |
-| NXP Semiconductors | Workday `nxp.wd3/careers` | `nxp.wd3.myworkdayjobs.com/careers` | ✅ Location_Country UUID in registry |
-| Autodesk | Workday `autodesk.wd1/Ext` | `autodesk.wd1.myworkdayjobs.com/Ext` | ✅ locationCountry UUID in registry |
-| Roche | Workday `roche.wd3/roche-ext` | `roche.wd3.myworkdayjobs.com/roche-ext` | ✅ locations facet UUID in registry |
-| ING Bank | Workday `ing.wd3/ICSGBLCOR` | `ing.wd3.myworkdayjobs.com/ICSGBLCOR` | 🔴 no India locations in this portal |
-| Barclays | Workday `barclays.wd3/External_Career_Site_Barclays` | Confirmed | ✅ 12 India office UUIDs in registry |
-| Maersk | Workday `maersk.wd3/Maersk_Careers` | Confirmed | ✅ 26 India office UUIDs in registry |
-| DXC Technology | Workday `dxctechnology.wd1/DXCJobs` | Confirmed | ✅ locationCountry UUID in registry |
-| ABB | Workday `abb.wd3` (suspected) | tenant confirmed, career_site TBD | ⚠️ slug needed |
-| Juniper Networks | Workday → HPE merger Jan 2024 | check HPE Workday portal | ⚠️ verify |
-| Societe Generale | SmartRecruiters `SocieteGenerale4` | Confirmed | 🟡 API ready |
-| Freshworks | SmartRecruiters `freshworks` | Confirmed | 🟡 API ready |
-| Publicis Sapient | SmartRecruiters (Publicis Groupe) | company_id TBD | 🟡 probe needed |
-| Razorpay | Greenhouse `razorpaysoftwareprivatelimited` | Confirmed | 🟡 API ready |
-| PhonePe | Greenhouse `phonepe` | Confirmed | 🟡 API ready |
-| Thoughtworks | Greenhouse `thoughtworks` | Confirmed | 🟡 API ready |
-| Meesho | Lever `meesho` | `api.lever.co/v0/postings/meesho?mode=json` | 🟡 NEW ATS type |
-| CRED | Lever `cred` | `api.lever.co/v0/postings/cred?mode=json` | 🟡 NEW ATS type |
-| Paytm | Lever `paytm` | `api.lever.co/v0/postings/paytm?mode=json` | 🟡 NEW ATS type |
-| Texas Instruments | Oracle HCM `edbz.fa.us2.oraclecloud.com` | CX / UUID=300000000361484 | ✅ 114 India jobs cracked 2026-04-29 |
-| Nokia | Oracle HCM `fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com` | CX_1 / UUID=300000000471745 | ✅ 261 India jobs cracked 2026-04-29 |
-| BNY Mellon | Oracle HCM `eofe.fa.us2.oraclecloud.com/BNY-Careers` | Confirmed | 🟡 India filter TBD |
-| ARM Holdings | iCIMS `arm.icims.com` | Confirmed early careers; main TBD | 🟡 NEW ATS type |
-| Rakuten India | Custom `corp.rakuten.co.in/careers` | Custom portal | 🟡 FC scrape |
-| ANZ Bank | Custom `careers.anz.com` | Custom portal | 🟡 FC scrape |
-| Swiggy | MyNextHire `careers.swiggy.com` | Confirmed MyNextHire ATS | 🟡 FC scrape |
-| Flipkart | Custom `flipkartcareers.com` | Custom portal | 🟡 FC scrape |
-| Zoho | Zoho Recruit `careers.zohocorp.com` | Self-hosted | 🟡 FC scrape |
-| Tata Elxsi | Custom `tataelxsi.com/careers/job-openings` | Custom portal | 🟡 FC scrape |
-| ZS Associates | Custom `jobs.zs.com/all/jobs` | Custom portal | 🟡 FC scrape |
-| Virtusa | Custom `virtusa.com/careers` | Custom portal | 🟡 FC scrape |
-| Mu Sigma | Custom `mu-sigma.com/careers` | Custom portal | 🟡 FC scrape |
-| InMobi | Custom/Greenhouse TBD | probe `boards.greenhouse.io/inmobi` | 🟡 ATS unconfirmed |
-| Ola Electric | Custom `olaelectric.com/careers` | Custom portal | 🟡 FC scrape |
-| Keysight | Custom/SAP SF `jobs.keysight.com` | ATS probe needed | 🟡 XHR inspection |
-| Telefonica | Custom/SAP SF | India presence unclear | ⚠️ verify first |
-| Credit Suisse | MERGED → UBS | redirects to UBS | 🔴 skip |
-
-**Already tracked (no change):** Medtronic, Micron, Synopsys, Qualcomm, Schneider Electric, Morgan Stanley, Deutsche Bank, Standard Chartered, UBS, HSBC, Zomato, Myntra, Wipro, Tech Mahindra, HCLTech, Citi, Alstom, LTIMindtree
-
-**Priority next actions:**
-1. Add Lever scraper to `scrapers.py` (`GET api.lever.co/v0/postings/{slug}?mode=json`, filter by location)
-2. Probe CXS for all new Workday tenants to find India UUIDs
-3. Confirm Publicis Sapient SmartRecruiters company_id
-4. Confirm InMobi ATS — try Greenhouse board first
-5. Verify Juniper/HPE merger — check if separate portal survives
-6. ABB: probe `abb.wd3` with career_site slugs (ABB_Careers, External, ABBcareers)
-
----
-
-### Session 2026-04-19 (Part 2) — 26 new portals added (Hyderabad GCC + Bengaluru MNCs)
-
-**No scrape run.** Portal discovery only via Docker Firecrawl + direct Workday CXS probes.
-
-**New portals added (26 total):**
-| Portal | ATS | Status | Notes |
-|--------|-----|--------|-------|
-| Airbnb | Greenhouse `airbnb` | ✅ | India jobs confirmed (Gurugram, Bangalore) |
-| Visa | SmartRecruiters `Visa` | ✅ | 2 India jobs |
-| Target | Workday `target.wd5/TargetCareers` | 🟡 | 265 India jobs via searchText="india"; no India UUID |
-| Ford | Workday `fordcareers.wd12/Ford_Careers` | 🟡 | CXS 422 → FC fallback |
-| Unilever | Workday `unilever.wd3` | 🟡 | CXS 403 → FC fallback via careers.unilever.com |
-| Adobe | Workday `adobe.wd5/external_experienced` | 🟡 | CXS 422 → FC fallback |
-| Hitachi Vantara | Workday `hitachivantara.wd3/HitachiVantaraCareers` | 🟡 | CXS 422 → FC fallback |
-| Thomson Reuters | Workday `thomsonreuters.wd3/tr_External_Applicant` | 🟡 | CXS 422 → FC fallback |
-| CGI | Workday `cgicareers.wd3/CGI` | 🟡 | CXS 422 → FC fallback |
-| ADP | Workday `adp.wd5/ADP` | 🟡 | CXS 422 → FC fallback |
-| Intuit | Workday `intuit.wd5/Intuit` | 🟡 | CXS 422; careers.intuit.com antibot → FC fallback |
-| Samsung | Workday `samsungelectronics.wd3` | 🟡 | CXS 422; job.samsung.com FC-blocked; career_site TBD |
-| Carelon Global Solutions | Workday `elevancehealth.wd1/carelonglobal_in` | 🟡 | 7 global jobs only; no India UUID; FC fallback |
-| Broadcom | Workday `broadcom.wd1` | 🟡 | Career_site slug TBD; all probes 404/422 |
-| Amdocs | Workday `amdocs.wd3` | 🟡 | CXS 422; career_site TBD |
-| Citibank | Eightfold `citi.eightfold.ai` | 🟡 | Confirmed via jobs.citi.com FC scrape |
-| PepsiCo | iCIMS `globalcareers-pepsico.icims.com` | 🟡 | India jobs confirmed on page |
-| HP (HPE) | Phenom `careers.hpe.com` (HPE1US) | 🟡 | Phenom confirmed; India-filtered URL works |
-| EY India | SAP SuccessFactors | 🟡 | Confirmed via successfactors.com CDN |
-| KPMG India | Oracle HCM `ejgk.fa.em2.oraclecloud.com` | 🔴 | Returns 0 items without auth; auth-gated |
-| Netflix | Custom SPA `jobs.netflix.com` | 🟡 | No Greenhouse board; JS-rendered |
-| Meta | Custom GraphQL `metacareers.com` | 🟡 | FC-blocked; GraphQL 400 |
-| Walmart | Custom SPA `careers.walmart.com` | 🟡 | India filter via ?q=india; JS-rendered |
-| DE Shaw | Custom `deshawindia.com/careers` | 🟡 | No ATS fingerprint; custom portal |
-| LTIMindtree | Custom `ltimindtree.com/careers` | 🟡 | No ATS detected; SmartRecruiters 0 results |
-| Genpact | Custom `careers.genpact.com` | 🟡 | No ATS detected; SmartRecruiters 0 results |
-
-**Dropped (already in KNOWN_PORTALS.md):** Google, Amazon, Microsoft, Goldman Sachs, JPMorgan, Bosch, HSBC, Shell, Apple, Salesforce, Intel, Oracle, GE, Philips, Uber, Siemens, SAP, Cisco, Capgemini, IBM, Dell, Accenture, PwC, Deloitte, TCS, Infosys, Wipro, Cognizant
-
----
-
-### Session 2026-04-17 (Part 2) — Phase 1 full scrape + Phase 2 RAG enrichment in progress
-
-**Phase 1:** `python main.py --skip-enrich` — full fresh scrape of all active portals. Output: 94 jobs.json files, 2,376 total jobs, 1,730 with job_description.
-
-**Phase 2 (in progress):** `python main.py --enrich-only` running as PID 58046. 1,530 jobs to enrich. ETA ~4 hours.
-
-**Code changes this session:**
-- `scraper/rag_skills.py` (NEW) — IDF-weighted keyword inverted index over all 35,108 Lightcast L3 skill names; `retrieve(text, k=40)` returns canonical skill candidates in <1ms, no model calls
-- `scraper/enricher.py` — RAG integrated: top-40 taxonomy candidates injected into prompt as constrained vocabulary; system prompt removed from code (moved to LM Studio GUI for KV caching); max_tokens 300→150; JD truncation 2000→1500 chars
-- `scraper/main.py` — `enrich_only_run()` now uses `ThreadPoolExecutor(max_workers=4)` for parallel LLM calls; `concurrent.futures` added to imports
-- `scraper/config.py` — added `ENRICH_WORKERS` env var
-- `scraper/.env` — added `ENRICH_WORKERS=4`; dual model presets `MODEL_SPEED=fast|quality`
-
-**LM Studio GUI changes (Gemma 3 4B Inference tab):**
-- System prompt set: "You are a precise job data extractor. Return a single valid JSON object. No explanation, no markdown."
-- Limit Response Length enabled → 150 tokens
-- Temperature → 0.0
-
-**Status after Phase 2 + Phase 3:** Run `python csv_importer.py` once enrichment completes.
-
----
-
-### Session 2026-04-17 (Part 1) — Full 101-portal validation run (5 jobs each, no enrichment)
-
-**Mode:** `python main.py --validate` | **Duration:** ~12 min | **Result:** 92/101 processed, 9 skipped (0 jobs), 359 total jobs
-
-**✅ Working (92/101):**
-All Workday direct API: Accenture, Airbus, Chanel (1 India job), Fidelity, Novartis, Salesforce, Sanofi, Shell, Wells Fargo, Philips, Dell, Haleon — 5 JDs each
-Workday→Firecrawl fallback: Engie, Synopsys — 5 each
-SmartRecruiters: Continental, LDC, ServiceNow — 5 each; Zomato — 1 (only 1 India posting currently)
-Greenhouse: Stripe — 5
-Amazon (custom JSON API) — 5
-Eightfold via FC: AmEx (5), Morgan Stanley (3), STMicro (5), Philip Morris (5)
-Custom via FC: Apple (5), Cognizant (5), Google (4), L'Oréal (5)
-SAP via FC: Alstom (5), Monitor Deloitte (5), GMR (5), CMA CGM (5), Volvo (5)
-Phenom API: Schneider Electric (5)
-All remaining 🌐 portals: reachable, content returned (validate mode shows low counts for JS-heavy — expected without LLM)
-
-**❌ Broken / 0 jobs (9/101):**
-| Company | Error | Action |
-|---------|-------|--------|
-| TCS | document_antibot on tcs.com | Moved to ANTIBOT section |
-| CNHI | 404 on careers.cnh.com | Need new CNH Industrial URL |
-| BCG | Phenom API empty body | Route via Firecrawl scrape |
-| Oliver Wyman | Phenom API 404 (marsh.com redirect) | Route via Firecrawl scrape |
-| Elevation Capital | All FC engines blocked | Moved to ANTIBOT section |
-| S&P Global | document_antibot | Moved to ANTIBOT section |
-| Dabur | All FC engines blocked | Moved to ANTIBOT section |
-| Coforge | All FC engines blocked | Moved to ANTIBOT section |
-| Yubi | document_antibot | Moved to ANTIBOT section |
-
-**Status changes this session:**
-- Eli Lilly: Workday now 404 (was 303) → ⚠️ — Firecrawl fallback only returning 1 link
-- Dell ✅ confirmed working via Workday direct API
-- Haleon ✅ confirmed working via Workday direct API (new addition)
-- 6 portals demoted to new ANTIBOT BLOCKED section
-
----
-
-### Session 2026-04-12 — First full E2E run (Phase 1 + Phase 2 + Supabase upload)
-
-**Phase 1 results (scrape, --skip-enrich):** 40 portals, 37 min total, 1,628 new jobs
-**Phase 2 results (enrich, --enrich-only):** LM Studio enriched all jobs with raw_jd_text
-**Phase 3 results (upload):** Upserted to Supabase with quality gate (min_score ≥ 1)
-
-**What worked — jobs saved:**
-| Company | Jobs | ATS | Notes |
-|---------|------|-----|-------|
-| Accenture | 500 | Workday | cap hit; JD fetch 0/500 (Workday API limitation) |
-| Airbus | 72 | Workday | JD fetch 0/72 — same limitation |
-| Chanel | 1 | Workday | JD fetch 0/1 |
-| Eli Lilly | 10 | Workday→Firecrawl | fallback worked; 10 jobs with JD |
-| Fidelity | 29 | Workday | JD fetch 0/29 |
-| Novartis | 92 | Workday | JD fetch 0/92 |
-| Salesforce | 168 | Workday | JD fetch 0/168 |
-| Sanofi | 96 | Workday | JD fetch 0/96 |
-| Shell | 16 | Workday | JD fetch 0/16 |
-| Wells Fargo | 224 | Workday | JD fetch 0/224 |
-| Philips | 65 | Workday | JD fetch 0/65 |
-| Continental | 99 | SmartRecruiters | ✅ 100% JD coverage |
-| LDC | 20 | SmartRecruiters | ✅ 100% JD coverage |
-| ServiceNow | 35 | SmartRecruiters | ✅ 100% JD coverage |
-| Stripe | 66 | Greenhouse | ✅ 100% JD coverage |
-| Amazon | 81 | Custom JSON API | ✅ 100% JD coverage |
-| Alstom | 1 | SAP→Firecrawl | Firecrawl extract got 1 job |
-| Volvo Group | 33 | SAP→Firecrawl | Firecrawl extract got 33 jobs |
-| Schneider Electric | 10 | Phenom API | ✅ 100% JD coverage |
-| AstraZeneca | 10 | Phenom→Firecrawl | Firecrawl extract got 10 jobs |
-
-**Broken / 0 jobs this run:**
-| Company | Error | Root Cause | Fix Needed |
-|---------|-------|------------|------------|
-| Mastercard | `[WARN] no India UUID found` | Workday facet discovery failed | Investigate Mastercard Workday tenant facet structure |
-| Engie | `422 Unprocessable Entity` | Workday API blocked | Firecrawl fallback ran but LLM got 0 India listings from crawl |
-| Synopsys | `422 Unprocessable Entity` | Workday API blocked | Same as Engie |
-| American Express | 0 jobs | Eightfold JS — Firecrawl crawl saved raw md but LLM extracted 0 | Inspect XHR on aexp.eightfold.ai for real API endpoint |
-| Morgan Stanley | 0 jobs | Eightfold JS — same | Inspect XHR on morganstanley.eightfold.ai |
-| STMicroelectronics | Timeout | Firecrawl crawl timed out on st.com | Try scrape instead of crawl; st.com may block |
-| Apple | 0 jobs | JS-heavy; Firecrawl crawled but LLM got 0 | Inspect XHR on jobs.apple.com for JSON API |
-| Cognizant | 0 jobs | XML feed returned HTML; Firecrawl crawl got 0 | Verify RSS feed URL is still valid |
-| Google | 0 jobs | JS-rendered SPA; Firecrawl crawl got 0 this run | Inspect XHR on careers.google.com for JSON API endpoint |
-| Infosys | 0 jobs | Angular SPA; Firecrawl crawl got 0 | Inspect XHR for internal API |
-| L'Oréal | 403 Forbidden | Direct GET blocked | Route through Firecrawl instead |
-| Microsoft | 0 pages | Firecrawl returned no pages (Azure CDN block?) | Try different URL or Playwright |
-| Stellantis | 0 jobs | JS-heavy; Firecrawl got 0 this run | Try scrape not crawl |
-| Wipro | 429 Too Many Requests | Firecrawl rate limit hit (too many crawls in run) | Add delay between Firecrawl calls or reduce concurrent crawls |
-| TCS | 429 Too Many Requests | Same rate limit issue | Same fix |
-| CMA CGM | 0 jobs | SAP/JS — Firecrawl crawl saved raw md but LLM got 0 | Inspect what's in firecrawl_raw.md; may need Firecrawl scrape |
-| CNHI | 404 Not Found | URL changed: `careers.cnh.com` is dead | Find new CNH Industrial careers URL |
-| TotalEnergies | 0 jobs | Avature JS — Firecrawl crawl saved raw md but LLM got 0 | Inspect firecrawl_raw.md; try India-specific search URL |
-| Baker Hughes | 402 Payment Required | Firecrawl paid-tier feature limit hit | Check Firecrawl plan — extract endpoint may be capped |
-| Dell | 402 Payment Required | Same Firecrawl plan limit | Same fix |
-
-**Key systemic issue — Workday JD fetch (0/N for all Workday companies):**
-The individual job detail API (`GET .../wday/cxs/{tenant}/{site}/jobs/{externalPath}`)
-returns the full JD, but this fetch is failing silently for all tenants this run.
-Root cause likely: rate limiting or auth token expiry on the CXS API during the fetch loop.
-Fix: add retry logic + backoff in scrapers.py Workday JD fetch; or batch fewer JDs per run.
-
----
-
-### Session 2026-04-10 — First full run (interrupted)
-- Ran `python main.py` (full run, all portals).
-- Run was force-closed mid-way due to memory pressure from running Docker + LM Studio simultaneously.
-- **15 companies fully scraped** before interruption:
-  Accenture, Airbus, Amazon, American Express, Chanel, Continental, Fidelity Investments,
-  LDC (Louis Dreyfus), Morgan Stanley, STMicroelectronics, Sanofi, ServiceNow, Shell, Stripe, Wells Fargo
----
-
-## SCRAPE_QUEUE — TODO
-
-```
-# Workday — need to re-run (will now use careers_url for Firecrawl fallback, code fixed)
-Engie                [wd-fallback-url-fixed] https://jobs.engie.com
-Mastercard           [wd-fallback-url-fixed] https://careers.mastercard.com/us/en/search-results
-Novartis             [wd-fallback-url-fixed] https://www.novartis.com/careers
-Synopsys             [wd-fallback-url-fixed] https://careers.synopsys.com/
-
-# Needs India-filtered URL (currently pointing to generic homepage)
-Baker Hughes         [needs-india-url]       https://careers.bakerhughes.com/global/en/search-jobs/India
-Philips              [needs-india-url]       https://www.careers.philips.com/global/search-results?country=in
-TotalEnergies        [needs-india-url]       https://jobs.totalenergies.com/en_US/careers/SearchJobs/?location=India
-Volvo Group          [needs-india-url]       https://jobs.volvogroup.com/search/?q=&locationsearch=India
-Microsoft            [needs-correct-url]     https://careers.microsoft.com/en-us/search?q=&l=india — js-required
-
-# Broken endpoints — need URL investigation
-Atlassian            [board-token-changed]   https://www.atlassian.com/company/careers
-Michelin             [url-changed]           https://www.michelin.com/en/careers/
-CNHI                 [url-changed]           https://www.cnh.com/en-US/our-company/careers
-Schneider Electric   [url-changed]           https://careers.se.com
-Alstom               [fc-timeout]            https://jobsearch.alstom.com — try scrape not crawl
-CMA CGM              [fc-timeout]            https://jobs.cmacgm-group.com — try scrape not crawl
-Air France           [fc-timeout]            https://recrutement.airfrance.com — try scrape not crawl
-SAP                  [fc-timeout]            https://jobs.sap.com — try scrape not crawl
-Dell                 [fc-no-pages]           https://jobs.dell.com/search-jobs/India — verify endpoint
-Apple                [api-broken]            https://jobs.apple.com/en-in/search — js-required, use FC
-
-# Workday slugs unconfirmed
-Capgemini            [slug-unknown]          https://capgemini.wd3.myworkdayjobs.com
-HCL Technologies     [slug-unknown]          https://hcltech.wd3.myworkdayjobs.com
-MSCI                 [slug-unknown]          https://msci.wd3.myworkdayjobs.com
-
-# New / not yet added
-Cisco                [new]                   https://jobs.cisco.com
-Tech Mahindra        [url-changed]           https://www.techmahindra.com/en-in/careers/
-```
-
----
-
-## FIELD MAP — ATS → Canonical Schema
-
-| Canonical Field | Workday | Greenhouse | SmartRecruiters | Amazon Jobs | Eightfold |
-|----------------|---------|------------|-----------------|-------------|-----------|
-| `job_id` | `jobReqId` | `id` | `id` | `id_icims` | `id` |
-| `title` | `title` | `title` | `name` | `title` | `name` |
-| `job_url` | built from `externalPath` | `absolute_url` | `ref` | built from `id` | built from `id` |
-| `raw_jd_text` | `jobDescription` (HTML) | `content` (HTML) | `jobAd.sections.jobDescription.text` | `description` | `description` |
-| `location_city` | `locationsText` | `location.name` | `location.city` | `normalized_location` | `location` |
-| `date_posted` | `postedOn` | `updated_at` | `releasedDate` | `posted_date` | `updated_at` |
-| `business_unit` | `bulletFields[1]` | `departments[0].name` | `department.label` | `business_category` | `team` |
-| `source_platform` | `Workday` | `Greenhouse` | `SmartRecruiters` | `Amazon` | `Eightfold` |
