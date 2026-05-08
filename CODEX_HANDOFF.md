@@ -3,6 +3,26 @@
 **Repo:** `/Users/incognito/firecrawl_Supabase`  
 **Goal:** Crack 8 company career portals — get direct ATS API access for each, persist to registries so every future run gets jobs automatically.
 
+**Status:** Historical handoff. The targeted crack session is complete; do not use this file as the active task list. Current operating guidance lives in `CLAUDE.md`, current portal status lives in `KNOWN_PORTALS.md`, and chronological evidence lives in `RUN_HISTORY.md`.
+
+---
+
+## Progress Update (2026-05-07)
+
+Market Data V1 has been harvested into active mechanisms where verified. Do not run legacy notebooks/scripts directly.
+
+| Company | Current Provider Route | Status |
+|---------|-------------------------|--------|
+| WESCO | `ats=oracle` (`finder=findReqs`, site `CX`) | ✅ cracked |
+| CMA CGM | `ats=sap_jobs2web_html` (`optionsFacetsDD_country=IN`) | ✅ cracked |
+| Volvo Group | `ats=sap_jobs2web_html` (`locationsearch=India`) | ✅ cracked |
+| Michelin | `ats=michelin_astro` (`jobs.michelin.in` Astro/CXF criteria JSON) | ✅ cracked |
+
+Validation signal:
+- Direct provider smoke test returned CMA CGM `4`, Volvo Group `27`, and Michelin `19` India jobs with non-empty detail JDs.
+- WESCO targeted run saved `7` jobs.
+- Microsoft legacy GCS endpoint was tested and rejected as stale; keep Microsoft JS-required until fresh XHR discovery.
+
 ---
 
 ## Progress Update (2026-05-02)
@@ -148,7 +168,9 @@ The human opens each career URL in Chrome → filters to India → watches Netwo
 
 ---
 
-## Target Companies
+## Completed Target Companies (Historical)
+
+All targets in this section were either cracked or moved to their correct provider route by 2026-05-02. The details below are preserved as evidence/context, not as open work.
 
 ### 1. HCL Technologies (Workday)
 - **Career URL:** https://careers.hcltech.com/go/India/9553955/
@@ -275,17 +297,11 @@ Key = `company` field from `KNOWN_PORTALS.md` (exact match, case-sensitive).
 
 ## Files to Edit
 
-| File | What to change |
-|------|----------------|
-| `scraper/workday_registry.json` | Add `india_uuid` entries for companies 1–7 |
-| `scraper/KNOWN_PORTALS.md` | Update status from `⚠️`/`🟡` to ✅ for each cracked company; add ABB row |
-| `scraper/providers/yello.py` | CREATE — Yello/Recsolu provider for EY India (company 8) |
-| `scraper/registry.py` | Register `YelloProvider` with key `yello` (company 8) |
-| `scraper/company_industries.json` | Add ABB: `"IT/Industrial Automation"`, EY India: `"Professional Services"` if missing |
+No active edits remain from this handoff. Provider code and portal/industry mappings were already added during the crack session.
 
 ---
 
-## Test Command Per Company
+## Historical Test Commands
 
 ```bash
 cd /Users/incognito/firecrawl_Supabase/scraper
@@ -300,34 +316,30 @@ python main.py --company "Thomson Reuters"
 python main.py --company "ABB"
 python main.py --company "EY India"
 
-# Success = log shows ">= 5 new jobs" and jobs.json written to:
-# scraper/output/<Company_Name>/Outputs/YYYY_MM_DD/jobs.json
+# Success = log shows jobs scraped/saved and jobs.json written under:
+# All_CSV_Outputs_thru_firecrawl/<Company_Name>/Outputs/YYYY_MM_DD/jobs.json
 ```
 
 ---
 
 ## What NOT to Do
 
-- Do NOT run `--scope global` or `--enrich-only` until all 8 companies are cracked and tested
 - Do NOT call any cloud AI API — LM Studio only at `http://localhost:1234/v1`
 - Do NOT use `crawl()` from Firecrawl — banned in this project
-- Do NOT add fields outside the 9-field canonical schema: `job_id, job_title, job_description, company_name, Industry, Location, apply_url, main_skills, side_skills`
-- Do NOT amend existing registry entries — only add new ones
+- Do NOT add fields outside the canonical schema in `scraper/schema.py`
+- Do NOT amend existing registry entries unless you have a verified replacement route
 
 ---
 
 ## Session Context
 
-Phase 1 scrape just completed: **9,868 jobs from 45 companies** saved to `scraper/output/`.  
-Phase 2 (LLM enrichment) not yet run — waiting until these 8 companies are cracked first to maximize the enrichment batch.
+This handoff no longer blocks enrichment/upload. For the current weekly run, use the commands in `CLAUDE.md`:
 
-After cracking all 8, run:
 ```bash
-# Phase 1 delta (new companies only)
-python main.py --skip-enrich --company "HCL Technologies"
-# ... repeat for each newly cracked company
+# Phase 1 — Docker on, LM Studio off
+python main.py --skip-enrich --scope global --global-cap 2000
 
-# Phase 2 — turn LM Studio ON, Docker OFF
+# Phase 2 — LM Studio on, Docker off
 python main.py --enrich-only
 
 # Phase 3 — Supabase upsert

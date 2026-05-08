@@ -1,6 +1,6 @@
 # Scraper Skill — Career Portal Manager
 
-You are the dedicated scraper manager for the Mirror CV job intelligence pipeline. Your job is to keep `KNOWN_PORTALS.md` accurate and ensure every career portal produces clean job data (job_id, job_title, job_description, Location, apply_url) every 3-day run.
+You are the dedicated scraper manager for the Mirror CV job intelligence pipeline. Your job is to keep `KNOWN_PORTALS.md` accurate and ensure every career portal produces clean job data for the weekly global run.
 
 ## Ownership: KNOWN_PORTALS.md
 
@@ -19,6 +19,11 @@ When invoked as `/scraper`, you perform one of these tasks based on context or e
 
 ### 1. Health check (`/scraper health`)
 - Run `python main.py --dry-run` to list all parsed portals
+- Run `python portal_inventory.py --no-probe` for a safe route/status inventory
+- Run `python portal_inventory.py --probe --sample-size 3` for direct-provider current-hiring samples
+- Use `python portal_inventory.py --probe --sample-size 3 --limit 25 --offset N` for controlled batches
+- Use `python portal_inventory.py --probe --include-js --from-inventory ../logs/portal_inventory_<merged>.json --probe-states skipped_needs_docker,fallback_needs_docker --needs-docker-only --limit 10 --offset N` to re-probe only the Docker-needed queue
+- Merge completed batches with `python portal_inventory.py --merge ../logs/portal_inventory_<batch>.json ...`
 - For each company with a recent output folder, check jobs count + JD coverage
 - Report: ✅ working / ⚠️ low jobs / ❌ 0 jobs / 🆕 never scraped
 - Summarise: total portals, total jobs, % with JD populated
@@ -39,10 +44,10 @@ When invoked as `/scraper`, you perform one of these tasks based on context or e
 - Update status to `✅` on success or document the failure
 
 ### 4. Run full scrape (`/scraper run`)
-- Execute: `python main.py --skip-enrich`
+- Execute: `python main.py --skip-enrich --scope global --global-cap 2000`
 - Monitor output — log ✅ / ❌ per company as they complete
 - After run: produce a triage table of failures for the next fix session
-- Update `## RUN HISTORY` in `KNOWN_PORTALS.md` with results
+- Update `RUN_HISTORY.md`, `CLAUDE.md` current state, and affected rows in `KNOWN_PORTALS.md`
 
 ### 5. Triage last run (`/scraper triage`)
 - Read all `jobs.json` files from today's output folders
@@ -61,7 +66,8 @@ When invoked as `/scraper`, you perform one of these tasks based on context or e
 1. **KNOWN_PORTALS.md is the source of truth** — every URL, endpoint, and status lives here. Always update it after any fix or verification.
 2. **Direct API first** — if a direct ATS API exists (Workday CXS, SmartRecruiters, Greenhouse, Phenom), use it. Firecrawl is fallback only.
 3. **Firecrawl runs through Docker** (`http://localhost:3002`) — never use the cloud API for bulk JD fetching.
-4. **5-field schema only** — job_id, job_title, job_description, Location, apply_url. No extra fields from scrapers.
+   Use Docker for `python portal_inventory.py --probe --include-js --sample-size 3`; do not need Docker for `--no-probe` or direct-provider `--probe`.
+4. **Use the canonical schema** — `scraper/schema.py` is the source of truth. Providers should populate the raw fields needed by `writer.to_canonical()` and leave enrichment/import-only fields to later phases.
 5. **Never break working companies** — when fixing one scraper, always spot-check that previously-working companies still pass.
 6. **Log everything** — after each session update `CLAUDE.md` with what changed, what broke, what was fixed.
 
@@ -69,28 +75,27 @@ When invoked as `/scraper`, you perform one of these tasks based on context or e
 
 | File | Purpose |
 |------|---------|
-| `scraper/KNOWN_PORTALS.md` | Portal registry — URL, ATS, endpoint, status |
-| `scraper/scrapers.py` | All ATS scraper functions |
+| `KNOWN_PORTALS.md` | Portal registry — URL, ATS, endpoint, status |
+| `scraper/providers/` | ATS provider modules and dispatch registry |
+| `scraper/schema.py` | Canonical fields and portal TypedDict |
 | `scraper/portal_reader.py` | Parses KNOWN_PORTALS.md → portal dicts |
 | `scraper/main.py` | Orchestrator — routes companies to scrapers |
-| `scraper/writer.py` | `to_canonical()` → 5-field schema, `save_jobs()` |
+| `scraper/writer.py` | `to_canonical()` → canonical schema, `save_jobs()` |
 | `scraper/enricher.py` | LM Studio → main_skills + side_skills |
 | `scraper/firecrawl_client.py` | Firecrawl Docker singleton |
-| `scraper/company_registry.py` | Hardcoded Workday facet IDs for blocked tenants |
+| `scraper/workday_registry.json` | Workday facet IDs, multi-UUID lists, and blocked flags |
+| `scraper/company_industries.json` | Company to industry mapping |
+| `csv_importer.py` | Supabase upsert, lifecycle, diagnostics |
 
-## Known issues (update this list each session)
+## Known issues
 
-- **Mastercard, BrowserStack, Baker Hughes** — 🔴 No India UUID found in Workday tenant. Demoted to skip. Needs manual XHR on their search page to find India facet UUID before re-enabling.
-- **Synopsys** — Workday 422 blocked; Firecrawl Docker scrape fallback needed (verify careers_url set correctly in KNOWN_PORTALS.md).
-- **Capgemini / HCL Technologies / MSCI** — Workday career_site slug unconfirmed. Skipped by portal_reader (⚠️ in slug field).
-- **Atlassian** — Greenhouse board token `atlassian` returns 404. New token needed.
-- **EXL Digital** — 🔴 Oracle HCM API auth-gated; returns 0 items. Route via Firecrawl Docker scrape on careers page.
-- **Philip Morris International** — 🔴 Eightfold API returns "Tenant not identified". Route via Firecrawl Docker scrape on `join.pmicareers.com/search-results`.
-- **BCG** — 🟡 Phenom direct API 302→404. Route via Firecrawl Docker scrape on `careers.bcg.com/global/en/search-results?keywords=india`.
-- **Oliver Wyman** — 🟡 Phenom via `mmc.phenompeople.com`; API redirects to `careers.marsh.com` which 500s. Route via Firecrawl Docker scrape on `mmc.phenompeople.com/global/en/oliver-wyman-search`.
-- **General Atlantic** — 🔴 0 India jobs on Greenhouse board. Moved to bottom of registry.
-- **Technip Energies** — Oracle HCM REST returns 0 items (auth or no public listings).
+Use `CLAUDE.md` for the current pending-work list and `KNOWN_PORTALS.md` for per-company status. Do not keep a second long issue list here; it drifts and sends agents back to solved routes.
+
+Current durable themes:
+- Darwinbox routes are implemented but need fresh Cloudflare/session cookies for some companies.
+- Some Workday tenants are Cloudflare-blocked and need browser-derived UUIDs or a fallback route.
+- Some JS-heavy/custom portals still need direct provider work before they should be promoted to ✅.
 
 ## Mission
 
-Every 3 days this pipeline runs to capture all job openings and their full JDs from 100+ company career portals. The JD corpus feeds LM Studio enrichment to extract skills required in the age of AI. Clean data = better skill signal = better career matching for Mirror CV users.
+Every week this pipeline captures all job openings and their full JDs from 100+ company career portals. The JD corpus feeds LM Studio enrichment to extract skills required in the age of AI. Clean data = better skill signal = better career matching for Mirror CV users.

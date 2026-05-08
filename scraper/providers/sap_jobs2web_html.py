@@ -31,7 +31,9 @@ _HEADERS = {
 }
 
 _POSTING_ID_RE = re.compile(r"/(\d{6,})/?$")
-_IN_COUNTRY_TOKEN_RE = re.compile(r"\bIN\b", re.IGNORECASE)
+# Jobs2Web commonly uses ", IN" as the India country code. Keep this stricter
+# than a plain word-boundary match so Indiana/US locations do not leak in.
+_IN_COUNTRY_TOKEN_RE = re.compile(r"(?:,\s*IN(?:\s*,|\s*$)|\bIndia\b)", re.IGNORECASE)
 
 
 class SAPJobs2WebHTMLProvider:
@@ -84,8 +86,18 @@ def _extract_rows(list_html: str) -> list[dict]:
         title = strip_html(_unescape(a.get_text(" ", strip=True)))
         loc_node = row.select_one("span.jobLocation")
         listing_loc = strip_html(_unescape(loc_node.get_text(" ", strip=True))) if loc_node else ""
+        cells = [strip_html(_unescape(c.get_text(" ", strip=True))) for c in row.select("td")]
+        if len(cells) > 4 and cells[4]:
+            business_unit = cells[4]
+        else:
+            business_unit = cells[2] if len(cells) > 2 and cells[2] != listing_loc else ""
 
-        out.append({"href": href, "title": title, "listing_location": listing_loc})
+        out.append({
+            "href": href,
+            "title": title,
+            "listing_location": listing_loc,
+            "business_unit": business_unit,
+        })
 
     return out
 
@@ -229,7 +241,7 @@ def _scrape_sap_jobs2web_html(portal: Portal, max_jobs: int | None = None) -> li
                     "title": title,
                     "job_url": apply_url,
                     "source_api_url": listing_url,
-                    "business_unit": "",
+                    "business_unit": row.get("business_unit", ""),
                     "raw_jd_text": raw_jd,
                     "location_city": loc,
                     "date_posted": detail.get("date_posted", ""),

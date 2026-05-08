@@ -12,6 +12,9 @@ from providers.mynexthire import MyNextHireProvider
 from providers.icims_custom import IcimsCustomProvider
 from providers.mckinsey import McKinseyProvider
 from providers.aditya_birla import AdityaBirlaProvider
+from providers.apple_jobs import AppleJobsProvider
+from providers.cognizant_xml import CognizantXMLProvider
+from providers.deshaw_india import DEShawIndiaProvider
 from providers.pcsx import PCSXProvider
 from providers.taleo import TaleoProvider
 from providers.talentbrew import TalentBrewProvider
@@ -20,9 +23,12 @@ from providers.siemens_externaljobs import SiemensExternalJobsProvider
 from providers.deloitte_usi import DeloitteUSIProvider
 from providers.yello import YelloProvider
 from providers.sap_jobs2web_html import SAPJobs2WebHTMLProvider
+from providers.tata_elxsi import TataElxsiProvider
+from providers.vector_consulting import VectorConsultingProvider
 from providers.pepsico_jobs_api import PepsiCoJobsAPIProvider
 from providers.skima_careers import SkimaCareersProvider
 from providers.hm_wp_jobs import HMWordPressJobsProvider
+from providers.michelin_astro import MichelinAstroProvider
 from providers.pinpoint import PinpointProvider
 from providers.spire2grow import Spire2GrowProvider
 from providers.zwayam import ZwayamProvider
@@ -48,6 +54,9 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "mynexthire": MyNextHireProvider(),
     "mckinsey": McKinseyProvider(),
     "aditya_birla": AdityaBirlaProvider(),
+    "apple_jobs": AppleJobsProvider(),
+    "cognizant_xml": CognizantXMLProvider(),
+    "deshaw_india": DEShawIndiaProvider(),
     "pinpoint": PinpointProvider(),
     "pcsx": PCSXProvider(),
     "taleo": TaleoProvider(),
@@ -57,9 +66,12 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "deloitte_usi": DeloitteUSIProvider(),
     "yello": YelloProvider(),
     "sap_jobs2web_html": SAPJobs2WebHTMLProvider(),
+    "tata_elxsi": TataElxsiProvider(),
+    "vector_consulting": VectorConsultingProvider(),
     "pepsico_jobs_api": PepsiCoJobsAPIProvider(),
     "skima_careers": SkimaCareersProvider(),
     "hm_wp_jobs": HMWordPressJobsProvider(),
+    "michelin_astro": MichelinAstroProvider(),
     "spire2grow": Spire2GrowProvider(),
     "zwayam": ZwayamProvider(),
 }
@@ -159,3 +171,45 @@ def dispatch_scrape(
         max_jobs=max_jobs,
         validate_mode=validate_mode,
     )
+
+
+def probe_scrape(
+    portal: Portal,
+    log: logging.Logger,
+    *,
+    max_jobs: int | None = None,
+    validate_mode: bool = False,
+    allow_firecrawl: bool = False,
+) -> ProviderResult:
+    """Probe one portal without implicit Firecrawl fallback unless allowed.
+
+    Inventory runs need to distinguish "direct route returned zero" from
+    "direct route would need Firecrawl". The production dispatch path should keep
+    falling back automatically; this probe path is deliberately conservative.
+    """
+    provider = _provider_for_portal(portal)
+
+    if provider is _FIRECRAWL_PROVIDER and not allow_firecrawl:
+        return ProviderResult.fallback(
+            policy=FALLBACK_FIRECRAWL_EXTRACT,
+            reason="firecrawl_probe_skipped",
+            portal=portal,
+        )
+
+    result = provider.scrape(
+        portal,
+        max_jobs=max_jobs,
+        validate_mode=validate_mode,
+    )
+
+    if result.fallback_policy == FALLBACK_FIRECRAWL_EXTRACT and allow_firecrawl:
+        jobs = _apply_fallback(
+            result,
+            portal,
+            log,
+            max_jobs=max_jobs,
+            validate_mode=validate_mode,
+        )
+        return ProviderResult.success(jobs)
+
+    return result

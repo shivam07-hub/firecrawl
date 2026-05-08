@@ -36,7 +36,7 @@ Use this file as the single handoff status board for Codex/Claude.
   - `scraper/providers/phenom.py` — full Phenom API logic moved here
   - `scraper/providers/generic_json.py` — `scrape_get`, `_parse_json_response` moved here
   - `scraper/providers/firecrawl_js.py` — `scrape_validate`, `scrape_extract`, link patterns moved here
-  - `scraper/scrapers.py` — now contains ONLY lazy-import backward-compat shims (no logic)
+  - `scraper/scrapers.py` — historical shim at this phase; later deleted in A1
 - Behavior changes:
   - `scrapers.py` is now a pure shim file; all ATS logic lives in `providers/`
   - Circular import resolved via lazy imports in all shim functions

@@ -109,9 +109,11 @@ Client → POST /v1/scrape (or /v2/*)
 
 ---
 
-## SCRAPER (`firecrawl/scraper/`)
+## SCRAPER (`scraper/`)
 
-**From Dump 4 onwards the canonical schema is 5 raw fields only.** The previous 25-field schema is retired. A weekly job scraper reads `firecrawl/KNOWN_PORTALS.md`, scrapes 5 raw fields per job, enriches with LLM (skills only), and loads to Supabase.
+Current scraper architecture and state are maintained in `CLAUDE.md`, `KNOWN_PORTALS.md`, `RUN_HISTORY.md`, and `scraper/schema.py`. Treat older dump/session notes in this file as historical context only.
+
+The scraper reads `KNOWN_PORTALS.md`, routes each portal through `scraper/providers/`, writes canonical JSON/CSV output, enriches with LM Studio, and loads to Supabase.
 
 ### Files
 
@@ -120,17 +122,19 @@ Client → POST /v1/scrape (or /v2/*)
 | `config.py` | Env vars: LM Studio base URL/key/model, Firecrawl URL, output paths |
 | `utils.py` | `strip_html`, `is_india`, `job_hash`, `company_slug` |
 | `portal_reader.py` | Parses `KNOWN_PORTALS.md` by section → list of portal dicts |
-| `scrapers.py` | Workday (POST + India UUID + pagination), SmartRecruiters, Greenhouse, generic GET |
-| `firecrawl_client.py` | `scrape(url)` + `crawl(url)` against localhost:3002 with poll loop |
-| `enricher.py` | LM Studio enrichment: `enrich_job()` fills null fields; `extract_jobs_from_markdown()` for FC pages |
-| `writer.py` | `to_canonical()` → **5-field raw schema** (Dump 4+); `save_jobs()` → deduplicated JSON + CSV; `load_to_supabase()` → upsert pipeline |
+| `schema.py` | `Portal` TypedDict + canonical field list |
+| `providers/` | Workday, SmartRecruiters, Greenhouse, Lever, Phenom, SAP, Oracle, custom provider modules |
+| `firecrawl_client.py` | Firecrawl singleton helpers; `crawl()` is intentionally not exposed |
+| `enricher.py` | LM Studio enrichment: `enrich_job()` fills `main_skills` + `side_skills` |
+| `writer.py` | `to_canonical()` → canonical schema; `save_jobs()` → deduplicated JSON + CSV |
 | `main.py` | Orchestrator: `--company`, `--ats`, `--dry-run`, `--skip-enrich`, `--resume`, `--enrich-only` |
+| `csv_importer.py` | Supabase upsert, lifecycle, diagnostics |
 | `test_llm.py` / `test_pipeline.py` | Test scripts |
 
 ### Setup (once)
 
 ```bash
-cd firecrawl/scraper
+cd scraper
 cp .env.example .env
 # Required: set FIRECRAWL_API_KEY to your paid Firecrawl API key (fc-...)
 # If API key is not given, run through Docker — Firecrawl should be configured to run through Docker
@@ -150,29 +154,28 @@ After editing, restart Codex. The `firecrawl_scrape`, `firecrawl_extract`,
 python main.py --dry-run                 # verify KNOWN_PORTALS.md parsed correctly
 python main.py --company "Syngenta"      # test single company
 python main.py --ats smartrecruiters     # test one ATS type
-python main.py                           # full weekly run
-python main.py --resume                  # skip companies already in All_CSV_Outputs (resume interrupted run)
-python main.py --resume --skip-enrich    # scrape only, no LLM — use when Docker on, LM Studio off
+python main.py --skip-enrich --scope global --global-cap 2000  # full scrape, no LLM
+python main.py --resume --skip-enrich    # resume an interrupted run only
 python main.py --enrich-only             # enrich saved jobs in-place — use when LM Studio on, Docker off
 ```
 
 ### Two-phase run (low-RAM machines)
 
-Split between Firecrawl API (always on, cloud) vs Firecrawl through Docker. When the scraping/crawling through firecrawl is done, only then we start LM Studio (local, RAM-heavy).
+Split between Docker/Firecrawl and LM Studio because local RAM is constrained. Finish scraping first, then start LM Studio for enrichment.
 
-**Phase 1 — Scraping** (Firecrawl API key set, LM Studio off):
+**Phase 1 — Scraping** (Docker/Firecrawl on, LM Studio off):
 ```bash
-python main.py --resume --skip-enrich
+python main.py --skip-enrich --scope global --global-cap 2000
 ```
-Scrapes all portals not yet in `All_CSV_Outputs`. Workday: uses CXS API + JD fetch.
-JS-heavy: uses `scrape_extract()` via Firecrawl cloud LLM/ else use through docker.
+Scrapes all active portals. Workday uses CXS API + JD fetch.
+JS-heavy: use direct ATS APIs where possible; otherwise use Firecrawl Docker first and cloud only as a last resort.
 `--skip-enrich` suppresses the LM Studio enrichment pass only.
 
 **Phase 2 — Enrichment** (LM Studio on, no firecrawl needed):
 ```bash
 python main.py --enrich-only
 ```
-Walks every `jobs.json` in `All_CSV_Outputs`, enriches jobs that have `raw_jd_text` but missing `skills_required', rewrites `.json`.
+Walks every `jobs.json`, enriches jobs that have `job_description` but missing `main_skills`, and rewrites `.json`.
 
 ### ATS routing
 
@@ -180,8 +183,8 @@ Walks every `jobs.json` in `All_CSV_Outputs`, enriches jobs that have `raw_jd_te
 - **SmartRecruiters** → direct GET `?country=in` (includes full JD in API response)
 - **Greenhouse** → direct GET, India filter in Python (includes full JD in API response)
 - **Custom/SAP/Oracle** → direct GET, fallback to Firecrawl extract if HTML response
-- **JS-heavy** (Eightfold, Avature, custom SPAs) → `scrape_extract()` via Firecrawl cloud LLM
-- All Firecrawl paths now can use the **paid cloud API** (`api.firecrawl.dev`) — can switch to local Docker for testing
+- **JS-heavy** (Eightfold, Avature, custom SPAs) → Firecrawl Docker fallback or a dedicated provider when cracked
+- Firecrawl cloud is a last resort for portals that cannot be handled directly or through Docker
 
 ### LLM enrichment flow (Dump 4+)
 
@@ -209,9 +212,9 @@ Start with low-risk targets before JS-heavy ones: **Stripe → ServiceNow → Sa
 
 ---
 
-## PIPELINE v2 — CANONICAL ARCHITECTURE (Dump 4+)
+## ARCHIVED PIPELINE v2 NOTES
 
-This is the standardised E2E pipeline used from Dump 4 onwards. Do not deviate from this structure without updating this section.
+This section is preserved for historical context. The current schema is defined in `scraper/schema.py` and summarized in `CLAUDE.md`.
 
 ### Canonical schema — 8 fields total
 
@@ -238,7 +241,7 @@ Firecrawl API is **never used** — banned - unless extremely important. Only `s
 Phase 1 — Scrape
   → ATS direct API (Workday CXS, SmartRecruiters, Greenhouse, Phenom, etc.)
   → Firecrawl scrape() ONLY as fallback for JS-heavy portals (not crawl) and through docker.
-  → Output: 5-field raw JSON per company
+  → Output: canonical raw JSON per company
 
 Phase 2 — LLM Enrichment (LM Studio)
   → Input: job_description (raw JD text)
@@ -286,7 +289,9 @@ CREATE TABLE jobs (
 
 ---
 
-## RUN HISTORY & CURRENT STATE
+## ARCHIVED RUN HISTORY
+
+Do not use this section as current state or an active task list. Current state lives in `CLAUDE.md`; chronological updates live in `RUN_HISTORY.md`.
 
 ### Session 2026-05-02 — Procter & Gamble cracked via Phenom SSR
 
@@ -414,8 +419,8 @@ CREATE TABLE jobs (
 
 **Code changes:**
 - `scraper/config.py` — `WORKDAY_JD_FETCH_LIMIT` default raised 200→500. Was silently capping JD fetch for all large Workday companies (Accenture 500 jobs had only 200 JDs, State Street 351→200, DBS 285→200).
-- `scraper/company_registry.py` — Added 4 new standard Workday tenants (3M, NXP, Autodesk, DXC) with `locationCountry` facet. Added Roche (`locations` facet). Added Barclays (12 India office UUIDs) and Maersk (26 India office UUIDs) using `india_uuids` list support.
-- `scraper/scrapers.py` — `india_uuids` list support: `reg.get('india_uuids') or [reg['india_uuid']]` allows multi-UUID facet queries for tenants with per-office location facets (Barclays, Maersk).
+- Historical note: these Workday entries later moved from `company_registry.py` into `scraper/workday_registry.json`.
+- Historical note: this logic later moved from `scrapers.py` into provider modules under `scraper/providers/`.
 - `scraper/probe_cxs.py` — New tool for probing Workday CXS India UUIDs for a list of tenants.
 
 **New companies scraped (2026-04-19):**
@@ -469,12 +474,12 @@ CREATE TABLE jobs (
 - `python main.py --skip-enrich` completed. 94 output files, 2,376 total jobs, 1,730 with `job_description`.
 - Output path: `/Users/incognito/Mirror CV/firecrawl/All_CSV_Outputs_thru_firecrawl/` (set via `OUTPUT_BASE` in .env)
 
-**Phase 2 status (in progress as of session close):**
+**Historical Phase 2 status (completed later):**
 - `python main.py --enrich-only` running as PID 58046, log at `/tmp/enrich_rag.log`
 - 1,530 jobs need enrichment (have JD, no main_skills). ~4h ETA at ~10s/job.
 - All skills now sourced directly from Lightcast L3 taxonomy via RAG retrieval.
 
-**Next after Phase 2 completes:**
+**Historical next step (completed later):**
 - Run `python csv_importer.py` (Phase 3 — Supabase upsert)
 - Verify row count in Supabase matches enriched job count
 
@@ -521,7 +526,7 @@ LDC (20), STMicro (3), Morgan Stanley (3), AmEx (3), Chanel (1),
 Eli Lilly (3), Google (3), Infosys (3), L'Oréal (3), TCS (3), Wipro (3),
 Cognizant (2), Stellantis (3), AstraZeneca (3)
 
-**Still broken / needs next run:**
+**Historical broken list (superseded by `KNOWN_PORTALS.md`):**
 - Engie, Mastercard, Novartis, Synopsys — Workday fallback URL fix applied; re-run to verify
 - Baker Hughes, Philips, TotalEnergies, Volvo Group — need India-filtered URL in KNOWN_PORTALS.md
 - Microsoft — Firecrawl crawled Azure error page; needs correct careers URL
@@ -579,7 +584,7 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
 
 ## MISSION STATEMENT
 
-**Goal:** Keep Firecrawl running to capture all job openings + full JDs from 100+ company portals every 3 days. The JD corpus is used to extract skills required in the age of AI (via LM Studio enrichment → Supabase). Every scraper build decision must serve this mission — if a direct API exists, use it; Firecrawl is the fallback, not the default.
+**Goal:** Keep Firecrawl running to capture all job openings + full JDs from 100+ company portals every week. The JD corpus is used to extract skills required in the age of AI (via LM Studio enrichment → Supabase). Every scraper build decision must serve this mission — if a direct API exists, use it; Firecrawl is the fallback, not the default.
 
 ---
 
@@ -629,27 +634,23 @@ User is upgrading to paid Firecrawl. With paid tier, rate limiting is removed. R
   - API: POST to Darwinbox candidate search endpoint (inspect XHR)
 - **SAP SuccessFactors direct REST**: Monitor Deloitte, GMR Group, CMA CGM, CNHI, Deutsche Bank
   - API: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json`
-- Wire all new scrapers into `to_canonical()` → `save_jobs()` (5-field schema only)
+- Wire all new providers into `to_canonical()` → `save_jobs()` using `scraper/schema.py` as the field source of truth.
 
-### Chunk 4 — Archon 3-day cadence + docs (REPEATS EVERY 3 DAYS automatically)
-- Update `.archon/workflows/scraper-weekly-run.yaml` → rename to `scraper-3day-run.yaml`
-- Schedule: every 3 days via Archon cron (not weekly)
-- After each run: update RUN HISTORY in KNOWN_PORTALS.md + AGENTS.md
-- Archon workflow nodes: check-docker + check-lm + test-portals → scrape (--skip-enrich) → enrich (--enrich-only) → upload (csv_importer.py) → summarize
-- **This chunk is the repeating operational heartbeat — set it once, it runs itself**
+### Chunk 4 — Retired cadence note
+The old 3-day cadence proposal is retired. The active operating model is a weekly full run, with `RUN_HISTORY.md` and changed `KNOWN_PORTALS.md` rows updated after each run.
 
 ---
 
-## NEXT SESSION — Weekly Scraper Run (Dump 5)
+## WEEKLY SCRAPER RUN
 
-**Goal:** Execute a full fresh weekly scrape of all 100+ companies, enrich with LM Studio, upload to Supabase.
+**Goal:** Execute a full fresh weekly scrape, enrich with LM Studio, upload to Supabase, and update `RUN_HISTORY.md` + changed `KNOWN_PORTALS.md` rows.
 
-**How to run (requires Docker + LM Studio both on):**
+**How to run through Archon:**
 ```bash
 archon workflow run scraper-weekly-run --no-worktree "Weekly dump $(date +%Y-%m-%d)"
 ```
 - Layer 0: check-docker + check-lm + test-portals (parallel pre-flight)
-- Layer 1: scrape — `python main.py --skip-enrich` (full fresh scrape, 40-90 min)
+- Layer 1: scrape — `python main.py --skip-enrich --scope global --global-cap 2000` (full fresh scrape, 40-90 min)
 - Layer 2: enrich — `python main.py --enrich-only` (LM Studio, 20-40 min)
 - Layer 3: upload — `python csv_importer.py` (Supabase upsert, < 5 min)
 - Layer 4: summarize — AI run report
@@ -664,12 +665,12 @@ archon workflow run scraper-weekly-run --no-worktree --resume "Weekly dump $(dat
 
 **IMPORTANT — do NOT add --resume for a fresh weekly run.** `--resume` is only for recovering from a mid-run crash within the same session. Using it on a new week skips all companies that already have output folders (18 min run that does nothing).
 
-**Architecture goal (v2):**
+**Current architecture:**
 ```
 KNOWN_PORTALS.md  ←  portal config (URL, ATS type, company name)
       ↓
-scrapers.py  ←  ATS direct API → 5-field raw JSON per company
-  (Firecrawl scrape() only as JS-heavy fallback —  Use through docker for everything - can crawl - can scrape - use API only after confirming.)
+providers/  ←  ATS direct API → canonical raw JSON per company
+  (Firecrawl scrape/extract only as JS-heavy fallback; Docker first, cloud last)
       ↓
 enricher.py  ←  LM Studio → main_skills + side_skills from job_description
       ↓
@@ -677,9 +678,9 @@ csv_importer.py / load_to_supabase()  ←  upsert to Supabase on job_id
 ```
 
 **What to do for Market Data_V1_of_Scrapers/ folder:**
-1. all company-specific scrapers are the first working version of the scrapers. The scrapers in Firecrawl folder are buit with the pricniples of individual scrapers in the Market Data_V1_of_scrapers
-2. For any upcoming company scrapers - build it at /Users/incognito/Mirror CV/firecrawl_Supabase/scraper(all new scrapers are placed here) Wire output into `to_canonical()` → `save_jobs()` using the **5-field schema only**
-3. KNOWN_PORTALS.md is the URL config source — personal scrapers read endpoint from it and keep updating on it so that endpoints are updated and confirmed after every week.
+1. Treat it as historical reference only.
+2. Build new reusable scrapers in `scraper/providers/`.
+3. Keep `KNOWN_PORTALS.md` as the URL/provider config source and update rows after every verified route change.
 
 **Note on LM Studio:** User runs LM Studio locally. Multiple processes can share `localhost:1234` safely — it is stateless per request. If model outputs look wrong, verify `LM_STUDIO_MODEL` in `.env` matches the loaded model.
 

@@ -159,13 +159,14 @@ def _extract_oracle_nested(data: dict) -> list[dict]:
     return req_list if isinstance(req_list, list) else []
 
 
-def _parse_oracle_job(p: dict, host: str) -> dict:
+def _parse_oracle_job(p: dict, host: str, site_num: str = "careers") -> dict:
     """Map Oracle HCM field names (Title, Id, PrimaryLocation) to canonical shape."""
     title = p.get('Title') or p.get('title') or ''
     loc_raw = p.get('PrimaryLocation') or p.get('primaryLocation') or ''
     loc = loc_raw if isinstance(loc_raw, str) else ''
     jid = str(p.get('Id') or p.get('requisitionId') or p.get('id') or job_hash(title, ''))
-    job_url = f"https://{host}/hcmUI/CandidateExperience/en/sites/careers/job/{jid}" if jid else ''
+    site = site_num or "careers"
+    job_url = f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}" if jid else ''
     return {
         '_title': title,
         '_loc':   loc,
@@ -194,7 +195,7 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
         for p in raw_items:
             if not isinstance(p, dict):
                 continue
-            mapped = _parse_oracle_job(p, host)
+            mapped = _parse_oracle_job(p, host, site_num)
             if not mapped['_title']:
                 continue
             india_only = portal.get('india_only', True)

@@ -149,5 +149,41 @@
   "BlackBerry": {
     "india_facet_param": "Country",
     "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Accenture": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Chanel": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Fidelity Investments": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Novartis": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Salesforce": {
+    "india_facet_param": "CF_-_REC_-_LRV_-_Job_Posting_Anchor_-_Country_from_Job_Posting_Location_Extended",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Sanofi": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Wells Fargo": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "State Street": {
+    "india_facet_param": "Location_Country",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "DBS Bank": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
   }
 }

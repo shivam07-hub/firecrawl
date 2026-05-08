@@ -29,7 +29,11 @@ _LISTING_LINK_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _LISTING_LINK_RE_ADP = re.compile(
-    r'<a[^>]+href="(?P<href>/en/jobs/(?P<job_id>[^/]+)/[^"]+)"[^>]*>(?P<body>.*?)</a>',
+    r'<a[^>]+href="(?P<href>/en/jobs/(?P<job_id>[^/?#"<>\s]+)/[^"#<>\s]+/?)"[^>]*>(?P<body>.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_LISTING_LINK_RE_RADANCY = re.compile(
+    r'<a[^>]+class="[^"]*(?:\bsr-job-item__link\b|\bsearch-results-link\b)[^"]*"[^>]+href="(?P<href>/job/[^"]+/(?P<company_id>\d+)/(?P<job_id>\d+))"[^>]*>(?P<body>.*?)</a>',
     re.IGNORECASE | re.DOTALL,
 )
 _H2_RE = re.compile(r"<h2[^>]*>(?P<title>.*?)</h2>", re.IGNORECASE | re.DOTALL)
@@ -90,6 +94,13 @@ def _page_url(base_url: str, page: int) -> str:
         q["page"] = str(page)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q, doseq=True), parts.fragment))
 
+    # Radancy/TalentBrew search pages use ?p=N pagination.
+    if "/search-jobs/" in base_url and page > 1:
+        parts = urlsplit(base_url)
+        q = dict(parse_qsl(parts.query, keep_blank_values=True))
+        q["p"] = str(page)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q, doseq=True), parts.fragment))
+
     # TalentBrew location pages use path pagination:
     # /location/india-jobs/{org}/{country_id}/{facet_type}/{page}
     if page <= 1:
@@ -146,6 +157,32 @@ def _extract_listing_items(listing_html: str) -> list[dict]:
                 "href": href,
                 "title": title,
                 "listing_loc": "",
+            }
+        )
+
+    # Pattern C: Radancy/TalentBrew search pages (Citi, AstraZeneca).
+    for m in _LISTING_LINK_RE_RADANCY.finditer(listing_html):
+        job_id = (m.group("job_id") or "").strip()
+        href = (m.group("href") or "").strip()
+        body = m.group("body") or ""
+        if not job_id or not href or job_id in seen:
+            continue
+        seen.add(job_id)
+
+        title_m = _H2_RE.search(body)
+        title = strip_html(_html.unescape(title_m.group("title") if title_m else body))
+        if not title:
+            continue
+
+        loc_m = _LOC_RE.search(body)
+        listing_loc = strip_html(_html.unescape(loc_m.group("loc") if loc_m else ""))
+
+        items.append(
+            {
+                "job_id": job_id,
+                "href": href,
+                "title": title,
+                "listing_loc": listing_loc,
             }
         )
     return items

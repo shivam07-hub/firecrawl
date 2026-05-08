@@ -275,6 +275,15 @@ def _greenhouse(rows) -> list[Portal]:
 
 def _eightfold(rows) -> list[Portal]:
     out = []
+    direct_overrides: dict[str, dict] = {
+        # jobs.citi.com is a Radancy/TalentBrew HTML endpoint with server-rendered
+        # listings and JSON-LD detail pages. The Eightfold API returns 403.
+        "Citibank": {
+            "ats": "talentbrew",
+            "endpoint": "https://jobs.citi.com/search-jobs/India",
+            "india_only": True,
+        },
+    }
     for r in rows:
         status      = r.get('Status', '')
         ef_domain   = r.get('Eightfold Domain', '').strip()   # e.g. netflix.eightfold.ai
@@ -287,7 +296,7 @@ def _eightfold(rows) -> list[Portal]:
         tenant = ef_domain.replace('.eightfold.ai', '').strip()
         # Use direct API if we have tenant + api_domain; otherwise Firecrawl
         has_api = bool(tenant and api_domain)
-        out.append({
+        portal = {
             'company':           company,
             'ats':               'eightfold',
             'endpoint':          careers_url or f"https://{ef_domain}/careers",
@@ -296,7 +305,11 @@ def _eightfold(rows) -> list[Portal]:
             'eightfold_domain':  api_domain,
             'status':            status,
             'industry':          _industry(company),
-        })
+        }
+        if company in direct_overrides:
+            portal.update(direct_overrides[company])
+            portal['js_required'] = False
+        out.append(portal)
     return out
 
 
@@ -332,6 +345,10 @@ def _icims_custom(rows) -> list[Portal]:
 
 def _custom(rows) -> list[Portal]:
     out = []
+    ats_overrides: dict[str, str] = {
+        "Apple": "apple_jobs",
+        "Cognizant": "cognizant_xml",
+    }
     for r in rows:
         status  = r.get('Status', '')
         if not _is_active(status):
@@ -341,12 +358,13 @@ def _custom(rows) -> list[Portal]:
         endpoint = ep or careers
         js_req  = '🟡' in status or ep is None
         company = r.get('Company', '').strip()
+        ats = ats_overrides.get(company, 'custom')
         out.append({
             'company':      company,
-            'ats':          'custom',
+            'ats':          ats,
             'endpoint':     endpoint,
             'india_filter': r.get('India Filter', '').strip(),
-            'js_required':  js_req,
+            'js_required':  False if ats != 'custom' else js_req,
             'status':       status,
             'industry':     _industry(company),
         })
@@ -366,6 +384,9 @@ _SAP_ATS_OVERRIDES: dict[str, str] = {
     "EY India Experienced": "sap_jobs2web_html",
     # jobs.pepsicojobs.com exposes direct JSON API with India filter.
     "PepsiCo": "pepsico_jobs_api",
+    # Legacy Market Data route recovered: direct Jobs2Web HTML, no browser needed.
+    "CMA CGM": "sap_jobs2web_html",
+    "Volvo Group": "sap_jobs2web_html",
 }
 
 _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
@@ -375,6 +396,8 @@ _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
     "EY India": "https://eyglobal.yello.co/job_boards/1",
     "EY India Experienced": "https://careers.ey.com/ey/search/?createNewAlert=false&q=india&optionsFacetsDD_customfield1=&optionsFacetsDD_country=IN&optionsFacetsDD_city=",
     "PepsiCo": "https://www.pepsicojobs.com/api/jobs?page=1&sortBy=relevance&descending=false&internal=false&country=India",
+    "CMA CGM": "https://jobs.cmacgm-group.com/search/jobs?optionsFacetsDD_country=IN&startrow=0&sortColumn=referencedate&sortDirection=desc",
+    "Volvo Group": "https://jobs.volvogroup.com/search/?q=&locationsearch=India",
 }
 
 
@@ -485,10 +508,18 @@ _ATS_OVERRIDES: dict[str, str] = {
     'ADP': 'talentbrew',
     'H&M': 'hm_wp_jobs',
     'Intuit': 'talentbrew',
+    'AstraZeneca': 'talentbrew',
     'Adobe': 'phenom_ssr',
     'Siemens': 'siemens_externaljobs',
     'ABB': 'phenom_ssr',
+    'Eli Lilly': 'phenom_ssr',
+    'Cisco': 'phenom_ssr',
+    'LTIMindtree': 'sap_jobs2web_html',
+    'Tata Elxsi': 'tata_elxsi',
+    'Vector Consulting Group': 'vector_consulting',
+    'DE Shaw': 'deshaw_india',
     'Nykaa': 'skima_careers',
+    'Michelin': 'michelin_astro',
 }
 
 _TALEO_V1: set[str] = {'Standard Chartered Bank', 'Wipro'}
@@ -499,10 +530,18 @@ _INDIA_ONLY_OVERRIDES: dict[str, bool] = {
     'ADP': True,
     'H&M': True,
     'Intuit': True,
+    'AstraZeneca': True,
     'Adobe': True,
     'Siemens': True,
     'ABB': True,
+    'Eli Lilly': True,
+    'Cisco': True,
+    'LTIMindtree': True,
+    'Tata Elxsi': True,
+    'Vector Consulting Group': True,
+    'DE Shaw': True,
     'Nykaa': True,
+    'Michelin': True,
 }
 
 
@@ -519,7 +558,7 @@ def _other(rows, india_only: bool = True) -> list[Portal]:
             'company':     company,
             'ats':         ats,
             'endpoint':    r.get('Careers URL', '').strip(),
-            'js_required': js_req,
+            'js_required': False if ats != 'other' else js_req,
             'status':      status,
             'industry':    _industry(company),
             'india_only':  _INDIA_ONLY_OVERRIDES.get(company, india_only),
@@ -561,6 +600,7 @@ def _phenom_api(rows, india_only: bool = True) -> list[Portal]:
         # P&G search pages are Phenom SSR HTML with embedded eagerLoadRefineSearch,
         # not the JSON /api/jobs shape used by PhenomProvider.
         "Procter & Gamble": "https://www.pgcareers.com/in/en/search-results?qcountry=India",
+        "BCG": "https://careers.bcg.com/global/en/search-results?keywords=india",
     }
     out = []
     for r in rows:

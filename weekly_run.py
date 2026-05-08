@@ -1,9 +1,9 @@
 """
-weekly_run.py — Weekly job scraping pipeline (Dump 3+)
+    weekly_run.py — Weekly job scraping pipeline
 
-Phase 1+2: company_scrapers/ bespoke HTTP scrapers + KNOWN_PORTALS ATS/Firecrawl
-Phase 3:   LM Studio enrichment (fills skills, seniority, work_mode on all outputs)
-Phase 4:   Supabase upsert → job_postings table
+Phase 1:   KNOWN_PORTALS provider scrape
+Phase 2:   LM Studio enrichment (main_skills + side_skills)
+Phase 3:   Supabase upsert
 
 Usage:
     python3 weekly_run.py                  # full run
@@ -40,23 +40,23 @@ def main():
     t0 = datetime.now()
     ok: dict[str, bool] = {}
 
-    # Phase 1+2: bespoke company scrapers → Firecrawl/ATS for the rest
-    cmd = [_PY, str(_SCRAPER), "--with-company-scrapers", "--resume", "--skip-enrich"]
+    # Phase 1: provider scrape from KNOWN_PORTALS.md
+    cmd = [_PY, str(_SCRAPER), "--skip-enrich", "--scope", "global", "--global-cap", "2000"]
     ok["scrape"] = _run(
-        "Phase 1+2 — company_scrapers + KNOWN_PORTALS scrape", cmd, _HERE / "scraper"
+        "Phase 1 — KNOWN_PORTALS provider scrape", cmd, _HERE / "scraper"
     ) if not args.dry_run else True
 
-    # Phase 3: LM Studio enrichment
+    # Phase 2: LM Studio enrichment
     if not args.skip_enrich:
         cmd = [_PY, str(_SCRAPER), "--enrich-only"]
         ok["enrich"] = _run(
-            "Phase 3 — LM Studio enrichment", cmd, _HERE / "scraper"
+            "Phase 2 — LM Studio enrichment", cmd, _HERE / "scraper"
         ) if not args.dry_run else True
 
-    # Phase 4: Supabase upsert
+    # Phase 3: Supabase upsert
     if not args.skip_upload:
         cmd = [_PY, str(_IMPORT)]
-        ok["upload"] = _run("Phase 4 — Supabase upsert", cmd) if not args.dry_run else True
+        ok["upload"] = _run("Phase 3 — Supabase upsert", cmd) if not args.dry_run else True
 
     print(f"\n{'═' * 60}")
     for phase, status in ok.items():

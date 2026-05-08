@@ -5,6 +5,161 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-05-08 — Direct ATS/API endpoint promotion
+
+**Scope:** Promoted high-value Firecrawl/Docker-discovered companies to direct API/ATS/HTML routes so Firecrawl is no longer needed for extraction.
+
+**Code updated:**
+- Added `scraper/providers/tata_elxsi.py` for Tata Elxsi's server-rendered careers pages:
+  - listing cards at `https://www.tataelxsi.com/careers/job-openings?page=N`
+  - full JD and Ramco apply URL from each detail page
+- Added `scraper/providers/vector_consulting.py` for Vector Consulting Group's Next.js SSR payload:
+  - jobs embedded in `__NEXT_DATA__.props.pageProps.jobsData.dataset`
+  - full JD assembled from `description` and sectioned `body`
+- Added `scraper/providers/deshaw_india.py` for D. E. Shaw India's Next.js SSR payload:
+  - public jobs embedded in `__NEXT_DATA__.props.pageProps.regularJobs`
+  - full JD assembled from `jobDescription` fields, including string/list variants
+  - apply URL through `/recruit/jobs/Ads/Link/{jobUrl}`
+- Added `scraper/providers/cognizant_xml.py` for Cognizant's public XML feed (`/india-en/jobs/xml/?rss=true`) with full JD descriptions and India filtering.
+- Added `scraper/providers/apple_jobs.py` for Apple's JSON careers API:
+  - `POST https://jobs.apple.com/api/v1/search`
+  - `GET https://jobs.apple.com/api/v1/jobDetails/{positionId}`
+- Extended `scraper/providers/talentbrew.py` to parse Radancy/TalentBrew search-result cards used by Citibank and AstraZeneca.
+- Routed direct providers in `scraper/portal_reader.py`:
+  - Apple -> `apple_jobs`
+  - Cognizant -> `cognizant_xml`
+  - Citibank -> `talentbrew`
+  - AstraZeneca -> `talentbrew`
+  - Eli Lilly -> `phenom_ssr`
+  - Cisco -> `phenom_ssr`
+  - BCG -> `phenom_ssr`
+  - LTIMindtree -> `sap_jobs2web_html`
+  - Tata Elxsi -> `tata_elxsi`
+  - Vector Consulting Group -> `vector_consulting`
+  - DE Shaw -> `deshaw_india`
+- `writer.to_canonical()` now emits every field in `schema.CANONICAL_FIELDS`, including the current jobs-table location/enrichment columns with safe defaults.
+
+**Docs/metadata updated:**
+- `KNOWN_PORTALS.md` now records the direct endpoints and ATS routes for Apple, Cognizant, Citibank, BCG, AstraZeneca, Eli Lilly, LTIMindtree, Tata Elxsi, Vector Consulting Group, and DE Shaw.
+- `scraper/schema.py` ATS comment updated with `apple_jobs`, `cognizant_xml`, `tata_elxsi`, `vector_consulting`, and `deshaw_india`.
+
+**Validation evidence:**
+- Live targeted runs succeeded for Cognizant, Citibank, AstraZeneca, Eli Lilly, Cisco, BCG, and LTIMindtree with `--skip-enrich --company-cap 3`; each route used direct providers and returned jobs with JDs.
+- Direct Apple probe returned 3 India jobs with full detail JDs through Apple's JSON API.
+- Direct registry probes with Firecrawl disabled succeeded for Tata Elxsi, Vector Consulting Group, and DE Shaw:
+  - Tata Elxsi: 3 capped India jobs with JDs.
+  - Vector Consulting Group: 2 current India jobs with JDs.
+  - DE Shaw: 3 capped India jobs with JDs from a 76-role public payload.
+- Canonical shape validation confirmed each promoted provider maps through `writer.to_canonical()` to exactly `CANONICAL_FIELDS`.
+
+**Verification:**
+- `python3 test_writer_canonical.py` ✅
+- `python3 test_direct_endpoint_providers.py` ✅
+- `python3 test_direct_endpoint_routing.py` ✅
+- `python3 -m py_compile providers/deshaw_india.py providers/tata_elxsi.py providers/vector_consulting.py providers/registry.py portal_reader.py schema.py test_direct_endpoint_providers.py test_direct_endpoint_routing.py` ✅
+
+## Session 2026-05-08 — Docker-backed JS/Fallback inventory pass
+
+**Scope:** User started Docker/Firecrawl locally, so the previous direct-provider inventory backlog was re-probed through the local Firecrawl container only (`FIRECRAWL_URL=http://localhost:3002`, `FIRECRAWL_API_KEY=local`).
+
+**Code/docs updated:**
+- `scraper/portal_inventory.py` now supports targeted re-probes from a prior JSON report:
+  - `--from-inventory <json>` selects exact companies from a previous inventory.
+  - `--probe-states skipped_needs_docker,fallback_needs_docker --needs-docker-only` focuses only the Docker-needed queue.
+  - Source row positions are preserved so batch reports merge cleanly back into the all-portal report, even when older reports do not contain `inventory_index`.
+- Inventory reports now add `sample_quality` and `quality_flags` so Firecrawl page-chrome hits are not treated as clean hiring evidence. Current flags include company-name-only titles, weak button/navigation titles, anchor/listing URLs, missing JDs, and likely `IN` as US state false positives.
+- Documented targeted Docker re-probe commands in `CLAUDE.md` and `.claude/commands/scraper.md`.
+
+**Reports generated:**
+- Docker batch reports covered all 80 previously Docker-needed rows from `logs/portal_inventory_20260508_143513_180142.json`.
+- Final merged report: `logs/portal_inventory_20260508_174834_733158.{json,md}`.
+- Final merged summary: 175 active portals, 105 sampled as hiring, 66 no-open-jobs samples, 2 blocked, 2 config errors.
+- Quality summary: 91 usable samples, 14 hiring samples marked `needs_review`, 70 no-usable-sample rows.
+
+**Usable Docker/fallback hits from the prior queue:**
+- Synopsys — 2 India jobs with JDs.
+- Qualcomm — 1 India job with JD.
+- Citibank — 3 India jobs with JDs.
+- Apple — 2 India jobs with JDs.
+- Eli Lilly — 2 India jobs with JDs.
+- Cisco — 3 India jobs with JDs.
+- LTIMindtree — 2 India jobs with JDs.
+- Black Brix — 1 India job with JD.
+
+**Needs review / direct-provider follow-up after current promotions:**
+- Google, Microsoft, Genpact, EY Parthenon, PwC India, CK Birla Group, and HiLabs returned job-like content but weak titles/page text; use dedicated direct routes before promoting.
+- L'Oréal returned `IN`-as-Indiana false positives (`Greenwood`, `Plainfield`) and should not be trusted through the current generic Firecrawl path.
+- Meta and Virtusa remained blocked in Docker probing.
+
+**Verification:**
+- `python3 test_portal_inventory.py` ✅
+- `python3 -m py_compile portal_inventory.py test_portal_inventory.py` ✅
+- `python3 portal_inventory.py --merge <direct-report> <docker-batches...>` ✅
+
+## Session 2026-05-07 — Known portals inventory and hiring probe
+
+**Scope:** Added a repeatable inventory mechanism for `KNOWN_PORTALS.md` so route health and current hiring samples can be generated without a bespoke spreadsheet.
+
+**Code/docs updated:**
+- Added `scraper/portal_inventory.py`:
+  - `--no-probe` writes route/status inventory only.
+  - `--probe` samples direct providers only.
+  - `--probe --include-js` intentionally includes Firecrawl/JS routes and should be run only when Docker/Firecrawl is available.
+  - `--limit` + `--offset` support controlled batches.
+- Added `scraper/test_portal_inventory.py` for no-network tests.
+- Added `providers.registry.probe_scrape(...)` so inventory probes do not silently fall through to Firecrawl unless explicitly allowed.
+- Documented commands in `CLAUDE.md` and `.claude/commands/scraper.md`.
+- Probe side effects persisted useful fast paths in registries: Workday India UUIDs for Accenture/Chanel/Fidelity/Novartis/Salesforce/Sanofi/Wells Fargo/State Street/DBS Bank, and generic JSON item keys for Amazon/Atlassian.
+
+**Reports generated:**
+- Metadata-only: `logs/portal_inventory_20260508_141855_602506.{json,md}` — 175 active portals parsed, 54 requiring Docker/Firecrawl.
+- Direct probe batches: offsets `0,25,50,75,100,125,150` with `--sample-size 3 --limit 25`, direct providers only.
+- Merged direct-probe report: `logs/portal_inventory_20260508_143513_180142.{json,md}` — 175 active portals, 83 sampled as hiring, 80 requiring Docker/Firecrawl, 10 no-open-jobs samples, 2 config errors.
+
+**Portal status corrected:**
+- BlackBerry promoted from `🟡 India UUID TBD` to `✅ CRACKED 2026-05-07`; targeted run scraped 5 raw jobs with 5/5 JDs using the Workday UUID already present in `workday_registry.json`.
+
+**Quality fix:**
+- `scraper/providers/talentbrew.py`: tightened ADP listing link detection so navigation/filter links no longer appear as fake jobs. ADP probe now returns real job titles, ADP apply URLs, and full JDs.
+- ADP targeted run: `python3 main.py --company "ADP" --skip-enrich --company-cap 3` -> `3 raw`, `3 saved`.
+
+**Verification:**
+- `python3 -m py_compile portal_inventory.py test_portal_inventory.py providers/registry.py` ✅
+- `python3 test_portal_inventory.py` ✅
+- `python3 portal_inventory.py --no-probe` ✅
+- `python3 portal_inventory.py --probe --sample-size 3 --limit 25` ✅
+- `python3 portal_inventory.py --probe --sample-size 3 --limit 25 --offset 25` ✅
+- `python3 portal_inventory.py --merge <batch-json...>` ✅
+
+## Session 2026-05-07 — Market Data V1 route recovery + provider promotion
+
+**Scope:** Captured reusable company route intelligence from `Market Data_V1_of_Scrapers/` and promoted verified routes into the active provider-based scraper.
+
+**Routes promoted:**
+- WESCO: Oracle HCM finder route recovered from legacy `run_wesco.py` (`eklm.fa.us2.oraclecloud.com`, site `CX`, India location ID `300000000302954`). `generic_json` now preserves Oracle site numbers in candidate job URLs (`/sites/CX/job/{Id}`).
+- CMA CGM: old legacy `country=India` Jobs2Web URL was stale and returned global/US false positives. Correct direct route is `optionsFacetsDD_country=IN`; routed to `ats=sap_jobs2web_html`.
+- Volvo Group: routed India Jobs2Web listing to `ats=sap_jobs2web_html`; direct table parse + per-job detail JD extraction.
+- Michelin: added `scraper/providers/michelin_astro.py` for server-rendered Astro/CXF listings on `jobs.michelin.in`; provider applies India criteria JSON, paginates `page=N`, and fetches full JDs from detail pages.
+
+**Validation evidence:**
+- WESCO targeted run: `python3 main.py --company "WESCO" --skip-enrich --company-cap 30` -> `7 raw`, `7 saved`.
+- Direct provider smoke test: CMA CGM -> `4` India jobs, Volvo Group -> `27` India jobs, Michelin -> `19` India jobs; sample JD lengths were all non-empty.
+- Dry-run routing confirmed:
+  - `CMA CGM [sap_jobs2web_html]`
+  - `Volvo Group [sap_jobs2web_html]`
+  - `Michelin [michelin_astro]`
+
+**Docs/metadata updated:**
+- `KNOWN_PORTALS.md`: WESCO, CMA CGM, Volvo Group, and Michelin marked `✅ CRACKED 2026-05-07` with route notes.
+- `scraper/company_industries.json`: WESCO industry mapping added.
+- `scraper/LEGACY_MARKET_DATA_V1_AUDIT.md`: 53-company legacy inventory captured with active-system status.
+
+**Rejected stale signal:**
+- Microsoft legacy GCS endpoint (`gcsservices.careers.microsoft.com/search/api/v1/search?...loc=India`) is stale: certificate hostname mismatch and `curl -k` returns an Azure test 404 page, not job JSON. Kept as JS-required until fresh XHR discovery.
+
+**Operational fix:**
+- `main.py` run IDs/log/summary filenames now include microseconds to avoid checkpoint temp-file collisions when multiple quick validation runs start in the same second.
+
 ## Session 2026-05-02 — Procter & Gamble cracked via Phenom SSR embed
 
 **Scope:** Parser + portal docs update for P&G direct route (no Firecrawl fallback).

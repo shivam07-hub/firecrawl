@@ -1,9 +1,8 @@
 """
-Mirror Job Scraper — Weekly Orchestrator (v2, Dump 4+)
-=======================================================
-Reads KNOWN_PORTALS.md, scrapes each active portal (5 raw fields),
-enriches via LM Studio (main_skills + side_skills), writes 7-field JSON
-to All_CSV_Outputs/.
+Mirror Job Scraper — Weekly Orchestrator
+========================================
+Reads KNOWN_PORTALS.md, routes active portals through providers, enriches via
+LM Studio (main_skills + side_skills), and writes canonical JSON/CSV output.
 
 Firecrawl credit rules:
   - crawl() is NEVER called — too expensive (N credits per company)
@@ -24,7 +23,6 @@ import csv
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -80,7 +78,7 @@ def already_scraped(company: str) -> bool:
 # ── Logging setup ─────────────────────────────────────────────────────────────
 
 def setup_logging(log_dir: str = "../logs") -> logging.Logger:
-    log_path = Path(log_dir) / f"run_{datetime.now().strftime('%Y_%m_%d_%H%M%S')}.log"
+    log_path = Path(log_dir) / f"run_{datetime.now().strftime('%Y_%m_%d_%H%M%S_%f')}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     fmt = "%(asctime)s  %(levelname)-7s  %(message)s"
@@ -108,40 +106,6 @@ def scrape_portal(portal: dict, log: logging.Logger, max_jobs: int | None = None
         validate_mode=validate_mode,
         on_page_complete=on_page_complete,
     )
-
-
-# ── Company scrapers (bespoke HTTP scripts) ───────────────────────────────────
-
-def run_company_scrapers(log: logging.Logger) -> set[str]:
-    """Run all run_*.py scripts in company_scrapers/. Returns set of company slugs scraped."""
-    scrapers_dir = Path(__file__).parent / "company_scrapers"
-    scripts = sorted(scrapers_dir.glob("run_*.py"))
-    log.info(f"company_scrapers: {len(scripts)} scripts found")
-    done: set[str] = set()
-    for script in scripts:
-        log.info(f"  {script.name} ...")
-        r = subprocess.run(
-            [sys.executable, str(script)],
-            cwd=str(Path(__file__).parent),
-            env={**os.environ},
-            capture_output=True,
-            text=True,
-        )
-        slug = script.stem.replace("run_", "")
-        wrote_jobs = "[OK] jobs.json:" in r.stdout
-        if r.returncode == 0:
-            done.add(slug.lower())
-            log.info(f"    OK")
-        elif wrote_jobs:
-            done.add(slug.lower())
-            log.info(f"    OK (exit {r.returncode} — jobs.json written successfully)")
-        else:
-            log.warning(f"    FAILED (exit {r.returncode})")
-            if r.stderr.strip():
-                log.warning(f"    stderr: {r.stderr.strip()[-400:]}")
-            elif r.stdout.strip():
-                log.warning(f"    stdout tail: {r.stdout.strip()[-400:]}")
-    return done
 
 
 # ── Page-flush callback ───────────────────────────────────────────────────────
@@ -190,7 +154,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         checkpoint: RunCheckpoint | None = None) -> dict:
     summary = {
         "scope": scope,
-        "run_id": checkpoint.run_id if checkpoint else datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "run_id": checkpoint.run_id if checkpoint else datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
         "processed": 0, "skipped": 0, "total_new": 0,
         "total_validation_drops": 0,
         "unresolved": [],
@@ -480,7 +444,6 @@ def main():
     parser.add_argument("--skip-enrich",           action="store_true", help="Skip LLM enrichment, save raw scraped data")
     parser.add_argument("--resume",                action="store_true", help="Skip companies that already have output in All_CSV_Outputs")
     parser.add_argument("--enrich-only",           action="store_true", help="Enrich already-scraped jobs (no scraping, LM Studio only)")
-    parser.add_argument("--with-company-scrapers", action="store_true", help="Run company_scrapers/ scripts before KNOWN_PORTALS phase")
     parser.add_argument("--scope", choices=["india", "global"], default="india",
                         help="Job geography scope (default: india).")
     parser.add_argument("--company-cap", type=int, default=_DEFAULT_COMPANY_CAP,
@@ -516,18 +479,7 @@ def main():
     elif max_jobs:
         log.info(f"Cap: {max_jobs} jobs/company")
 
-    scraped_slugs: set[str] = set()
-    if args.with_company_scrapers:
-        scraped_slugs = run_company_scrapers(log)
-        log.info(f"company_scrapers done: {len(scraped_slugs)} companies")
-
     portals = parse_portals()
-    if scraped_slugs:
-        before = len(portals)
-        portals = [p for p in portals
-                   if company_slug(p["company"]).lower().replace("_", "") not in
-                   {s.replace("_", "") for s in scraped_slugs}]
-        log.info(f"Skipping {before - len(portals)} portals already done by company_scrapers")
     if args.company:
         portals = [p for p in portals if args.company.lower() in p["company"].lower()]
     if args.ats:
@@ -573,7 +525,7 @@ def main():
         return
 
     # Create checkpoint for this run (always — not only on --resume)
-    run_id  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id  = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     checkpoint = resume_checkpoint or RunCheckpoint.new(run_id, log_dir)
     if resume_checkpoint:
         log.info(f"Resuming run_id={checkpoint.run_id}")
@@ -610,7 +562,7 @@ def main():
 
     reports_dir = Path(__file__).resolve().parent.parent / "logs"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = reports_dir / f"run_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    summary_path = reports_dir / f"run_summary_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log.info(f"  Run summary JSON    : {summary_path}")
     _persist_diagnostics_to_supabase(summary, log)

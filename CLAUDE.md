@@ -49,6 +49,15 @@ python main.py --dry-run                                        # verify portals
 python main.py --company "Stripe"                               # single company test
 python main.py --skip-enrich --scope global --global-cap 2000  # full scrape, no LLM
 
+# Inventory — safe by default (no Docker/Firecrawl)
+python portal_inventory.py --no-probe                           # route/status inventory only
+python portal_inventory.py --probe --sample-size 3              # direct providers only: current hiring sample
+python portal_inventory.py --probe --sample-size 3 --limit 25   # batched direct-provider probe
+python portal_inventory.py --merge ../logs/portal_inventory_*.json # merge batch reports
+python portal_inventory.py --probe --include-js --sample-size 3 # includes JS routes; requires Docker/Firecrawl
+python portal_inventory.py --probe --include-js --from-inventory ../logs/portal_inventory_<merged>.json --probe-states skipped_needs_docker,fallback_needs_docker --needs-docker-only --limit 10 --offset 0
+                                                               # re-probe only prior Docker-needed rows
+
 # Phase 2 — enrich (LM Studio on, Docker off)
 python main.py --enrich-only
 
@@ -60,6 +69,7 @@ python csv_importer.py --company "Stripe"  # single company smoke test
 
 **Two-phase run required** — Docker and LM Studio can't run simultaneously (RAM constraint).
 **Never use `--resume` for a fresh weekly run** — it skips companies with existing output folders.
+**Docker is only needed for** full scrape fallback paths or `portal_inventory.py --probe --include-js`.
 
 ---
 
@@ -108,8 +118,12 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `industry` | company_industries.json | raw category (43 values) |
 | `industry_group` | csv_importer mapping dict | 10-bucket super-category for UX filters |
 | `role_domain` | LLM Phase 2 | 15-value controlled vocab |
-| `location` | ATS or Firecrawl | raw string; defaults to "India" if null |
-| `location_city` | csv_importer extraction | city extracted from location string |
+| `location` | csv_importer `_normalize_location` | display string derived from raw |
+| `location_raw` | ATS or Firecrawl | original scraped location string |
+| `location_city` | csv_importer `_normalize_location` | canonical city name |
+| `location_country` | csv_importer `_normalize_location` | canonical country — **required for True_Yodha match filter** |
+| `location_mode` | csv_importer `_normalize_location` | `onsite` / `hybrid` / `remote` / `unknown` |
+| `location_quality` | csv_importer `_normalize_location` | `ok` / `unknown` — hydration sentinel in True_Yodha |
 | `apply_url` | ATS direct link | null if image/invalid URL |
 | `main_skills` | LLM Phase 2 | top 5 must-have, Lightcast L3 |
 | `side_skills` | LLM Phase 2 | nice-to-have, Lightcast L3 |
@@ -118,6 +132,24 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `last_seen` | csv_importer | updated every run |
 | `is_active` | community-owned | true on INSERT; only `job_reports` trigger sets false |
 | `report_count` | job_reports trigger | incremented per report; at 5 → is_active=false |
+
+### job_skills table (FK join table — canonical skill source)
+
+`job_skills` is the source of truth for skill↔job relationships in True_Yodha.
+`main_skills` / `side_skills` TEXT arrays on `jobs` are legacy and will be dropped once the contract test passes.
+
+| Column | Type | Notes |
+|---|---|---|
+| `job_id` | uuid FK → jobs | |
+| `skill_id` | uuid FK → skills | resolved via `skills.taxonomy_key` |
+| `is_primary` | boolean | true = main_skill, false = side_skill |
+| `required_level` | int (1–5) | **NOT YET ADDED** — see Pending Work §6 below |
+
+**`required_level` contract (agreed 2026-05-07):**
+- True_Yodha currently uses a heuristic: `is_primary → 4`, `is_primary=False → 2`
+- This heuristic fires **only when `required_level` IS NULL**
+- Once this column is populated by the scraper, True_Yodha automatically uses the real values — no code change needed
+- Definition: the minimum proficiency level (1–5) a candidate needs in this skill to be considered qualified for the job role
 
 ---
 
@@ -255,12 +287,32 @@ Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi V
 
 ### 3 — New ATS providers still needed
 - **Workable**: `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
-- **SAP SuccessFactors**: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json` — targets: Deloitte, GMR Group, CMA CGM, Deutsche Bank
+- **SAP SuccessFactors**: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json` — targets: GMR Group, Deutsche Bank
 - **Ashby**: `GET https://api.ashbyhq.com/posting-api/job-board/{slug}` — target: Mondee
 
 ### 4 — Architecture (remaining)
 - **Firecrawl result cache** — `firecrawl_cache.json` keyed by URL, 7-day TTL. Cache hit → skip re-scrape, save credits.
-- **Unify company_scrapers/** — 32 bespoke `run_*.py` scripts use different schema (24 cols), don't feed main pipeline. Delete; replace with `portal_overrides.json`.
+- **Provider override consolidation** — if a future route needs special handling, add it through `portal_reader.py` + `scraper/providers/`, not a bespoke script folder.
+
+### 6 — Add `required_level` to `job_skills` (unblocks True_Yodha skill gap display)
+
+**What:** Add `required_level INT` column to `job_skills` table. Scraper populates it during Phase 2 enrichment.
+
+**Why:** True_Yodha shows `L0→L4` skill gap cards on the home dashboard. Until this column exists, it uses a heuristic (primary=4, secondary=2). Real values will improve accuracy.
+
+**SQL migration (run via Supabase dashboard):**
+```sql
+ALTER TABLE job_skills ADD COLUMN IF NOT EXISTS required_level INT CHECK (required_level BETWEEN 1 AND 5);
+```
+
+**Scraper change (`enricher.py` / LLM prompt):**
+For each skill returned by the LLM, also return `required_level` (1–5).
+LLM prompt addition: *"For each skill, also output `required_level` (1=aware, 2=practitioner, 3=proficient, 4=expert, 5=master) — the minimum level needed to succeed in this role."*
+
+**`csv_importer.py` change:**
+When writing to `job_skills`, include `required_level` from the enriched skill dict if present. Null is fine — True_Yodha falls back to heuristic.
+
+**True_Yodha contract:** no code change needed — fallback already handles NULL.
 
 ### 5 — Archon weekly cadence
 - Weekly cron: `0 2 * * 0` via `.archon/workflows/scraper-weekly-run.yaml`

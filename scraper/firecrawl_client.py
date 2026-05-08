@@ -11,7 +11,7 @@ ONE singleton _app instance. Two permitted calls:
 
 crawl() is intentionally NOT exposed — banned, too expensive (N credits per company).
 
-Usage in scrapers.py / main.py:
+Usage in providers / main.py:
     import firecrawl_client as fc
     markdown = fc.scrape(career_url)
     data     = fc.extract([career_url], schema, prompt)

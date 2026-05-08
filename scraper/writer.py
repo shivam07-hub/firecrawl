@@ -49,18 +49,28 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         # Try canonical key first (already-mapped field), then raw key alias
         return raw.get(canonical_key) or raw.get(raw_key) or default
 
-    return {
-        "job_id":          raw.get('job_id') or '',
-        "job_title":       _get('title', 'job_title'),
-        "job_description": _get('raw_jd_text', 'job_description'),
-        "industry":        raw.get('industry') or '',
-        "company_name":    company_name,
-        "location":        _get('location_city', 'location') or raw.get('Location') or 'India',
-        "apply_url":       _get('job_url', 'apply_url'),
-        "main_skills":     raw.get('main_skills') or [],
-        "side_skills":     raw.get('side_skills') or [],
-        "batch_date":      _today(),
+    location = _get('location_city', 'location') or raw.get('Location') or raw.get('location_raw') or 'India'
+
+    row = {
+        "job_id":           raw.get('job_id') or '',
+        "job_title":        _get('title', 'job_title'),
+        "job_description":  _get('raw_jd_text', 'job_description'),
+        "industry":         raw.get('industry') or '',
+        "industry_group":   raw.get('industry_group') or '',
+        "company_name":     company_name,
+        "location":         location,
+        "location_raw":     raw.get('location_raw') or location,
+        "location_city":    raw.get('location_city') or location,
+        "location_country": raw.get('location_country') or ('India' if location else ''),
+        "location_mode":    raw.get('location_mode') or '',
+        "location_quality": raw.get('location_quality') or '',
+        "apply_url":        _get('job_url', 'apply_url'),
+        "role_domain":      raw.get('role_domain') or raw.get('business_unit') or '',
+        "main_skills":      raw.get('main_skills') or [],
+        "side_skills":      raw.get('side_skills') or [],
+        "batch_date":       raw.get('batch_date') or _today(),
     }
+    return {field: row.get(field, '') for field in CANONICAL_FIELDS}
 
 
 def save_jobs(

@@ -28,6 +28,8 @@ class Portal(TypedDict, total=False):
     ats:          str   # workday | smartrecruiters | greenhouse | lever | phenom_api
                         # | phenom_ssr | yello | sap_jobs2web_html | pepsico_jobs_api
                         # | skima_careers | hm_wp_jobs | deloitte_usi
+                        # | apple_jobs | cognizant_xml | tata_elxsi | vector_consulting
+                        # | deshaw_india
                         # | sap | oracle | eightfold | avature | talentbrew | custom | other
     endpoint:     str   # URL to hit
     careers_url:  str   # human-facing careers page (fallback / reference)
@@ -68,7 +70,11 @@ CANONICAL_FIELDS: list[str] = [
     "industry_group",
     "company_name",
     "location",
+    "location_raw",
     "location_city",
+    "location_country",
+    "location_mode",
+    "location_quality",
     "apply_url",
     "role_domain",
     "main_skills",
@@ -93,7 +99,7 @@ SKILL_FIELDS: tuple[str, ...] = ("main_skills", "side_skills")
 LEGACY_FIELD_ALIASES: dict[str, list[str]] = {
     "job_title":       ["title"],
     "job_description": ["raw_jd_text", "job_description"],
-    "location":        ["Location", "location_city", "location", "location_country"],
+    "location":        ["Location", "location_city", "location", "location_country", "location_raw"],
     "apply_url":       ["job_url", "apply_url"],
     "main_skills":     ["main_skills", "skills_required"],
     "side_skills":     ["side_skills", "skills_preferred"],
