@@ -3,8 +3,8 @@ csv_importer.py — Phase 3: upload enriched local JSON to Supabase.
 
 Reads All_CSV_Outputs/*/Outputs/*/jobs.json and:
   1. Upserts core job fields to the `jobs` table (with lifecycle tracking).
-  2. Resolves main_skills/side_skills → skill_ids via the `skills` table.
-  3. Upserts rows to `job_skills (job_id, skill_id, is_primary)`.
+  2. Resolves structured skills or main_skills/side_skills → skill_ids.
+  3. Upserts rows to `job_skills (job_id, skill_id, is_primary, required_level)`.
   4. Logs skills that don't resolve (taxonomy drift signal).
 
 Usage:
@@ -12,6 +12,10 @@ Usage:
     python csv_importer.py --company "Barclays"   # one company
     python csv_importer.py --all-dates            # all date folders, not just latest
     python csv_importer.py --dry-run              # print counts, no writes
+    python csv_importer.py --dry-run --deactivate-missing
+                                                  # inspect newest output date without writes
+    python csv_importer.py --deactivate-missing --run-date 20260510
+                                                  # opt-in stale-job decommission, one run date only
 """
 from __future__ import annotations
 
@@ -22,11 +26,13 @@ import os
 import re
 import sys
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -47,13 +53,26 @@ from config import OUTPUT_BASE
 _JOB_FIELDS = [
     "job_id", "job_title", "job_description",
     "industry", "company_name", "location", "apply_url",
-    "role_domain", "batch_date",
+    "role_domain", "main_skills", "side_skills", "batch_date",
     "location_raw", "location_city", "location_country", "location_mode", "location_quality",
 ]
 
 _BATCH_SIZE = 200
 _UNKNOWN_LOCATION_THRESHOLD = 0.10
+_MAX_DEACTIVATION_RATE = 0.75
 _LOCATION_PARSER_VERSION = "v1"
+
+
+def _parse_batch_date(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if re.match(r"^\d{8}$", text):
+        return int(text)
+    normalized = text.replace("_", "-")
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", normalized):
+        return int(normalized.replace("-", ""))
+    return None
 
 # ── Industry group mapping (10 super-categories) ──────────────────────────────
 
@@ -275,6 +294,109 @@ def _supabase() -> Client:
     return create_client(url, key)
 
 
+def _assert_location_audit_contract(run_id: str) -> None:
+    """Read-only guard: fail before uploads if the run-audit table shape drifted."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        log.error("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in scraper/.env")
+        sys.exit(1)
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception as exc:
+        log.error("Could not read Supabase OpenAPI schema for preflight: %s", exc)
+        raise SystemExit(2) from exc
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("job_feed_run_audits") or schemas.get("public.job_feed_run_audits") or {}
+    columns = table.get("properties") or {}
+    required = {
+        "run_id",
+        "source",
+        "parser_version",
+        "total_rows",
+        "unknown_location_rows",
+        "unknown_location_rate",
+        "top_unknown_aliases",
+        "status",
+    }
+    missing = sorted(required - set(columns))
+    if missing:
+        log.error("job_feed_run_audits is missing required preflight columns: %s", ", ".join(missing))
+        raise SystemExit(2)
+
+    run_id_type = columns.get("run_id", {}).get("format") or columns.get("run_id", {}).get("type")
+    if run_id_type == "uuid":
+        try:
+            uuid.UUID(run_id)
+        except ValueError as exc:
+            log.error("job_feed_run_audits.run_id expects uuid; generated run_id is invalid: %s", run_id)
+            raise SystemExit(2) from exc
+    log.info("Supabase audit contract preflight OK")
+
+
+def _job_skills_has_required_level() -> bool:
+    """Return True when live Supabase job_skills exposes required_level."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return False
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return False
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("job_skills") or schemas.get("public.job_skills") or {}
+    return "required_level" in (table.get("properties") or {})
+
+
+def _job_skill_entries(job: dict) -> list[dict]:
+    structured = job.get("skills")
+    if isinstance(structured, list) and structured:
+        result = []
+        for item in structured:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            is_primary = bool(item.get("is_primary"))
+            level = item.get("required_level")
+            if not isinstance(level, int) or level not in (1, 2, 3, 4):
+                level = 2 if is_primary else 1
+            result.append({
+                "name": name,
+                "is_primary": is_primary,
+                "required_level": level,
+            })
+        return result
+
+    return [
+        {"name": skill, "is_primary": True, "required_level": 2}
+        for skill in (job.get("main_skills") or [])
+    ] + [
+        {"name": skill, "is_primary": False, "required_level": 1}
+        for skill in (job.get("side_skills") or [])
+    ]
+
+
 # ── Skill ID cache ─────────────────────────────────────────────────────────────
 
 def _build_skill_id_map(sb: Client) -> dict[str, int]:
@@ -406,6 +528,7 @@ def _resolve_and_upsert_skills(
     skill_id_map: dict[str, int],
     drift_counter: Counter,
     dry_run: bool,
+    supports_required_level: bool,
 ) -> tuple[int, int]:
     skill_rows: list[dict] = []
     local_drift = 0
@@ -415,32 +538,43 @@ def _resolve_and_upsert_skills(
         if not job_id:
             continue
 
-        for skill in (job.get("main_skills") or []):
+        for skill_entry in _job_skill_entries(job):
+            skill = skill_entry["name"]
             skill_id = skill_id_map.get(skill)
             if skill_id:
-                skill_rows.append({"job_id": job_id, "skill_id": skill_id, "is_primary": True})
-            else:
-                drift_counter[skill] += 1
-                local_drift += 1
-
-        for skill in (job.get("side_skills") or []):
-            skill_id = skill_id_map.get(skill)
-            if skill_id:
-                skill_rows.append({"job_id": job_id, "skill_id": skill_id, "is_primary": False})
+                row = {
+                    "job_id": job_id,
+                    "skill_id": skill_id,
+                    "is_primary": skill_entry["is_primary"],
+                    "required_level": skill_entry["required_level"],
+                }
+                skill_rows.append(row)
             else:
                 drift_counter[skill] += 1
                 local_drift += 1
 
     # Deduplicate by (job_id, skill_id) — a skill can appear in both main + side;
-    # keep is_primary=True if either occurrence is primary.
-    seen: dict[tuple[str, int], bool] = {}
+    # keep is_primary=True and the strongest required_level if either occurrence is primary.
+    seen: dict[tuple[str, int], dict] = {}
     for r in skill_rows:
         key = (r["job_id"], r["skill_id"])
-        seen[key] = seen.get(key, False) or r["is_primary"]
-    skill_rows = [{"job_id": k[0], "skill_id": k[1], "is_primary": v} for k, v in seen.items()]
+        existing = seen.get(key)
+        if not existing:
+            seen[key] = r
+            continue
+        existing["is_primary"] = existing["is_primary"] or r["is_primary"]
+        existing["required_level"] = max(existing["required_level"], r["required_level"])
+    skill_rows = list(seen.values())
 
     if dry_run or not skill_rows:
         return len(skill_rows), local_drift
+
+    if not supports_required_level:
+        log.error(
+            "job_skills.required_level is missing in Supabase. "
+            "Run scraper/sql/add_job_skills_required_level.sql before uploading enriched skills."
+        )
+        raise SystemExit(2)
 
     for i in range(0, len(skill_rows), _BATCH_SIZE):
         batch = skill_rows[i:i + _BATCH_SIZE]
@@ -496,6 +630,88 @@ def _write_location_audit(
     }).execute()
 
 
+def _fetch_active_jobs_for_company(sb: Client, company: str) -> list[dict]:
+    rows: list[dict] = []
+    page = 0
+    page_size = 1000
+    while True:
+        batch = (
+            sb.table("jobs")
+            .select("job_id,job_title,company_name,batch_date,last_seen,is_active")
+            .eq("company_name", company)
+            .eq("is_active", True)
+            .range(page * page_size, (page + 1) * page_size - 1)
+            .execute()
+        ).data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return rows
+
+
+def _deactivate_missing_jobs(
+    sb: Client,
+    *,
+    company: str,
+    current_job_ids: set[str],
+    batch_date: int,
+    dry_run: bool,
+    allow_large_deactivation: bool,
+) -> dict:
+    active_rows = _fetch_active_jobs_for_company(sb, company)
+    missing = [row for row in active_rows if row.get("job_id") not in current_job_ids]
+    missing_rate = (len(missing) / len(active_rows)) if active_rows else 0.0
+    result = {
+        "company": company,
+        "active": len(active_rows),
+        "current": len(current_job_ids),
+        "missing": len(missing),
+        "changed": 0,
+        "blocked": False,
+        "missing_rate": missing_rate,
+    }
+    if (
+        missing
+        and active_rows
+        and missing_rate > _MAX_DEACTIVATION_RATE
+        and not allow_large_deactivation
+    ):
+        result["blocked"] = True
+        result["reason"] = (
+            f"would deactivate {missing_rate:.1%} of active rows; "
+            "rerun a full scrape or pass --allow-large-deactivation"
+        )
+        return result
+
+    if dry_run or not missing:
+        return result
+
+    missing_ids = [row["job_id"] for row in missing if row.get("job_id")]
+    for i in range(0, len(missing_ids), _BATCH_SIZE):
+        chunk = missing_ids[i:i + _BATCH_SIZE]
+        sb.table("jobs").update({"is_active": False}).in_("job_id", chunk).execute()
+
+    version_rows = []
+    for row in missing:
+        old_snapshot = {**row, "is_active": True}
+        new_snapshot = {**row, "is_active": False}
+        version_rows.append({
+            "job_id": row["job_id"],
+            "company_name": company,
+            "batch_date": batch_date,
+            "change_type": "deactivate",
+            "changed_fields": ["is_active"],
+            "old_snapshot": old_snapshot,
+            "new_snapshot": new_snapshot,
+        })
+    for i in range(0, len(version_rows), _BATCH_SIZE):
+        sb.table("job_versions").insert(version_rows[i:i + _BATCH_SIZE]).execute()
+
+    result["changed"] = len(missing)
+    return result
+
+
 def import_file(
     sb: Client,
     json_path: Path,
@@ -503,6 +719,7 @@ def import_file(
     drift_counter: Counter,
     unknown_location_counter: Counter[str],
     dry_run: bool,
+    supports_required_level: bool,
     run_id: str = "",
 ) -> dict:
     try:
@@ -515,7 +732,7 @@ def import_file(
 
     company    = jobs[0].get("company_name", json_path.parent.parent.parent.name)
     date_str   = json_path.parent.name
-    batch_date = int(date_str.replace("-", "")) if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str) else None
+    batch_date = _parse_batch_date(date_str) or _parse_batch_date(jobs[0].get("batch_date"))
     enriched   = sum(1 for j in jobs if j.get("main_skills"))
 
     local_unknown = 0
@@ -531,7 +748,7 @@ def import_file(
                     unknown_location_counter[normalized.location_raw.lower()] += 1
 
     skill_rows_written, drift = _resolve_and_upsert_skills(
-        sb, jobs, skill_id_map, drift_counter, dry_run
+        sb, jobs, skill_id_map, drift_counter, dry_run, supports_required_level
     )
 
     if not dry_run and run_id:
@@ -541,6 +758,8 @@ def import_file(
         "path": str(json_path),
         "company": company,
         "date": date_str,
+        "batch_date": batch_date,
+        "job_ids": {j.get("job_id") for j in jobs if j.get("job_id")},
         "jobs": jobs_written,
         "skill_rows": skill_rows_written,
         "drift": drift,
@@ -556,7 +775,28 @@ def main() -> None:
     parser.add_argument("--company",   help="Filter by company slug (substring, case-insensitive)")
     parser.add_argument("--all-dates", action="store_true", help="Import all date folders, not just latest")
     parser.add_argument("--dry-run",   action="store_true", help="Count only — no writes to Supabase")
+    parser.add_argument(
+        "--run-date",
+        help="With --deactivate-missing, scope decommissioning to one output date (YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD)",
+    )
+    parser.add_argument(
+        "--deactivate-missing",
+        action="store_true",
+        help="After a successful import, mark active jobs missing from this run inactive for imported companies only",
+    )
+    parser.add_argument(
+        "--allow-large-deactivation",
+        action="store_true",
+        help="Allow a company import to deactivate more than 75%% of currently active rows",
+    )
     args = parser.parse_args()
+
+    if args.deactivate_missing and args.all_dates:
+        log.error("--deactivate-missing is only safe with the latest date folder, not --all-dates")
+        raise SystemExit(2)
+    if args.deactivate_missing and not args.dry_run and not args.run_date:
+        log.error("Real deactivation writes require --run-date YYYYMMDD/YYYY-MM-DD/YYYY_MM_DD")
+        raise SystemExit(2)
 
     sb = _supabase()
     skill_id_map = _build_skill_id_map(sb)
@@ -566,15 +806,59 @@ def main() -> None:
         log.warning("No jobs.json files found. Did you run main.py first?")
         return
 
+    deactivation_batch_date = _parse_batch_date(args.run_date)
+    if args.deactivate_missing:
+        if args.run_date and deactivation_batch_date is None:
+            log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")
+            raise SystemExit(2)
+        available_dates = {
+            parsed for parsed in (_parse_batch_date(path.parent.name) for path in json_files)
+            if parsed is not None
+        }
+        if deactivation_batch_date is None and available_dates:
+            deactivation_batch_date = max(available_dates)
+        if deactivation_batch_date is None:
+            log.error("--deactivate-missing requires dated output folders")
+            raise SystemExit(2)
+        before_count = len(json_files)
+        json_files = [
+            path for path in json_files
+            if _parse_batch_date(path.parent.name) == deactivation_batch_date
+        ]
+        log.info(
+            "Deactivation scoped to run date %s: %s/%s files",
+            deactivation_batch_date,
+            len(json_files),
+            before_count,
+        )
+        if not json_files:
+            log.error("No jobs.json files found for deactivation run date %s", deactivation_batch_date)
+            raise SystemExit(2)
+
     log.info(f"Files to import: {len(json_files)}")
     if args.dry_run:
         log.info("DRY RUN — no writes")
 
-    run_id = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    log.info(f"Run ID: {run_id}")
+    run_label = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_id = str(uuid.uuid4())
+    log.info(f"Run ID: {run_id} ({run_label})")
+    _assert_location_audit_contract(run_id)
+    supports_required_level = _job_skills_has_required_level()
+    if supports_required_level:
+        log.info("job_skills.required_level contract OK")
+    else:
+        log.warning(
+            "job_skills.required_level is missing; dry-run can continue, "
+            "but real enriched uploads require scraper/sql/add_job_skills_required_level.sql"
+        )
+        if not args.dry_run:
+            log.error("Stopping before writes to avoid a partial jobs-only upload.")
+            raise SystemExit(2)
 
     drift_counter: Counter = Counter()
     unknown_location_counter: Counter[str] = Counter()
+    imported_company_job_ids: dict[str, set[str]] = {}
+    imported_company_batch_dates: dict[str, int] = {}
     total_jobs = total_skill_rows = total_drift = total_unknown_location_rows = 0
     t0 = time.time()
 
@@ -586,6 +870,7 @@ def main() -> None:
             drift_counter,
             unknown_location_counter,
             args.dry_run,
+            supports_required_level,
             run_id,
         )
         if "error" in result:
@@ -605,6 +890,11 @@ def main() -> None:
         total_skill_rows += result["skill_rows"]
         total_drift      += result.get("drift", 0)
         total_unknown_location_rows += result.get("unknown_location_rows", 0)
+        if result.get("company") and result.get("jobs"):
+            company = result["company"]
+            imported_company_job_ids.setdefault(company, set()).update(result.get("job_ids", set()))
+            if result.get("batch_date"):
+                imported_company_batch_dates[company] = result["batch_date"]
 
     elapsed = time.time() - t0
     unknown_rate = (total_unknown_location_rows / total_jobs) if total_jobs else 0.0
@@ -632,6 +922,50 @@ def main() -> None:
             message=message,
         )
 
+    total_missing = total_deactivated = blocked_deactivation = 0
+    if args.deactivate_missing:
+        if status == "blocked":
+            log.error("Skipping deactivation because the import quality gate is blocked.")
+        else:
+            for company, job_ids in sorted(imported_company_job_ids.items()):
+                batch_date = imported_company_batch_dates.get(company) or int(datetime.now().strftime("%Y%m%d"))
+                result = _deactivate_missing_jobs(
+                    sb,
+                    company=company,
+                    current_job_ids=job_ids,
+                    batch_date=batch_date,
+                    dry_run=args.dry_run,
+                    allow_large_deactivation=args.allow_large_deactivation,
+                )
+                total_missing += result["missing"]
+                total_deactivated += result["changed"]
+                if result["blocked"]:
+                    blocked_deactivation += 1
+                    log.error(
+                        "  %s: deactivation blocked — %s active, %s current, %s missing (%s)",
+                        company,
+                        result["active"],
+                        result["current"],
+                        result["missing"],
+                        result.get("reason"),
+                    )
+                elif args.dry_run:
+                    log.info(
+                        "  %s: would deactivate %s missing active jobs (%s active, %s current)",
+                        company,
+                        result["missing"],
+                        result["active"],
+                        result["current"],
+                    )
+                else:
+                    log.info(
+                        "  %s: deactivated %s missing active jobs (%s active, %s current)",
+                        company,
+                        result["changed"],
+                        result["active"],
+                        result["current"],
+                    )
+
     log.info("─" * 60)
     log.info(f"Done: {total_jobs} jobs, {total_skill_rows} job_skills rows — {elapsed:.0f}s")
     log.info(
@@ -646,7 +980,14 @@ def main() -> None:
         for skill, count in drift_counter.most_common(20):
             log.warning(f"  {count:4d}×  {skill!r}")
 
-    if status == "blocked":
+    if args.deactivate_missing:
+        action = "would deactivate" if args.dry_run else "deactivated"
+        count = total_missing if args.dry_run else total_deactivated
+        log.info("Decommissioning: %s %s missing jobs across imported companies", action, count)
+        if blocked_deactivation:
+            log.error("Decommissioning blocked for %s companies; no inactive writes were made for those companies.", blocked_deactivation)
+
+    if status == "blocked" or blocked_deactivation:
         raise SystemExit(2)
 
 

@@ -186,8 +186,8 @@ def _workday(rows) -> list[Portal]:
         tenant      = r.get('Tenant', '').strip()
         instance    = r.get('Instance', '').strip()
         career_site = r.get('Career Site', '').strip()
-        # Skip rows where career_site slug is still unknown
-        if not tenant or not instance or '⚠️' in career_site or not career_site:
+        # Skip rows where career_site slug is still unknown or tenant is flagged as non-Workday
+        if not tenant or '⚠️' in tenant or not instance or '⚠️' in career_site or not career_site:
             continue
         base = (
             f"https://{tenant}.{instance}.myworkdayjobs.com"
@@ -348,6 +348,9 @@ def _custom(rows) -> list[Portal]:
     ats_overrides: dict[str, str] = {
         "Apple": "apple_jobs",
         "Cognizant": "cognizant_xml",
+        "Google": "google_careers",
+        "IntouchCX": "intouchcx",
+        "Microsoft": "microsoft_careers",
     }
     for r in rows:
         status  = r.get('Status', '')
@@ -384,9 +387,12 @@ _SAP_ATS_OVERRIDES: dict[str, str] = {
     "EY India Experienced": "sap_jobs2web_html",
     # jobs.pepsicojobs.com exposes direct JSON API with India filter.
     "PepsiCo": "pepsico_jobs_api",
+    "GMR Group": "sap_jobs2web_html",
     # Legacy Market Data route recovered: direct Jobs2Web HTML, no browser needed.
     "CMA CGM": "sap_jobs2web_html",
     "Volvo Group": "sap_jobs2web_html",
+    "Nestlé": "sap_jobs2web_html",
+    "Adidas": "sap_jobs2web_html",
 }
 
 _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
@@ -396,8 +402,11 @@ _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
     "EY India": "https://eyglobal.yello.co/job_boards/1",
     "EY India Experienced": "https://careers.ey.com/ey/search/?createNewAlert=false&q=india&optionsFacetsDD_customfield1=&optionsFacetsDD_country=IN&optionsFacetsDD_city=",
     "PepsiCo": "https://www.pepsicojobs.com/api/jobs?page=1&sortBy=relevance&descending=false&internal=false&country=India",
+    "GMR Group": "https://careers.gmrgroup.in/search/?q=&locationsearch=india",
     "CMA CGM": "https://jobs.cmacgm-group.com/search/jobs?optionsFacetsDD_country=IN&startrow=0&sortColumn=referencedate&sortDirection=desc",
     "Volvo Group": "https://jobs.volvogroup.com/search/?q=&locationsearch=India",
+    "Nestlé": "https://jobdetails.nestle.com/search/?q=&locationsearch=india",
+    "Adidas": "https://jobs.adidas-group.com/search/?q=&optionsFacetsDD_country=IN",
 }
 
 
@@ -424,6 +433,21 @@ def _sap(rows, india_only: bool = True) -> list[Portal]:
         })
     return out
 
+
+_ORACLE_ENDPOINT_OVERRIDES: dict[str, str] = {
+    # Oracle Corp uses location=India text param, not a numeric locationId
+    "Oracle": (
+        "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+        "?onlyData=true"
+        "&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,"
+        "requisitionList.secondaryLocations,flexFieldsFacet.values,"
+        "requisitionList.requisitionFlexFields"
+        "&finder=findReqs;siteNumber=CX_45001,"
+        "facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3B"
+        "CATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,"
+        "limit=25,location=India,sortBy=POSTING_DATES_DESC"
+    ),
+}
 
 _ORACLE_EXPAND = (
     "requisitionList.workLocation,"
@@ -453,7 +477,11 @@ def _oracle(rows) -> list[Portal]:
         loc_id    = r.get('India Location ID', '').strip()
         base      = f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 
-        if site_num:
+        override = _ORACLE_ENDPOINT_OVERRIDES.get(company)
+        if override:
+            endpoint = override
+            oracle_nested = True
+        elif site_num:
             # Cracked: use finder=findReqs; locationId optional (omit for India-only portals)
             loc_filter = f",locationId={loc_id}" if loc_id else ""
             endpoint = (
@@ -515,11 +543,26 @@ _ATS_OVERRIDES: dict[str, str] = {
     'Eli Lilly': 'phenom_ssr',
     'Cisco': 'phenom_ssr',
     'LTIMindtree': 'sap_jobs2web_html',
+    'HiLabs': 'hilabs_careers',
     'Tata Elxsi': 'tata_elxsi',
     'Vector Consulting Group': 'vector_consulting',
     'DE Shaw': 'deshaw_india',
     'Nykaa': 'skima_careers',
     'Michelin': 'michelin_astro',
+    'Black Brix': 'blackbrix_jobs',
+    'Adidas': 'sap_jobs2web_html',
+    'Nestlé': 'sap_jobs2web_html',
+    'Unilever': 'talentbrew',
+    'ITC Limited': 'zoho_recruit',
+}
+
+_OTHER_ENDPOINT_OVERRIDES: dict[str, str] = {
+    # Nestlé: careers.nestle.in is the human portal; SAP Jobs2Web India search is on jobdetails.nestle.com
+    "Nestlé": "https://jobdetails.nestle.com/search/?q=&locationsearch=india",
+    # Unilever: TalentBrew India listing (path-paginated; listing JS-rendered)
+    "Unilever": "https://careers.unilever.com/en/location/india-jobs/34155/1269750/2",
+    # ITC: Zoho Recruit SSR portal (all India, no country filter needed)
+    "ITC Limited": "https://recruitment.itcportal.com/jobs/Careers",
 }
 
 _TALEO_V1: set[str] = {'Standard Chartered Bank', 'Wipro'}
@@ -537,11 +580,17 @@ _INDIA_ONLY_OVERRIDES: dict[str, bool] = {
     'Eli Lilly': True,
     'Cisco': True,
     'LTIMindtree': True,
+    'HiLabs': True,
     'Tata Elxsi': True,
     'Vector Consulting Group': True,
     'DE Shaw': True,
     'Nykaa': True,
     'Michelin': True,
+    'Black Brix': True,
+    'Adidas': True,
+    'Nestlé': True,
+    'Unilever': True,
+    'ITC Limited': True,
 }
 
 
@@ -554,10 +603,12 @@ def _other(rows, india_only: bool = True) -> list[Portal]:
         company = r.get('Company', '').strip()
         ats     = _ATS_OVERRIDES.get(company, 'other')
         js_req  = '🟡' in status or '🔍' in status
+        careers = r.get('Careers URL', '').strip()
+        endpoint = _OTHER_ENDPOINT_OVERRIDES.get(company, careers)
         portal: dict = {
             'company':     company,
             'ats':         ats,
-            'endpoint':    r.get('Careers URL', '').strip(),
+            'endpoint':    endpoint,
             'js_required': False if ats != 'other' else js_req,
             'status':      status,
             'industry':    _industry(company),
@@ -601,6 +652,7 @@ def _phenom_api(rows, india_only: bool = True) -> list[Portal]:
         # not the JSON /api/jobs shape used by PhenomProvider.
         "Procter & Gamble": "https://www.pgcareers.com/in/en/search-results?qcountry=India",
         "BCG": "https://careers.bcg.com/global/en/search-results?keywords=india",
+        "HP (HPE)": "https://careers.hpe.com/us/en/search-results?qcountry=India",
     }
     out = []
     for r in rows:

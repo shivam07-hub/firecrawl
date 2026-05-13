@@ -1,21 +1,19 @@
 """
-discover_endpoints.py — Use Firecrawl to find the real job-listing URLs
-for companies currently using generic homepage endpoints in KNOWN_PORTALS.md.
+discover_endpoints.py — Use Firecrawl as a discovery microscope, not the final scraper.
 
-For each js-required 'other' company, scrapes the careers homepage and looks for:
-  - ATS platform links (workday, greenhouse, smartrecruiters, lever, ashby, etc.)
-  - India-filtered job search URLs
-  - /jobs/, /careers/jobs, /openings, /positions patterns
+Workflow per portal:
+  1. Firecrawl /map to quickly enumerate likely careers URLs on the site.
+  2. If map does not already reveal the ATS endpoint, Firecrawl /scrape only a tiny shortlist.
+  3. Promote the direct ATS/XHR route into KNOWN_PORTALS.md + portal routing once confirmed.
 
 Usage:
-    python discover_endpoints.py                    # all js-required 'other' companies
-    python discover_endpoints.py --company "HSBC"   # single company
-    python discover_endpoints.py --confirm          # write findings back to KNOWN_PORTALS.md
+    python discover_endpoints.py                    # all js-required portals
+    python discover_endpoints.py --company "HSBC"   # single company, any current ATS
+    python discover_endpoints.py --confirm          # print KNOWN_PORTALS.md update suggestions
 """
 import argparse
 import re
-import sys
-from pathlib import Path
+from urllib.parse import urlparse
 
 import firecrawl_client as fc
 from portal_reader import parse_portals
@@ -37,14 +35,18 @@ ATS_PATTERNS = [
 # ── URL patterns that indicate a job listing page ────────────────────────────
 JOB_URL_PATTERNS = [
     r'/jobs[/\?]',
+    r'/careers?([/\?]|$)',
     r'/careers/jobs',
     r'/careers/search',
     r'/open-positions',
     r'/openings',
+    r'/positions',
     r'/search-jobs',
     r'/job-search',
     r'SearchJobs',
     r'search-results',
+    r'join-us',
+    r'work-with-us',
     r'locationsearch=India',
     r'location=India',
     r'country=India',
@@ -66,8 +68,11 @@ SKIP_PATTERNS = [
     r'youtube\.com',
 ]
 
+MAP_SEARCH_QUERY = "jobs careers openings hiring india"
+SCRAPE_CANDIDATE_LIMIT = 3
 
-def _extract_links(markdown: str, base_url: str) -> list[str]:
+
+def _extract_links(markdown: str) -> list[str]:
     """Extract all URLs from markdown link syntax [text](url)."""
     links = re.findall(r'\]\((https?://[^\s\)]+)\)', markdown)
     # Also grab bare URLs
@@ -86,25 +91,72 @@ def _extract_links(markdown: str, base_url: str) -> list[str]:
     return out
 
 
-def _classify_link(url: str) -> tuple[str | None, str | None]:
+def _classify_link(url: str, title: str = "", description: str = "") -> tuple[str | None, str | None]:
     """
     Returns (ats_type, reason) if the URL is useful, else (None, None).
     ats_type: 'workday' | 'greenhouse' | ... | 'job_page' | None
     reason: short description of why this URL is interesting
     """
-    url_lower = url.lower()
-
     # ATS platform detection
     for pattern, ats in ATS_PATTERNS:
         if re.search(pattern, url, re.I):
             return ats, f"ATS platform: {ats}"
 
     # Job listing page patterns
+    haystack = " ".join(part for part in [url, title, description] if part)
     for pattern in JOB_URL_PATTERNS:
-        if re.search(pattern, url, re.I):
+        if re.search(pattern, haystack, re.I):
             return 'job_page', f"job listing URL pattern: {pattern}"
 
     return None, None
+
+
+def _candidate_score(url: str, title: str = "", description: str = "") -> int:
+    haystack = " ".join(part for part in [url, title, description] if part)
+    score = 0
+    if re.search(r'india', haystack, re.I):
+        score += 8
+    if re.search(r'jobs?|openings?|positions?|hiring|search-results|search-jobs', haystack, re.I):
+        score += 6
+    if re.search(r'/careers?([/\?]|$)', url, re.I):
+        score += 4
+    return score
+
+
+def _scrape_candidates(current_url: str, mapped_links: list[dict[str, str]]) -> list[str]:
+    candidates = []
+    seen = set()
+
+    def add(url: str) -> None:
+        if not url or url in seen:
+            return
+        seen.add(url)
+        candidates.append(url)
+
+    scored = sorted(
+        mapped_links,
+        key=lambda item: (
+            _candidate_score(item.get("url", ""), item.get("title", ""), item.get("description", "")),
+            item.get("url", ""),
+        ),
+        reverse=True,
+    )
+    current_host = urlparse(current_url).netloc.lower()
+    for item in scored:
+        url = item.get("url", "")
+        if not url:
+            continue
+        host = urlparse(url).netloc.lower()
+        if host and current_host and host != current_host and not host.endswith("." + current_host):
+            continue
+        if _candidate_score(url, item.get("title", ""), item.get("description", "")) <= 0:
+            continue
+        add(url)
+        if len(candidates) >= SCRAPE_CANDIDATE_LIMIT:
+            break
+
+    add(current_url)
+    return candidates[:SCRAPE_CANDIDATE_LIMIT]
 
 
 def discover(company_name: str, current_url: str) -> dict:
@@ -119,34 +171,64 @@ def discover(company_name: str, current_url: str) -> dict:
         'error': str | None,
       }
     """
-    print(f"  Scraping {current_url} ...", flush=True)
-    md = fc.scrape(current_url)
-
-    if not md:
-        return {
-            'company': company_name, 'current_url': current_url,
-            'ats_links': [], 'job_links': [], 'markdown_len': 0,
-            'error': 'Firecrawl returned empty markdown',
-        }
-
-    links = _extract_links(md, current_url)
+    print(f"  Mapping {current_url} ...", flush=True)
+    mapped_links = fc.map_site(
+        current_url,
+        search=MAP_SEARCH_QUERY,
+        include_subdomains=True,
+        ignore_query_parameters=False,
+        limit=50,
+        sitemap="include",
+        timeout=60000,
+    )
     ats_links = []
     job_links = []
+    seen_ats = set()
+    seen_jobs = set()
 
-    for url in links:
-        ats_type, reason = _classify_link(url)
+    def add_ats(url: str, ats_type: str, reason: str) -> None:
+        key = (url, ats_type)
+        if key in seen_ats:
+            return
+        seen_ats.add(key)
+        ats_links.append((url, ats_type, reason))
+
+    def add_job(url: str, reason: str) -> None:
+        if url in seen_jobs:
+            return
+        seen_jobs.add(url)
+        job_links.append((url, reason))
+
+    for item in mapped_links:
+        url = item.get("url", "")
+        ats_type, reason = _classify_link(url, item.get("title", ""), item.get("description", ""))
         if ats_type == 'job_page':
-            job_links.append((url, reason))
+            add_job(url, reason)
         elif ats_type:
-            ats_links.append((url, ats_type, reason))
+            add_ats(url, ats_type, reason)
+
+    inspected_pages = []
+    if not ats_links:
+        for candidate in _scrape_candidates(current_url, mapped_links):
+            md = fc.scrape(candidate)
+            inspected_pages.append((candidate, len(md)))
+            if not md:
+                continue
+            for url in _extract_links(md):
+                ats_type, reason = _classify_link(url)
+                if ats_type == 'job_page':
+                    add_job(url, f"{reason} via scrape({candidate})")
+                elif ats_type:
+                    add_ats(url, ats_type, f"{reason} via scrape({candidate})")
 
     return {
         'company': company_name,
         'current_url': current_url,
         'ats_links': ats_links,
         'job_links': job_links,
-        'markdown_len': len(md),
-        'error': None,
+        'map_count': len(mapped_links),
+        'inspected_pages': inspected_pages,
+        'error': None if mapped_links or ats_links or job_links else 'Firecrawl map/scrape found no useful links',
     }
 
 
@@ -184,7 +266,12 @@ def print_findings(findings: dict) -> None:
 
     best_url, best_reason = _best_url(findings)
 
-    print(f"  [{c}]  markdown: {findings['markdown_len']} chars")
+    print(f"  [{c}]  mapped URLs: {findings['map_count']}")
+
+    if findings['inspected_pages']:
+        print(f"    Scraped follow-up pages:")
+        for url, md_len in findings['inspected_pages']:
+            print(f"      {md_len:>5} chars  {url[:80]}")
 
     if findings['ats_links']:
         print(f"    ATS links found:")
@@ -212,16 +299,13 @@ def main():
                         help='Print KNOWN_PORTALS.md update suggestions')
     args = parser.parse_args()
 
-    # Only test js-required 'other' companies (ones with generic homepage URLs)
     portals = parse_portals()
-    targets = [
-        p for p in portals
-        if p['ats'] == 'other' and p['js_required']
-    ]
     if args.company:
-        targets = [p for p in targets if args.company.lower() in p['company'].lower()]
+        targets = [p for p in portals if args.company.lower() in p['company'].lower()]
+    else:
+        targets = [p for p in portals if p.get('js_required')]
 
-    print(f"Discovering endpoints for {len(targets)} js-required 'other' companies\n")
+    print(f"Discovering endpoints for {len(targets)} target companies\n")
 
     all_findings = []
     for p in targets:

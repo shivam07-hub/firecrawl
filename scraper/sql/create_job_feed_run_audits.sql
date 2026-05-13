@@ -3,8 +3,8 @@
 
 create table if not exists public.job_feed_run_audits (
   id bigserial primary key,
-  run_id text not null unique,
-  source text not null default 'firecrawl_csv_importer',
+  run_id uuid not null unique,
+  source text not null default 'job_feed_importer',
   parser_version text not null,
   total_rows integer not null default 0,
   unknown_location_rows integer not null default 0,

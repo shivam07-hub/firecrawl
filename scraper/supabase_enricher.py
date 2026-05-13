@@ -3,7 +3,7 @@ supabase_enricher.py — Two-mode backfill for Supabase `jobs` table.
 
 Mode 1 (default): enrich skills
   Pull rows: job_description present, main_skills empty.
-  Run enrich_job() → UPDATE main_skills + side_skills.
+  Run enrich_job() → write job_skills with is_primary + required_level.
   Requires LM Studio running at LM_STUDIO_BASE_URL.
 
 Mode 2 (--fetch-jds): fetch missing job descriptions
@@ -30,6 +30,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -51,6 +52,30 @@ MIN_DESC_LEN = 200
 MIN_JD_SCRAPE_LEN = 300  # minimum chars for a scraped JD to be considered valid
 
 _SKILL_ID_CACHE: dict[str, int] | None = None
+
+
+def _job_skills_has_required_level() -> bool:
+    """Return True when live Supabase job_skills exposes required_level."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return False
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return False
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("job_skills") or schemas.get("public.job_skills") or {}
+    return "required_level" in (table.get("properties") or {})
 
 
 def _get_skill_id_map(sb: Client) -> dict[str, int]:
@@ -130,9 +155,37 @@ def fetch_unenriched(sb: Client, company: str | None, limit: int | None) -> list
     return results
 
 
-def write_job_skills(
-    sb: Client, job_id: str, main_skills: list[str], side_skills: list[str]
-) -> tuple[int, list[str]]:
+def _skill_entries_from_enriched(enriched: dict) -> list[dict]:
+    structured = enriched.get("skills")
+    if isinstance(structured, list) and structured:
+        entries = []
+        for item in structured:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            is_primary = bool(item.get("is_primary"))
+            level = item.get("required_level")
+            if not isinstance(level, int) or level not in (1, 2, 3, 4):
+                level = 2 if is_primary else 1
+            entries.append({
+                "name": name,
+                "is_primary": is_primary,
+                "required_level": level,
+            })
+        return entries
+
+    return [
+        {"name": skill, "is_primary": True, "required_level": 2}
+        for skill in (enriched.get("main_skills") or [])
+    ] + [
+        {"name": skill, "is_primary": False, "required_level": 1}
+        for skill in (enriched.get("side_skills") or [])
+    ]
+
+
+def write_job_skills(sb: Client, job_id: str, skills: list[dict]) -> tuple[int, list[str]]:
     """
     Resolve skill names → skill_ids and upsert to job_skills.
     Returns (rows_written, list_of_unresolved_skill_names).
@@ -142,19 +195,29 @@ def write_job_skills(
     rows: list[dict] = []
     unresolved: list[str] = []
 
-    for skill in main_skills:
-        sid = skill_id_map.get(skill)
+    for skill in skills:
+        name = skill["name"]
+        sid = skill_id_map.get(name)
         if sid:
-            rows.append({"job_id": job_id, "skill_id": sid, "is_primary": True})
+            rows.append({
+                "job_id": job_id,
+                "skill_id": sid,
+                "is_primary": skill["is_primary"],
+                "required_level": skill["required_level"],
+            })
         else:
-            unresolved.append(skill)
+            unresolved.append(name)
 
-    for skill in side_skills:
-        sid = skill_id_map.get(skill)
-        if sid:
-            rows.append({"job_id": job_id, "skill_id": sid, "is_primary": False})
-        else:
-            unresolved.append(skill)
+    deduped: dict[tuple[str, int], dict] = {}
+    for row in rows:
+        key = (row["job_id"], row["skill_id"])
+        existing = deduped.get(key)
+        if not existing:
+            deduped[key] = row
+            continue
+        existing["is_primary"] = existing["is_primary"] or row["is_primary"]
+        existing["required_level"] = max(existing["required_level"], row["required_level"])
+    rows = list(deduped.values())
 
     if rows:
         sb.table("job_skills").upsert(rows, on_conflict="job_id,skill_id").execute()
@@ -162,10 +225,10 @@ def write_job_skills(
     return len(rows), unresolved
 
 
-def _enrich_one(job: dict) -> tuple[str, list[str], list[str]]:
+def _enrich_one(job: dict) -> tuple[str, list[dict]]:
     from enricher import enrich_job
     enriched = enrich_job(job)
-    return job["job_id"], enriched.get("main_skills") or [], enriched.get("side_skills") or []
+    return job["job_id"], _skill_entries_from_enriched(enriched)
 
 
 def run_enrich(sb: Client, jobs: list[dict], dry_run: bool, workers: int) -> None:
@@ -182,6 +245,13 @@ def run_enrich(sb: Client, jobs: list[dict], dry_run: bool, workers: int) -> Non
         log.info("Dry-run — no writes.")
         return
 
+    if not _job_skills_has_required_level():
+        log.error(
+            "job_skills.required_level is missing in Supabase. "
+            "Run scraper/sql/add_job_skills_required_level.sql before enrichment backfill."
+        )
+        raise SystemExit(2)
+
     ok = fail = 0
     t0 = time.time()
 
@@ -190,9 +260,9 @@ def run_enrich(sb: Client, jobs: list[dict], dry_run: bool, workers: int) -> Non
         for i, fut in enumerate(as_completed(futures), 1):
             job = futures[fut]
             try:
-                job_id, ms, ss = fut.result()
-                if ms:
-                    written, drift = write_job_skills(sb, job_id, ms, ss)
+                job_id, skills = fut.result()
+                if skills:
+                    written, drift = write_job_skills(sb, job_id, skills)
                     if drift:
                         log.warning(f"  [{i}] Taxonomy drift for {job.get('job_title')}: {drift}")
                     ok += 1

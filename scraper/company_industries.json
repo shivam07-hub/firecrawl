@@ -105,6 +105,7 @@
   "InMobi": "Technology",
   "IndusInd Bank": "BFSI",
   "Infosys": "IT Services",
+  "IntouchCX": "Customer Experience",
   "Inspire Brands": "Hospitality",
   "Integrow Asset Management": "BFSI",
   "Intel": "Semiconductors",
@@ -227,5 +228,9 @@
   "Adani Thermal Power": "Energy",
   "Adani Gas": "Energy",
   "Procter & Gamble": "FMCG",
-  "Capgemini": "IT Services"
+  "Capgemini": "IT Services",
+  "Nestlé": "Consumer Goods",
+  "Adidas": "Consumer Goods",
+  "Unilever": "Consumer Goods",
+  "ITC Limited": "Conglomerates"
 }

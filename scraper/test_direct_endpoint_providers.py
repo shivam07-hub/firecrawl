@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+import json
+import re
+
+import providers.generic_json as generic_json
 from providers.apple_jobs import parse_apple_search_result
 from providers.cognizant_xml import parse_cognizant_xml
 from providers.deshaw_india import parse_deshaw_next_data
+from providers.google_careers import parse_google_careers_html
+from providers.hilabs_careers import parse_hilabs_html
+from providers.intouchcx import (
+    parse_dayforce_next_data,
+    parse_intouchcx_feed,
+    parse_legacy_intouchcx_detail,
+)
+from providers.blackbrix_jobs import (
+    parse_blackbrix_detail,
+    parse_blackbrix_listing_items,
+)
+from providers.microsoft_careers import (
+    parse_microsoft_detail_payload,
+    parse_microsoft_search_payload,
+)
 from providers.tata_elxsi import extract_tata_elxsi_detail, extract_tata_elxsi_listing_items
 from providers.talentbrew import _extract_listing_items, _page_url
 from providers.vector_consulting import parse_vector_next_data
@@ -12,6 +31,19 @@ def check(label: str, condition: bool) -> None:
     if not condition:
         raise AssertionError(label)
     print(f"PASS {label}")
+
+
+class _FakeJSONResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+        self.headers = {"Content-Type": "application/json"}
+        self.text = json.dumps(payload)
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
 
 
 def test_radancy_listing_links_parse() -> None:
@@ -197,6 +229,51 @@ def test_vector_next_data_parser_maps_jobs_and_body_sections() -> None:
     check("vector job url", jobs[0]["job_url"].endswith("/careers/career-listings/project-management-consultant"))
 
 
+def test_oracle_nested_scraper_paginates_offsets() -> None:
+    calls: list[str] = []
+    original_get = generic_json.requests.get
+
+    def fake_get(url: str, headers=None, timeout=None):
+        calls.append(url)
+        limit = int(re.search(r'limit=(\d+)', url).group(1))
+        offset = int(re.search(r'offset=(\d+)', url).group(1))
+        total = 140
+        page = []
+        for idx in range(offset, min(offset + limit, total)):
+            page.append({
+                "Id": 26000000 + idx,
+                "Title": f"Oracle Job {idx}",
+                "PrimaryLocation": "Bengaluru, KA, India",
+                "ExternalDescriptionStr": f"<p>Role {idx}</p>",
+            })
+        return _FakeJSONResponse({"items": [{"TotalJobsCount": total, "requisitionList": page}]})
+
+    generic_json.requests.get = fake_get
+    try:
+        portal = {
+            "company": "American Express",
+            "ats": "oracle",
+            "oracle_nested": True,
+            "india_only": True,
+            "industry": "Financial Services",
+            "endpoint": (
+                "https://egug.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/"
+                "recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,"
+                "requisitionList.otherWorkLocations,requisitionList.secondaryLocations,"
+                "flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;"
+                "siteNumber=CX_1,facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3B"
+                "CATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=25,"
+                "locationId=300000000228786,sortBy=POSTING_DATES_DESC"
+            ),
+        }
+        jobs = generic_json.scrape_get(portal, max_jobs=140)
+        check("oracle pagination job count", len(jobs) == 140)
+        check("oracle pagination second page fetched", len(calls) == 2 and "offset=100" in calls[1])
+        check("oracle pagination jd parsed", jobs[0]["raw_jd_text"] == "Role 0")
+    finally:
+        generic_json.requests.get = original_get
+
+
 def test_deshaw_next_data_parser_maps_public_regular_jobs() -> None:
     html = """
     <script id="__NEXT_DATA__" type="application/json">
@@ -254,6 +331,285 @@ def test_deshaw_next_data_parser_maps_public_regular_jobs() -> None:
     check("deshaw apply url", jobs[0]["job_url"].endswith("/recruit/jobs/Ads/Link/Core-Tech-Principal-Manager-Tech-Treasury-Tech-6760"))
 
 
+def test_intouchcx_feed_filters_india_and_maps_ids() -> None:
+    payload = {
+        "jobs": [
+            {
+                "job": "Customer Service Representative",
+                "link": "https://apply.intouchcx.com/3",
+                "location": "Mesa, Arizona, United States",
+            },
+            {
+                "job": "Customer Service Associate Voice",
+                "link": "https://apply.intouchcx.com/153",
+                "location": "Bengaluru, India",
+            },
+            {
+                "job": "Full Stack Developer ",
+                "link": "https://jobs.dayforcehcm.com/en-CA/intouchcx/CANDIDATEPORTAL/jobs/10082",
+                "location": "Hyderabad, India",
+            },
+        ]
+    }
+    jobs = parse_intouchcx_feed(
+        payload,
+        {
+            "company": "IntouchCX",
+            "endpoint": "https://www.intouchcx.com/wp-json/intouchcx/v1/jobs?country=India",
+            "industry": "Customer Experience",
+            "india_only": True,
+        },
+    )
+    check("intouchcx india count", len(jobs) == 2)
+    check("intouchcx legacy id", jobs[0]["job_id"] == "intouchcx-apply-153")
+    check("intouchcx dayforce id", jobs[1]["job_id"] == "intouchcx-dayforce-10082")
+    check("intouchcx title stripped", jobs[1]["title"] == "Full Stack Developer")
+    check("intouchcx source platform", jobs[1]["source_platform"] == "IntouchCX")
+
+
+def test_intouchcx_legacy_detail_extracts_application_body() -> None:
+    html = """
+    <div class="application-body in" style="font-family: Poppins;">
+      <p><strong>About the Job</strong></p>
+      <p>We are looking for a customer support associate.</p>
+      <ul><li>Handle customer calls end to end.</li></ul>
+    </div>
+    <div class="application-buttons text-center"></div>
+    """
+    text = parse_legacy_intouchcx_detail(html)
+    check("intouchcx legacy jd text", "customer support associate" in text)
+    check("intouchcx legacy jd list text", "Handle customer calls" in text)
+
+
+def test_intouchcx_dayforce_next_data_extracts_detail() -> None:
+    html = """
+    <script id="__NEXT_DATA__" type="application/json">
+    {
+      "props": {
+        "pageProps": {
+          "jobData": {
+            "jobPostingId": 10082,
+            "jobTitle": "Full Stack Developer ",
+            "postingStartTimestampUTC": "2025-05-28T08:00:00+00:00",
+            "jobPostingContent": {
+              "jobDescriptionHeader": "<p><strong>About IntouchCX</strong></p>",
+              "jobDescription": "<p>We are seeking a Full Stack Developer.</p><ul><li>Must have Angular experience.</li></ul>",
+              "jobDescriptionFooter": null
+            },
+            "postingLocations": [
+              {
+                "formattedAddress": "Hyderabad, Telangana, India",
+                "cityName": "Hyderabad",
+                "isoCountryCode": "IN"
+              }
+            ],
+            "jobPostingAttributes": [
+              {"name": "PayType", "value": "Salary"}
+            ]
+          }
+        }
+      }
+    }
+    </script>
+    """
+    detail = parse_dayforce_next_data(html)
+    check("intouchcx dayforce title", detail["title"] == "Full Stack Developer")
+    check("intouchcx dayforce jd", "Angular experience" in detail["raw_jd_text"])
+    check("intouchcx dayforce location", detail["location_city"] == "Hyderabad, Telangana, India")
+    check("intouchcx dayforce date", detail["date_posted"] == "2025-05-28T08:00:00+00:00")
+
+
+def test_google_careers_html_parser_maps_embedded_jobs() -> None:
+    html = r'''
+    <script>
+    AF_initDataCallback({key: 'ds:1', hash: '2', data:[[[
+      ["107743710602502854","Senior Security Architect, Mandiant, Google Cloud (English)",
+       "https://www.google.com/about/careers/applications/signin?jobId=abc&loc=IN&title=Senior+Security+Architect",
+       [null,"<ul><li>Identify solution issue trends.</li></ul>"],
+       [null,"<h3>Minimum qualifications:</h3><ul><li>Bachelor's degree.</li></ul>"],
+       "projects/gweb-careers-proto/tenants/60107626/companies/google",null,"Google","en-US",
+       [["India",["India"],null,null,null,"IN"]],
+       [null,"<p>Work on client security engagements.</p>"],
+       [2],[1778142684,3000000],[1778142684,3000000],[1778142684,224000000],
+       [null,""],1,null,[null,"<b>Remote location: India.</b>"],
+       [null,"<ul><li>Bachelor's degree.</li></ul>"],2],
+      ["999","US Role","https://www.google.com/about/careers/applications/signin?jobId=us",
+       [null,"<ul><li>US responsibility.</li></ul>"],[null,"<ul><li>US qualification.</li></ul>"],
+       "",null,"Google","en-US",[["New York, NY, USA",["New York"],"New York",null,"NY","US"]],
+       [null,"<p>US overview.</p>"],[2],[1778142684,0],[1778142684,0],[1778142684,0],
+       [null,""],1,null,[null,""],[null,""],2]
+    ]]], sideChannel: {}});
+    </script>
+    '''
+    jobs = parse_google_careers_html(
+        html,
+        {
+            "company": "Google",
+            "endpoint": "https://www.google.com/about/careers/applications/jobs/results/?location=India",
+            "industry": "Technology",
+            "india_only": True,
+        },
+    )
+    check("google parser filters india", len(jobs) == 1)
+    check("google native id", jobs[0]["job_id"] == "107743710602502854")
+    check("google title", jobs[0]["title"] == "Senior Security Architect, Mandiant, Google Cloud (English)")
+    check("google location", jobs[0]["location_city"] == "India")
+    check("google jd overview", "Work on client security engagements" in jobs[0]["raw_jd_text"])
+    check("google jd responsibilities", "Identify solution issue trends" in jobs[0]["raw_jd_text"])
+    check("google date", jobs[0]["date_posted"] == "2026-05-07")
+
+
+def test_microsoft_pcsx_search_parser_maps_india_positions() -> None:
+    payload = {
+        "status": 200,
+        "data": {
+            "count": 2,
+            "positions": [
+                {
+                    "id": 1970393556856063,
+                    "displayJobId": "200033959",
+                    "atsJobId": "200033959",
+                    "name": "Senior Software Engineer",
+                    "locations": ["India, Multiple Locations, Multiple Locations"],
+                    "postedTs": 1776326224,
+                    "department": "Software Engineering",
+                    "positionUrl": "/careers/job/1970393556856063",
+                },
+                {
+                    "id": 1970393556000000,
+                    "displayJobId": "200000001",
+                    "name": "US Engineer",
+                    "locations": ["Redmond, Washington, United States"],
+                    "positionUrl": "/careers/job/1970393556000000",
+                },
+            ],
+        },
+    }
+    jobs = parse_microsoft_search_payload(
+        payload,
+        {
+            "company": "Microsoft",
+            "endpoint": "https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com&location=India",
+            "industry": "Technology",
+            "india_only": True,
+        },
+    )
+    check("microsoft parser filters india", len(jobs) == 1)
+    check("microsoft search native id", jobs[0]["job_id"] == "microsoft-200033959")
+    check("microsoft search title", jobs[0]["title"] == "Senior Software Engineer")
+    check("microsoft search location", jobs[0]["location_city"] == "India, Multiple Locations, Multiple Locations")
+    check("microsoft search date", jobs[0]["date_posted"] == "2026-04-16")
+    check("microsoft search url", jobs[0]["job_url"].endswith("/careers/job/1970393556856063?hl=en"))
+
+
+def test_microsoft_detail_parser_maps_full_jd() -> None:
+    payload = {
+        "id": 1970393556864810,
+        "name": "Site Reliability Engineer 2",
+        "posting_name": "Site Reliability Engineer 2",
+        "location": "India, Telangana, Hyderabad",
+        "locations": ["India, Telangana, Hyderabad"],
+        "department": "Service Engineering",
+        "business_unit": "Cloud + AI",
+        "t_update": 1778477142,
+        "ats_job_id": "200037078",
+        "display_job_id": "200037078",
+        "job_description": "<b>Overview</b><br><p>Build reliable cloud services.</p>",
+    }
+    detail = parse_microsoft_detail_payload(payload)
+    check("microsoft detail id", detail["job_id"] == "microsoft-200037078")
+    check("microsoft detail title", detail["title"] == "Site Reliability Engineer 2")
+    check("microsoft detail jd", "Build reliable cloud services" in detail["raw_jd_text"])
+    check("microsoft detail location", detail["location_city"] == "India, Telangana, Hyderabad")
+    check("microsoft detail business unit", detail["business_unit"] == "Cloud + AI")
+    check("microsoft detail date", detail["date_posted"] == "2026-05-11")
+
+
+def test_hilabs_html_parser_maps_india_jobs() -> None:
+    html = r'''
+    <script>
+    self.__next_f.push([1,"24:[\"$\",\"$f\",null,{\"fallback\":[\"$\",\"div\",null,{}],\"children\":[\"$\",\"$L25\",null,{\"countByDepartmentAndCountry\":{\"india\":{\"All Job Listing\":1},\"usa\":{\"All Job Listing\":1}},\"groupedByPlaceAndDepartments\":{\"india\":{\"All Job Listing\":[{\"id\":27,\"documentId\":\"n1q35av2zmlmrfzi8mfowhmg\",\"Add_description_to_Hilabs_Team\":\"We are seeking a Lead Data Scientist.\",\"Job_Id\":null,\"Job_Title\":\"Lead Data Scientist\",\"Category\":\"Data Science\",\"Job_Location\":\"Pune, Maharashtra, India\",\"createdAt\":\"2025-08-26T11:56:09.834Z\",\"updatedAt\":\"2025-08-26T11:56:16.565Z\",\"publishedAt\":\"2025-08-26T11:56:16.594Z\",\"Job_Description\":[{\"id\":53,\"Heading\":\"Responsibilities\",\"Add_bullet_points_with_heading\":[{\"id\":55,\"Heading\":null,\"Points\":[{\"id\":557,\"Point\":\"Build machine learning algorithms.\"},{\"id\":558,\"Point\":\"Deploy big data workflows.\"}]}]},{\"id\":54,\"Heading\":\"Desired Profile\",\"Add_bullet_points_with_heading\":[{\"id\":56,\"Heading\":null,\"Points\":[{\"id\":568,\"Point\":\"Strong Python skills.\"}]}]}],\"Screening_Questions\":[]}]} ,\"usa\":{\"All Job Listing\":[{\"id\":1,\"documentId\":\"us-role\",\"Add_description_to_Hilabs_Team\":\"US only role\",\"Job_Title\":\"US Data Scientist\",\"Category\":\"Data Science\",\"Job_Location\":\"Austin, Texas, United States\",\"updatedAt\":\"2025-08-27T00:00:00.000Z\",\"Job_Description\":[]}]}},\"tagItems\":{\"india\":[{\"title\":\"All Job Listing\"}],\"usa\":[{\"title\":\"All Job Listing\"}]}}]}]"])\n
+    </script>
+    '''
+    jobs = parse_hilabs_html(
+        html,
+        {
+            "company": "HiLabs",
+            "endpoint": "https://www.hilabs.com/careers/all-open-positions?location=india",
+            "industry": "Healthcare Technology",
+            "india_only": True,
+        },
+    )
+    check("hilabs filters india", len(jobs) == 1)
+    check("hilabs id", jobs[0]["job_id"] == "hilabs-n1q35av2zmlmrfzi8mfowhmg")
+    check("hilabs title", jobs[0]["title"] == "Lead Data Scientist")
+    check("hilabs location", jobs[0]["location_city"] == "Pune, Maharashtra, India")
+    check("hilabs jd intro", "Lead Data Scientist" in jobs[0]["raw_jd_text"])
+    check("hilabs jd bullet", "Build machine learning algorithms" in jobs[0]["raw_jd_text"])
+    check("hilabs date", jobs[0]["date_posted"] == "2025-08-26")
+    check("hilabs url", jobs[0]["job_url"].endswith("/careers/all-open-positions/Lead-Data-Scientist/n1q35av2zmlmrfzi8mfowhmg"))
+
+
+def test_blackbrix_listing_and_detail_parsers() -> None:
+    listing_html = """
+    <div class="awsm-job-listings awsm-row awsm-grid-col-3" data-listings="18">
+      <div class="awsm-job-listing-item awsm-grid-item" id="awsm-grid-item-12225">
+        <a href="https://blackbrix.com/jobs/economist/" class="awsm-job-item">
+          <div class="awsm-grid-left-col">
+            <h2 class="awsm-job-post-title">Economist</h2>
+          </div>
+          <div class="awsm-grid-right-col">
+            <div class="awsm-job-specification-wrapper">
+              <div class="awsm-job-specification-item awsm-job-specification-job-location">
+                <span class="awsm-job-specification-term">Kolkata West Bengal</span>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+    </div>
+    """
+    items = parse_blackbrix_listing_items(listing_html, "https://blackbrix.com/job-openings/")
+    check("blackbrix listing count", len(items) == 1)
+    check("blackbrix listing id", items[0]["job_id"] == "12225")
+    check("blackbrix listing title", items[0]["title"] == "Economist")
+    check("blackbrix listing location", items[0]["location_city"] == "Kolkata West Bengal")
+
+    detail_html = """
+    <body class="single single-awsm_job_openings postid-12225">
+      <div class="awsm-job-content">
+        <div class="awsm-job-entry-content entry-content">
+          <p><strong>About Us</strong></p>
+          <p>Black Brix is a management consultancy firm.</p>
+          <p><strong>Base Location - Kolkata, West Bengal</strong></p>
+          <p><strong>Responsibility.</strong><br>Conduct advanced economic analysis.<br>Translate complex findings into recommendations.</p>
+          <p><strong>Desired Candidate Profile</strong><br>Master's degree in Economics.<br>Strong analytical skills.</p>
+        </div>
+      </div>
+      <div class="awsm-job-specification-wrapper">
+        <div class="awsm-job-specification-item awsm-job-specification-job-category">
+          <span class="awsm-job-specification-term">Economist</span>
+        </div>
+        <div class="awsm-job-specification-item awsm-job-specification-job-type">
+          <span class="awsm-job-specification-term">Full Time</span>
+        </div>
+        <div class="awsm-job-specification-item awsm-job-specification-job-location">
+          <span class="awsm-job-specification-term">Kolkata West Bengal</span>
+        </div>
+      </div>
+      <div class="awsm-job-form">
+        <h2>Apply for this position</h2>
+      </div>
+    </body>
+    """
+    detail = parse_blackbrix_detail(detail_html, "https://blackbrix.com/jobs/economist/")
+    check("blackbrix detail id", detail["job_id"] == "12225")
+    check("blackbrix detail title", detail["title"] == "Economist")
+    check("blackbrix detail location", detail["location_city"] == "Kolkata West Bengal")
+    check("blackbrix detail jd", "advanced economic analysis" in detail["raw_jd_text"])
+    check("blackbrix detail apply url", detail["job_url"] == "https://blackbrix.com/jobs/economist/")
+
+
 def main() -> None:
     test_radancy_listing_links_parse()
     test_search_jobs_pagination_uses_p_param()
@@ -263,6 +619,15 @@ def main() -> None:
     test_tata_elxsi_detail_extracts_jd_and_apply_url()
     test_vector_next_data_parser_maps_jobs_and_body_sections()
     test_deshaw_next_data_parser_maps_public_regular_jobs()
+    test_intouchcx_feed_filters_india_and_maps_ids()
+    test_intouchcx_legacy_detail_extracts_application_body()
+    test_intouchcx_dayforce_next_data_extracts_detail()
+    test_google_careers_html_parser_maps_embedded_jobs()
+    test_microsoft_pcsx_search_parser_maps_india_positions()
+    test_microsoft_detail_parser_maps_full_jd()
+    test_hilabs_html_parser_maps_india_jobs()
+    test_blackbrix_listing_and_detail_parsers()
+    test_oracle_nested_scraper_paginates_offsets()
     print("All direct endpoint provider tests passed.")
 
 

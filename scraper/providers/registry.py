@@ -8,11 +8,15 @@ from providers.base import FALLBACK_FIRECRAWL_EXTRACT, Provider, ProviderResult,
 from providers.eightfold import EightfoldProvider
 from providers.firecrawl_js import FirecrawlJSProvider
 from providers.darwinbox import DarwinboxProvider
+from providers.google_careers import GoogleCareersProvider
 from providers.mynexthire import MyNextHireProvider
 from providers.icims_custom import IcimsCustomProvider
+from providers.intouchcx import IntouchCXProvider
+from providers.microsoft_careers import MicrosoftCareersProvider
 from providers.mckinsey import McKinseyProvider
 from providers.aditya_birla import AdityaBirlaProvider
 from providers.apple_jobs import AppleJobsProvider
+from providers.blackbrix_jobs import BlackBrixJobsProvider
 from providers.cognizant_xml import CognizantXMLProvider
 from providers.deshaw_india import DEShawIndiaProvider
 from providers.pcsx import PCSXProvider
@@ -28,6 +32,7 @@ from providers.vector_consulting import VectorConsultingProvider
 from providers.pepsico_jobs_api import PepsiCoJobsAPIProvider
 from providers.skima_careers import SkimaCareersProvider
 from providers.hm_wp_jobs import HMWordPressJobsProvider
+from providers.hilabs_careers import HiLabsCareersProvider
 from providers.michelin_astro import MichelinAstroProvider
 from providers.pinpoint import PinpointProvider
 from providers.spire2grow import Spire2GrowProvider
@@ -38,6 +43,7 @@ from providers.lever import LeverProvider
 from providers.phenom import PhenomProvider
 from providers.smartrecruiters import SmartRecruitersProvider
 from providers.workday import WorkdayProvider
+from providers.zoho_recruit import ZohoRecruitProvider
 
 _FIRECRAWL_PROVIDER = FirecrawlJSProvider()
 _GENERIC_PROVIDER = GenericJSONProvider()
@@ -49,12 +55,16 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "lever": LeverProvider(),
     "phenom_api": PhenomProvider(),
     "eightfold": EightfoldProvider(),
+    "google_careers": GoogleCareersProvider(),
     "icims_custom": IcimsCustomProvider(),
+    "intouchcx": IntouchCXProvider(),
+    "microsoft_careers": MicrosoftCareersProvider(),
     "darwinbox": DarwinboxProvider(),
     "mynexthire": MyNextHireProvider(),
     "mckinsey": McKinseyProvider(),
     "aditya_birla": AdityaBirlaProvider(),
     "apple_jobs": AppleJobsProvider(),
+    "blackbrix_jobs": BlackBrixJobsProvider(),
     "cognizant_xml": CognizantXMLProvider(),
     "deshaw_india": DEShawIndiaProvider(),
     "pinpoint": PinpointProvider(),
@@ -71,9 +81,11 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "pepsico_jobs_api": PepsiCoJobsAPIProvider(),
     "skima_careers": SkimaCareersProvider(),
     "hm_wp_jobs": HMWordPressJobsProvider(),
+    "hilabs_careers": HiLabsCareersProvider(),
     "michelin_astro": MichelinAstroProvider(),
     "spire2grow": Spire2GrowProvider(),
     "zwayam": ZwayamProvider(),
+    "zoho_recruit": ZohoRecruitProvider(),
 }
 
 

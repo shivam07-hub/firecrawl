@@ -1,0 +1,15 @@
+<!-- converted from Volvo_Group_jobs_2026-04-19.xlsx -->
+
+## Sheet: Sheet1
+| Company | Role | Location | Date Posted | Work Mode | Employment Type | Seniority | Business Unit | Industry | Job Description | Primary Skills Required | Secondary Skills Required | URL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Volvo Group | Associate Solution Engineer | Bangalore | 2026-04-19 | onsite | full-time | junior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Associate-Solution-Engineer-562122/1347160555/ |
+| Volvo Group | Senior Solution Consultant IT | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Solution-Consultant-IT-562122/1347452155/ |
+| Volvo Group | Senior Solution Consultant IT | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Solution-Consultant-IT-562122/1348106055/ |
+| Volvo Group | Senior Software Engineer | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Software-Engineer-562122/1348147055/ |
+| Volvo Group | Senior Java Full Stack Developer | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Java-Full-Stack-Developer-562122/1348784755/ |
+| Volvo Group | Solution Consultant IT | Bangalore | 2026-04-19 | onsite | full-time | mid | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Solution-Consultant-IT-562122/1337144555/ |
+| Volvo Group | SAP FICO - Senior Solution Consultant | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-SAP-FICO-Senior-Solution-Consultant-562122/1326732355/ |
+| Volvo Group | Senior Software Engineer - Full Stack | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Software-Engineer-Full-Stack-562122/1349444555/ |
+| Volvo Group | Senior Consultant - SAP MM & LE and S4 HANA | Bangalore | 2026-04-19 | onsite | full-time | senior | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-Senior-Consultant-SAP-MM-&-LE-and-S4-HANA-562122/1327206855/ |
+| Volvo Group | .Net Developer | Bangalore | 2026-04-19 | onsite | full-time | mid | Volvo Group Digital Technology & Operations | Automotive / Transportation |  |  |  | https://jobs.volvogroup.com/job/Bangalore-_Net-Developer-562122/1326889355/ |

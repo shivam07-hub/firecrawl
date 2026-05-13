@@ -23,7 +23,35 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 
 ---
 
-## CURRENT STATE (as of 2026-05-04)
+## CURRENT STATE (as of 2026-05-13)
+
+- **Discovery-mode override for the current crack hunt:** do **not** block on tests, smoke runs, or full scrape verification when a likely ATS/XHR endpoint has been identified. For this phase, **capturing the endpoint/host/domain/siteNumber/locationId and saving it into `KNOWN_PORTALS.md`, `portal_reader.py`, or a provider registry is more important than proving it end-to-end.** Validation will happen later in a dedicated pass.
+- **Firecrawl cloud is now approved as a discovery microscope** for endpoint hunting. Use `map -> selective scrape`, then promote the durable direct route. Do not leave Firecrawl as the final architecture unless the portal is genuinely anti-bot / JS-opaque.
+- **American Express moved off the broken Eightfold assumption and onto Oracle Candidate Experience**:
+  - careers shell: `https://careers.americanexpress.com/en/sites/CX_1/jobs`
+  - API host: `egug.fa.us2.oraclecloud.com`
+  - site number: `CX_1`
+  - India location ID: `300000000228786`
+  - response path: `recruitingCEJobRequisitions?finder=findReqs`
+- **Direct-route promotions completed (earlier sessions):** `STMicroelectronics`, `GMR Group`, `HP (HPE)`, `HiLabs`, `Black Brix`, `American Express`.
+- **Crack-hunt session 2026-05-13 — new promotions:**
+  - `Nestlé` ✅ — SAP Jobs2Web HTML at `jobdetails.nestle.com/search/?q=&locationsearch=india`; 31 India jobs across 4 pages; routed via `_ATS_OVERRIDES` + `_OTHER_ENDPOINT_OVERRIDES` in `portal_reader.py`
+  - `ITC Limited` ✅ — Zoho Recruit SSR portal at `recruitment.itcportal.com/jobs/Careers`; 62 India jobs; new provider at `providers/zoho_recruit.py`; apply URL pattern: `SingleJobDetail.na?sys_id={id}&page_id=48611000000181149`
+  - `Adidas` ✅ — SAP Jobs2Web HTML at `jobs.adidas-group.com/search/?q=&optionsFacetsDD_country=IN`; routing fixed in `portal_reader.py`
+  - `Unilever` ✅ — TalentBrew at `careers.unilever.com/en/location/india-jobs/34155/1269750/2`; moved from WORKDAY section (was CF-blocked) to CONSUMER GOODS; endpoint override in `portal_reader.py`
+  - `Oracle` ✅ — Oracle CE (NOT Workday) confirmed via XHR cURL; API host `eeho.fa.us2.oraclecloud.com`; siteNumber `CX_45001`; `location=India` text param (no numeric locationId); moved from WORKDAY to ORACLE HCM section; `_ORACLE_ENDPOINT_OVERRIDES` in `portal_reader.py`; 5+ live India jobs verified
+- **portal_reader.py fixes this session:**
+  - `_workday()` skip condition now checks `'⚠️' in tenant` (not just instance/career_site) — prevents Unilever and other moved entries from leaking through as broken Workday portals
+  - `_OTHER_ENDPOINT_OVERRIDES` dict added — allows `_other()` to use a different endpoint than the `Careers URL` column (used by Nestlé, Unilever, ITC Limited)
+  - `_ATS_OVERRIDES` + `_INDIA_ONLY_OVERRIDES` extended for Adidas, Nestlé, Unilever, ITC Limited
+  - `_ORACLE_ENDPOINT_OVERRIDES` dict added — Oracle Corp uses `location=India` text param instead of numeric locationId; override bypasses standard endpoint builder
+- **Bank of America** — `careers.bankofamerica.com/en/jobs/` URL tested → 404; Workday entry unchanged; still needs correct Oracle CE or Workday URL from browser XHR
+- **Grant Thornton status:** TalentRecruit (`gtprod.talentrecruit.com`) is an **internal SSO-gated ATS** — not a public career page. FC map found `/career-page/jobs` but scrape returns login screen. No public portal found on `grantthornton.in`. Marked as internal/inaccessible in PENDING WORK.
+- **Firecrawl cloud discovery signals captured this session:**
+  - `Vehere Interactive`: Firecrawl surfaced durable `/positions/...` detail URLs even though direct requests still hit Cloudflare 403.
+  - `Meta`: Firecrawl can read the India jobs shell at `https://www.metacareers.com/jobs/?locations[0]=India`, but the stable direct JSON/GraphQL route still needs XHR capture.
+  - `Mondee Holdings`: Ashby board confirmed at `https://jobs.ashbyhq.com/mondee`; obvious posting API slug still unresolved / effectively empty.
+- **Important handoff note:** if `main.py` hangs on a portal during this discovery phase, that is **not** a reason to defer capturing the endpoint. Save the endpoint first, move on, and leave runtime verification for later.
 
 - **Active portals:** see `KNOWN_PORTALS.md` — file has expanded significantly beyond the previous 164 count; now includes 35+ sections with ATS-grouped companies, industry buckets, blocked lists, and a scrape queue. Exact active count = rows with `✅ working` status.
 - **~19,000 jobs** in Supabase (`jobs` table, project `gipvxuugajkugntwkeiz`) — last exact count: 18,991
@@ -81,7 +109,7 @@ KNOWN_PORTALS.md  ←  portal config (URL, ATS type, company name)
 main.py + providers/  ←  ATS direct API → raw JSON per company
   (Firecrawl scrape() only as JS-heavy fallback, via Docker)
       ↓
-enricher.py  ←  LM Studio → main_skills + side_skills from job_description
+enricher.py  ←  LM Studio → role_domain + structured skills with required_level
       ↓
 csv_importer.py  ←  upsert to Supabase on job_id
                  ←  writes per-company health to scrape_diagnostics
@@ -99,7 +127,7 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `generic_registry.json` | Per-company: which JSON keys worked — auto-written on first success |
 | `company_industries.json` | Company → Industry mapping — manual |
 | `rag_skills.py` | IDF index over 35,108 Lightcast L3 skills — vocab for LLM |
-| `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → `main_skills` + `side_skills` |
+| `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → structured `skills` + back-compat arrays |
 | `writer.py` | `to_canonical()` → deduped JSON+CSV saved to output folder |
 | `main.py` | Orchestrator — all CLI flags |
 | `csv_importer.py` | Phase 3 upsert: dedup, lifecycle, apply_url gate, industry_group, location_city |
@@ -143,13 +171,14 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `job_id` | uuid FK → jobs | |
 | `skill_id` | uuid FK → skills | resolved via `skills.taxonomy_key` |
 | `is_primary` | boolean | true = main_skill, false = side_skill |
-| `required_level` | int (1–5) | **NOT YET ADDED** — see Pending Work §6 below |
+| `required_level` | smallint (1–4) | scraper-owned proficiency signal; migration file: `scraper/sql/add_job_skills_required_level.sql` |
 
-**`required_level` contract (agreed 2026-05-07):**
-- True_Yodha currently uses a heuristic: `is_primary → 4`, `is_primary=False → 2`
-- This heuristic fires **only when `required_level` IS NULL**
-- Once this column is populated by the scraper, True_Yodha automatically uses the real values — no code change needed
-- Definition: the minimum proficiency level (1–5) a candidate needs in this skill to be considered qualified for the job role
+**`required_level` contract (updated 2026-05-10):**
+- L1 = awareness/basic, L2 = working proficiency, L3 = advanced/practitioner, L4 = expert/authority
+- LM Studio returns `skills[]` objects: `{name, is_primary, required_level}`
+- `_validate_enrichment()` canonicalizes skill names, caps primary skills at 5 and side skills at 8, and derives legacy `main_skills` / `side_skills`
+- `csv_importer.py` and `supabase_enricher.py` stop before real writes if Supabase has not run `scraper/sql/add_job_skills_required_level.sql`
+- True_Yodha should read `job_skills.required_level` directly and keep any heuristic only as a fallback
 
 ---
 
@@ -167,8 +196,12 @@ Scraper = discovery (new jobs). Community = freshness (is this still open?).
 
 ### is_active ownership
 - `csv_importer` sets `is_active = true` on INSERT only
-- `csv_importer` **NEVER sets `is_active = false`** — partial scrapes cause false negatives
-- Only `job_reports` trigger deactivates jobs
+- Community reports can still deactivate jobs through the `job_reports` trigger
+- Scraper decommissioning is opt-in: `csv_importer.py --deactivate-missing`
+- Scraper decommissioning only compares companies represented by one run date; real writes require `--run-date YYYYMMDD`
+- Dry-run decommissioning can omit `--run-date` to inspect the newest output date without writes
+- Companies absent from that run date are never touched
+- The importer blocks deactivation if upload quality fails or if one company would deactivate more than 75% of active rows, unless `--allow-large-deactivation` is explicitly passed
 
 ### Backend + frontend lives in True_Yodha repo
 Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
@@ -209,8 +242,13 @@ Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
 1. Always use `firecrawl-py` SDK — never raw HTTP.
 2. One singleton `_app` instance in `firecrawl_client.py`. Never instantiate elsewhere.
 3. Never use `crawl()`.
-4. Two permitted calls: `fc.scrape(url)` (1 credit) and `fc.extract(urls, schema, prompt)` (JS-heavy only).
-5. Priority order: Direct ATS API → Docker → Firecrawl cloud.
+4. Three permitted discovery/extraction calls:
+   - `fc.map_site(url, ...)` — discovery-first URL enumeration (1 credit per site)
+   - `fc.scrape(url)` — targeted markdown fetch (1 credit per URL)
+   - `fc.extract(urls, schema, prompt)` — JS-heavy structured fallback only
+5. Preferred workflow for crack-hunt sessions: **Direct ATS guess → Firecrawl `map_site()` → selective `scrape()` on the best 1-3 URLs → save the direct endpoint.**
+6. Priority order: Direct ATS API → Firecrawl map/scrape for discovery → Docker/Firecrawl fallback for opaque portals → later validation.
+7. During the current endpoint-capture phase, **do not spend credits on broad verification runs**. Capture the route and move forward.
 
 ---
 
@@ -218,9 +256,9 @@ Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
 
 1. `job_description` populated by scraper
 2. `rag_skills.py` retrieves top-40 Lightcast L3 skills from JD as vocabulary
-3. `enrich_job()` sends vocab + JD to LM Studio (`gemma-3-4b`, max_tokens=150, temp=0.0)
-4. LLM returns `main_skills` (top 5 must-have) + `side_skills` (nice-to-have)
-5. `_validate_enrichment()` validates against Lightcast L3 — invalid values dropped
+3. `enrich_job()` sends vocab + JD to LM Studio (`gemma-3-4b`, max_tokens=512, temp=0.0)
+4. LLM returns `role_domain` + `skills[]` with `is_primary` and `required_level`
+5. `_validate_enrichment()` validates against Lightcast L3, bounds levels to 1–4, and derives `main_skills` / `side_skills`
 
 ---
 
@@ -254,36 +292,39 @@ Confirmed blocked: Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspir
 
 ### 1 — ATS Crack Hunt (uncracked companies)
 
-**Workflow:** Open career page → DevTools → Network → XHR tab → find JSON request with job titles → Copy as cURL → paste here → Claude tests + saves to registry.
+**Workflow:** Open career page → DevTools → Network → XHR tab → find JSON request with job titles → Copy as cURL → paste here → Claude saves the route into `KNOWN_PORTALS.md` / `portal_reader.py` / provider registry.
+
+**Explicit priority rule for this phase:** if an endpoint *looks like the correct ATS endpoint*, capture it and move on. **No test is required before promotion.** A later validation pass can prove whether it runs cleanly.
 
 | Company | Career URL | Suspected ATS | Notes |
 |---|---|---|---|
-| 🟡 IIFL Finance | iifl.darwinbox.in | Darwinbox | Provider ready — needs CF cookies |
-| 🟡 Flipkart | flipkartcareers.com | Darwinbox | Provider ready — needs CF cookies |
-| 🟡 OYO | oyorooms.com/about/ | Darwinbox | Provider ready — needs CF cookies |
-| LTIMindtree | ltimindtree.com/careers | Unknown | Inspect XHR |
-| AMD | amd.com/en/corporate/careers | iCIMS | Find exact XHR endpoint |
-| Netflix | jobs.netflix.com | Custom Next.js | Find JSON API |
-| Meta | metacareers.com/jobs | Custom GraphQL | Find GraphQL endpoint + params |
-| Deutsche Bank | careers.db.com | SAP SuccessFactors | Find tenant + OData endpoint |
-| Standard Chartered | sc.com/en/global-careers | Workday CF-blocked | Find India UUID |
-| Keysight Technologies | jobs.keysight.com | SAP SF suspected | Inspect XHR |
-| ANZ Bank | careers.anz.com | Workday CF-blocked | Find India UUID |
-| Eli Lilly | careers.lilly.com | Phenom | CF-blocks `/api/jobs` |
-| Societe Generale | careers.societegenerale.com | Workday CF-blocked | Inspect XHR |
-| IndusInd Bank | indusind.bank.in | Unknown | Inspect XHR |
-| Mu Sigma | mu-sigma.com/careers | Unknown | Inspect XHR |
-| Ola Electric | olaelectric.com/careers | Unknown | Inspect XHR |
-| Kearney | kearney.com/about/locations/india | Unknown | Inspect XHR |
+| Meta | https://www.metacareers.com/jobs/?locations[0]=India | Custom GraphQL / JSON | Firecrawl can read listing shell; capture GraphQL/XHR route next |
+| Vehere Interactive | https://vehere.com/company/careers/ | Custom | Firecrawl surfaced `/positions/...` URLs; direct requests still 403 |
+| Mondee Holdings | https://jobs.ashbyhq.com/mondee | Ashby | Board confirmed; posting API slug unresolved / likely empty board |
+| Oliver Wyman | https://mmc.phenompeople.com/global/en/oliver-wyman-search | Phenom + downstream detail blocker | Listings exist; full JD route still unresolved |
+| Morgan Stanley | https://morganstanley.eightfold.ai/careers?location=INDIA&domain=morganstanley.com | Eightfold / PCSX | Direct API 403; needs browser/XHR clue |
+| Micron Technology | https://micron.eightfold.ai/careers?location=India&hl=en | Eightfold / PCSX | Direct API 403 |
+| Qualcomm | https://careers.qualcomm.com | Eightfold hosted / custom | Firecrawl usable; direct API/domain still missing |
+| HSBC | https://hsbc.eightfold.ai/careers?location=India&hl=en | Eightfold | SPA shell only; needs browser/XHR clue |
+| Philip Morris International | https://join.pmicareers.com/search-results | Eightfold hosted | Tenant not identified from direct API |
+| Grant Thornton India | https://gtprod.talentrecruit.com/career-page/jobs | TalentRecruit | **Internal SSO-gated ATS** — not a public portal; FC scrape returns login screen; check `grantthornton.in` for separate public career page or mark inaccessible |
+| Godrej Consumer Products | https://careers.godrejindustries.com/in/en/search-results?qcountry=India | Phenom SSR | DNS corrected — see KNOWN_PORTALS.md CONSUMER GOODS section; probe PCSX `domain=godrejindustries.com` or Phenom SSR to crack |
+| Alvarez & Marsal | https://alvarezandmarsal.wd1.myworkdayjobs.com | Workday | CF-blocked; need browser XHR for India UUID → `workday_registry.json` |
+| 🟡 IIFL Finance | iifl.darwinbox.in | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
+| 🟡 Flipkart | flipkartcareers.com | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
+| 🟡 OYO | oyorooms.com/about/ | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
 
 **Workday CF-blocked** (need India UUID via browser, then add to workday_registry.json):
-Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, Societe Generale, Standard Chartered, ANZ Bank.
+Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, Societe Generale, Standard Chartered, ANZ Bank, Alvarez & Marsal.
 
 ### 2 — Fix broken direct scrapers
-- Verify Phenom REST endpoints: BCG, PMI, Oliver Wyman (unverified API paths)
+- Capture direct detail/JD routes without blocking on runtime:
+  - Oliver Wyman full JD source
+  - Meta GraphQL payload + params
+  - Vehere reusable detail pattern under `/positions/...`
+  - Mondee Ashby job-board slug if a non-empty posting API exists
 - Fix Workday slugs: Capgemini, MSCI (HCL cracked via Taleo — done)
 - Fix SmartRecruiters: Zomato, S&P Global, CRISIL (unconfirmed IDs)
-- Fix HP/HPE Phenom endpoint (returning HTML — needs correct slug)
 
 ### 3 — New ATS providers still needed
 - **Workable**: `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
@@ -292,27 +333,12 @@ Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi V
 
 ### 4 — Architecture (remaining)
 - **Firecrawl result cache** — `firecrawl_cache.json` keyed by URL, 7-day TTL. Cache hit → skip re-scrape, save credits.
+- **Firecrawl discovery cache** — `map_site()` is now cached too; use it first during endpoint hunting.
 - **Provider override consolidation** — if a future route needs special handling, add it through `portal_reader.py` + `scraper/providers/`, not a bespoke script folder.
 
-### 6 — Add `required_level` to `job_skills` (unblocks True_Yodha skill gap display)
+### 6 — Backfill real `required_level` values into existing `job_skills`
 
-**What:** Add `required_level INT` column to `job_skills` table. Scraper populates it during Phase 2 enrichment.
-
-**Why:** True_Yodha shows `L0→L4` skill gap cards on the home dashboard. Until this column exists, it uses a heuristic (primary=4, secondary=2). Real values will improve accuracy.
-
-**SQL migration (run via Supabase dashboard):**
-```sql
-ALTER TABLE job_skills ADD COLUMN IF NOT EXISTS required_level INT CHECK (required_level BETWEEN 1 AND 5);
-```
-
-**Scraper change (`enricher.py` / LLM prompt):**
-For each skill returned by the LLM, also return `required_level` (1–5).
-LLM prompt addition: *"For each skill, also output `required_level` (1=aware, 2=practitioner, 3=proficient, 4=expert, 5=master) — the minimum level needed to succeed in this role."*
-
-**`csv_importer.py` change:**
-When writing to `job_skills`, include `required_level` from the enriched skill dict if present. Null is fine — True_Yodha falls back to heuristic.
-
-**True_Yodha contract:** no code change needed — fallback already handles NULL.
+Migration is complete and verified on 2026-05-10. Existing rows currently carry the default `required_level=2`; newly enriched uploads will write model-derived levels. Run a targeted LM Studio backfill only if level accuracy on existing jobs is needed before the next fresh scrape.
 
 ### 5 — Archon weekly cadence
 - Weekly cron: `0 2 * * 0` via `.archon/workflows/scraper-weekly-run.yaml`

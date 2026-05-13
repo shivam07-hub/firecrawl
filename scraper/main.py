@@ -2,7 +2,7 @@
 Mirror Job Scraper — Weekly Orchestrator
 ========================================
 Reads KNOWN_PORTALS.md, routes active portals through providers, enriches via
-LM Studio (main_skills + side_skills), and writes canonical JSON/CSV output.
+LM Studio (structured skills + back-compat arrays), and writes canonical JSON/CSV output.
 
 Firecrawl credit rules:
   - crawl() is NEVER called — too expensive (N credits per company)
@@ -238,7 +238,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
 
         canonical = g2.passed
 
-        # ── Enrich (main_skills + side_skills from job_description) ──────────
+        # ── Enrich (structured skills + back-compat arrays from JD) ──────────
         if skip_enrich:
             enriched = canonical
             log.info(f"  LLM enrichment skipped (--skip-enrich)")
@@ -313,6 +313,10 @@ def _persist_diagnostics_to_supabase(summary: dict, log: logging.Logger) -> None
     Best-effort write of run diagnostics to Supabase.
     If table/env is missing, this no-ops with a warning (does not fail the run).
     """
+    if os.getenv("SCRAPE_DIAGNOSTICS_DISABLED", "").lower() in {"1", "true", "yes"}:
+        log.info("  Diagnostics table skipped: SCRAPE_DIAGNOSTICS_DISABLED=1")
+        return
+
     table = os.getenv("SCRAPE_DIAGNOSTICS_TABLE", "scrape_diagnostics")
     supabase_url = os.getenv("SUPABASE_URL", "")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -363,7 +367,7 @@ def _persist_diagnostics_to_supabase(summary: dict, log: logging.Logger) -> None
 def _needs_enrichment(job: dict) -> bool:
     """True if the job has job_description but no skills enrichment yet."""
     has_jd     = bool((job.get('job_description') or '').strip())
-    has_skills = bool(job.get('main_skills'))
+    has_skills = bool(job.get('skills') or job.get('main_skills'))
     return has_jd and not has_skills
 
 

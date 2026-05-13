@@ -20,15 +20,24 @@ def test_direct_endpoint_routes() -> None:
     expected = {
         "Apple": "apple_jobs",
         "Cognizant": "cognizant_xml",
+        "Google": "google_careers",
+        "STMicroelectronics": "eightfold",
+        "American Express": "oracle",
         "Citibank": "talentbrew",
         "AstraZeneca": "talentbrew",
         "Eli Lilly": "phenom_ssr",
         "Cisco": "phenom_ssr",
         "BCG": "phenom_ssr",
         "LTIMindtree": "sap_jobs2web_html",
+        "GMR Group": "sap_jobs2web_html",
+        "HP (HPE)": "phenom_ssr",
+        "HiLabs": "hilabs_careers",
         "Tata Elxsi": "tata_elxsi",
         "Vector Consulting Group": "vector_consulting",
         "DE Shaw": "deshaw_india",
+        "IntouchCX": "intouchcx",
+        "Microsoft": "microsoft_careers",
+        "Black Brix": "blackbrix_jobs",
     }
     for company, ats in expected.items():
         portal = _portal(company)

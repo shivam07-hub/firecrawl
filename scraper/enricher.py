@@ -7,10 +7,10 @@ Single responsibility (v2, Dump 4+):
       Read job_title + job_description from canonical job dict.
       Ask LM Studio to extract:
         - role_domain  (functional area classification)
-        - main_skills  (top 5 must-have skills, validated against Lightcast L3 taxonomy)
-        - side_skills  (nice-to-have skills, validated against Lightcast L3 taxonomy)
+        - skills       (Lightcast L3 skills with is_primary + required_level)
       Skills that do not match an L3 entry in lightcast_skills_taxonomy.json are dropped.
       L1 and L2 taxonomy levels are derivable from L3 via the taxonomy JSON — not stored here.
+      Back-compat fields main_skills and side_skills are still populated.
       Writes into the job dict in-place and returns it.
       Safe to call if job_description is empty (returns job unchanged).
 """
@@ -60,10 +60,30 @@ Job Title: {title}
 Job Description:
 {jd}
 
-Approved skill vocabulary (choose ONLY from this list for main_skills and side_skills):
+Approved skill vocabulary (you MUST choose ONLY names from this list):
 {skills_list}
 
-Return a JSON object with EXACTLY these three keys:
+━━━ LEVEL SCALE (required_level integer 1-4) ━━━
+L1 - Awareness / Basic
+    Signals: "familiar with", "exposure to", "knowledge of", "nice to have",
+             "a plus", "preferred", "awareness of", "understanding of"
+
+L2 - Working Proficiency
+    Signals: "experience with", "working knowledge", "1-3 years", "proficient",
+             "hands-on", "comfortable with", "able to use"
+
+L3 - Advanced / Practitioner
+    Signals: "strong experience", "3-5 years", "advanced", "deep knowledge",
+             "lead", "architect", "design and implement", "own the"
+
+L4 - Expert / Authority
+    Signals: "expert", "5+ years", "mastery", "authority", "strategic ownership",
+             "deep expertise", "principal", "staff-level", "drive the vision"
+
+If no signal is present: use L2 for must-have skills, L1 for nice-to-have.
+Never assign L4 unless the JD explicitly demands expert or 5+ years.
+
+Return a JSON object with EXACTLY these two keys:
 
 1. role_domain: The functional area of this role. MUST be exactly one of:
    "Software Engineering" | "Data & Analytics" | "Finance" | "Strategy & Consulting" |
@@ -72,22 +92,26 @@ Return a JSON object with EXACTLY these three keys:
    "Risk & Compliance" | "General Management" | "Supply Chain" | "Manufacturing"
    Pick the single best match. Do not invent new values.
 
-2. main_skills: JSON array of the top 5 MUST-HAVE technical/hard skills from the JD.
-   - Choose ONLY names from the approved skill vocabulary above. Max 5 items.
+2. skills: JSON array, max 13 items total. Each item:
+   {{
+     "name": "<exact name from approved vocabulary>",
+     "is_primary": true | false,
+     "required_level": 1 | 2 | 3 | 4
+   }}
+   is_primary=true  -> must-have / explicitly required (max 5)
+   is_primary=false -> nice-to-have / preferred (max 8)
+   Skills absent from the approved vocabulary MUST be omitted entirely.
+   Do not invent skill names. Do not include duplicates.
 
-3. side_skills: JSON array of nice-to-have or soft skills from the JD.
-   - Choose ONLY names from the approved skill vocabulary above. Max 8 items.
-
-Use [] for skills if none are mentioned. Use null for role_domain if truly unclear.
 Return ONLY valid JSON:
-{{"role_domain": null, "main_skills": [], "side_skills": []}}"""
+{{"role_domain": null, "skills": []}}"""
 
 
 # ── Public function ───────────────────────────────────────────────────────────
 
 def enrich_job(job: dict) -> dict:
     """
-    Extract role_domain, main_skills and side_skills from job_description via LM Studio.
+    Extract role_domain and structured skills from job_description via LM Studio.
     Only runs if job_description is non-empty and skills are not already set.
     Mutates and returns the job dict.
     """
@@ -95,8 +119,8 @@ def enrich_job(job: dict) -> dict:
     if not jd:
         return job
 
-    # Skip if already fully enriched
-    if job.get('main_skills') and job.get('role_domain'):
+    # Skip if already fully enriched with levels and a controlled role_domain.
+    if job.get('skills') and job.get('main_skills') and job.get('role_domain') in _ROLE_DOMAIN_VALUES:
         return job
 
     title  = (job.get('job_title') or '').strip()
@@ -106,8 +130,10 @@ def enrich_job(job: dict) -> dict:
     extracted = _llm_json(prompt, default={})
     if extracted:
         extracted = _validate_enrichment(extracted)
-        if not job.get('role_domain'):
+        if job.get('role_domain') not in _ROLE_DOMAIN_VALUES:
             job['role_domain'] = extracted.get('role_domain') or ''
+        if not job.get('skills'):
+            job['skills'] = extracted.get('skills', [])
         if not job.get('main_skills'):
             job['main_skills'] = extracted.get('main_skills', [])
         if not job.get('side_skills'):
@@ -122,25 +148,61 @@ def _validate_enrichment(data: dict) -> dict:
     """
     Validate LLM output:
     - role_domain must be in the controlled vocabulary.
-    - Skills are matched against the Lightcast L3 taxonomy; unmatched skills are dropped.
+    - Structured skills are matched against the Lightcast L3 taxonomy.
+    - required_level is constrained to 1-4.
       The canonical taxonomy name is used (not the LLM's raw string).
     """
     rd = data.get('role_domain')
     data['role_domain'] = rd if rd in _ROLE_DOMAIN_VALUES else None
 
-    for field in ('main_skills', 'side_skills'):
-        val = data.get(field)
-        if not isinstance(val, list):
-            data[field] = []
+    raw_skills = data.get('skills') or []
+    if not raw_skills and (data.get('main_skills') or data.get('side_skills')):
+        raw_skills = [
+            {"name": skill, "is_primary": True, "required_level": 2}
+            for skill in (data.get('main_skills') or [])
+        ] + [
+            {"name": skill, "is_primary": False, "required_level": 1}
+            for skill in (data.get('side_skills') or [])
+        ]
+
+    if not isinstance(raw_skills, list):
+        raw_skills = []
+
+    validated: list[dict] = []
+    seen: set[str] = set()
+    primary_count = 0
+    side_count = 0
+    for item in raw_skills:
+        if not isinstance(item, dict):
             continue
-        validated = []
-        for s in val:
-            if not isinstance(s, str):
+        canonical = match_to_taxonomy(item.get('name') or '')
+        if not canonical or canonical in seen:
+            continue
+
+        is_primary = bool(item.get('is_primary'))
+        level = item.get('required_level')
+        if not isinstance(level, int) or level not in (1, 2, 3, 4):
+            level = 2 if is_primary else 1
+
+        if is_primary:
+            if primary_count >= 5:
                 continue
-            canonical = match_to_taxonomy(s)
-            if canonical and canonical not in validated:
-                validated.append(canonical)
-        data[field] = validated[:8]
+            primary_count += 1
+        else:
+            if side_count >= 8:
+                continue
+            side_count += 1
+
+        validated.append({
+            'name': canonical,
+            'is_primary': is_primary,
+            'required_level': level,
+        })
+        seen.add(canonical)
+
+    data['skills'] = validated
+    data['main_skills'] = [s['name'] for s in validated if s['is_primary']]
+    data['side_skills'] = [s['name'] for s in validated if not s['is_primary']]
     return data
 
 
@@ -148,9 +210,9 @@ def _llm_json(prompt: str, default):
     """Call LM Studio and parse the response as JSON. Returns default on any failure."""
     # deepseek-r1 (quality) emits a reasoning_content block before the answer;
     # needs 2048 to guarantee JSON output after thinking tokens.
-    # Fast models (gemma) output ~60-80 real tokens; 120 gives headroom without
+    # Fast models now emit structured skill objects; 512 gives headroom without
     # burning decode budget on preamble. Assistant prefill forces decode to start at {.
-    _max_tokens = 2048 if _MODEL_SPEED == "quality" else 120
+    _max_tokens = 2048 if _MODEL_SPEED == "quality" else 512
     try:
         resp = _get_client().chat.completions.create(
             model=LM_STUDIO_MODEL,
@@ -170,5 +232,3 @@ def _llm_json(prompt: str, default):
     except Exception as e:
         print(f"    [LLM ERROR]: {e}")
         return default
-
-

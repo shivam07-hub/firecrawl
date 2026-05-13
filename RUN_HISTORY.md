@@ -5,6 +5,66 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-05-13 — Firecrawl-as-microscope direct route promotion
+
+**Scope:** User provided Firecrawl access and clarified that Firecrawl should be used for endpoint discovery, not as the final weekly scrape architecture. Local Docker Firecrawl was running on `localhost:3002`.
+
+**Code/docs updated:**
+- Added a 7-day Firecrawl markdown cache in `scraper/firecrawl_client.py`:
+  - `scrape()` returns cached markdown before touching the SDK.
+  - `batch_scrape()` sends only cache misses and preserves cached hits.
+  - `scraper/firecrawl_cache.json` is gitignored.
+- Added a cached Firecrawl `map_site()` wrapper and rewired `scraper/discover_endpoints.py` to use `map -> selective scrape` instead of homepage scrape only:
+  - Firecrawl cloud discovery now surfaces candidate ATS/job URLs with much lower credit spend.
+  - Added `scraper/test_discover_endpoints.py` to lock in map-first behavior.
+- Improved Oracle Candidate Experience handling in `scraper/providers/generic_json.py`:
+  - finder=`findReqs` routes now paginate with `offset=...` instead of stopping at the first page.
+  - Added provider test coverage for Oracle pagination in `scraper/test_direct_endpoint_providers.py`.
+- Promoted five Firecrawl/fallback candidates to durable direct routes:
+  - **STMicroelectronics**: Eightfold API works with `domain=stmicroelectronics.com`; 4 India jobs in live probe; no Firecrawl needed.
+  - **GMR Group**: SAP Jobs2Web HTML route at `https://careers.gmrgroup.in/search/?q=&locationsearch=india&startrow=N`; direct listing/detail parse; no Firecrawl needed.
+  - **HP (HPE)**: Phenom SSR route at `https://careers.hpe.com/us/en/search-results?qcountry=India`; `qcountry=IN` returned 0; `qcountry=India` returned 363 India jobs in live probe; no Firecrawl needed.
+  - **HiLabs**: Next.js SSR payload route at `https://www.hilabs.com/careers/all-open-positions?location=india`; jobs embedded in `self.__next_f.push`; no Firecrawl needed.
+  - **Black Brix**: WordPress Job Openings HTML route at `https://blackbrix.com/job-openings/`; server-rendered listing cards + detail page JDs; no Firecrawl needed.
+- Promoted **American Express** off the broken Eightfold assumption and onto a durable Oracle Candidate Experience route:
+  - careers shell: `https://careers.americanexpress.com/en/sites/CX_1/jobs`
+  - API host: `egug.fa.us2.oraclecloud.com`
+  - finder route: `recruitingCEJobRequisitions?finder=findReqs`
+  - India facet: `locationsFacet -> India (Id=300000000228786)`
+- Updated `KNOWN_PORTALS.md` and `scraper/portal_reader.py` so these routes are parsed as direct providers.
+- Added cache tests in `scraper/test_firecrawl_cache.py` and direct routing assertions in `scraper/test_direct_endpoint_routing.py`.
+- Added direct-provider parser coverage for `HiLabs` and `Black Brix` in `scraper/test_direct_endpoint_providers.py`.
+
+**Validation evidence:**
+- Targeted runs used `OUTPUT_BASE=/Users/incognito/firecrawl_Supabase/_local/test_outputs` to keep generated outputs inside the repo-local ignored folder.
+- `python3 main.py --company "STMicroelectronics" --skip-enrich --company-cap 3` -> 3 saved; JD lengths 4,646-6,168 chars.
+- `python3 main.py --company "GMR Group" --skip-enrich --company-cap 3` -> 3 saved; JD lengths 2,815-3,503 chars.
+- `python3 main.py --company "HP (HPE)" --skip-enrich --company-cap 3` -> 3 saved; JD lengths 5,836-9,520 chars.
+- `python3 main.py --company "HiLabs" --skip-enrich --company-cap 3` -> 3 saved; JD lengths 2,893-3,266 chars.
+- `python3 main.py --company "Black Brix" --skip-enrich --company-cap 3` -> 1 saved; JD length 2,431 chars.
+- `python3 main.py --company "American Express" --skip-enrich --company-cap 5` -> 5 saved; India locations included Bengaluru/Gurugram/Chennai; JD lengths 790-1,015 chars.
+
+- Promoted **Oracle** off the broken Workday assumption and onto durable Oracle CE route:
+  - Oracle was incorrectly listed as Workday (wd1/OracleJobs, CF-blocked) — XHR cURL confirmed Oracle CE
+  - API host: `eeho.fa.us2.oraclecloud.com`; siteNumber `CX_45001`; `location=India` text param (no numeric locationId)
+  - Added `_ORACLE_ENDPOINT_OVERRIDES` in `portal_reader.py`; `oracle_nested=True`; 5+ India jobs verified live
+  - Moved from WORKDAY to ORACLE HCM section in `KNOWN_PORTALS.md`
+- **Bank of America** — provided URL `careers.bankofamerica.com/en/jobs/` tested → 404; Workday entry stands unchanged; needs correct URL from browser XHR
+- **Godrej Consumer Products** — `careers.godrejcp.com` confirmed DNS-dead; real portal at `careers.godrejindustries.com` (Phenom SSR); `utm_medium=phenom-feeds` confirmed; India jobs visible at `/in/en/search-results?qcountry=India`; needs PCSX/Phenom probe to crack
+
+**Still not promoted:**
+- Oliver Wyman Phenom SSR returned India listings, but full descriptions appear behind Workday-blocked apply URLs; keep as Firecrawl/further-investigation until full JD extraction is solved.
+- Mondee/Ashby `jobs.ashbyhq.com/mondee` is reachable, but `api.ashbyhq.com/posting-api/job-board/mondee` returned 404; slug/API still needs discovery.
+- Morgan Stanley, Micron, and Qualcomm Eightfold APIs returned `403 Not authorized for PCSX`.
+- Meta Firecrawl cloud scrape can read listing content at `https://www.metacareers.com/jobs/?locations[0]=India`, but a stable direct JSON/GraphQL route still needs XHR capture.
+- Vehere Interactive is still anti-bot from direct requests (Cloudflare 403), but Firecrawl cloud surfaced durable detail URLs under `/positions/...`; promote to a dedicated fallback provider if direct HTML stays blocked.
+
+**Verification:**
+- `python3 test_firecrawl_cache.py` ✅
+- `python3 test_discover_endpoints.py` ✅
+- `python3 test_direct_endpoint_routing.py` ✅
+- `python3 test_direct_endpoint_providers.py` ✅
+
 ## Session 2026-05-08 — Direct ATS/API endpoint promotion
 
 **Scope:** Promoted high-value Firecrawl/Docker-discovered companies to direct API/ATS/HTML routes so Firecrawl is no longer needed for extraction.

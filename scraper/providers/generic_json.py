@@ -94,6 +94,85 @@ _EXTRA_HEADERS: dict[str, dict] = {
 }
 
 
+def _fetch_response(url: str, headers: dict) -> requests.Response | None:
+    try:
+        r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        return r
+    except Exception as e:
+        _log.error(f"    [ERROR] GET {url}: {e}")
+        return None
+
+
+def _is_json_response(r: requests.Response) -> bool:
+    ct = r.headers.get('Content-Type', '')
+    return 'json' in ct or r.text.lstrip().startswith(('{', '['))
+
+
+def _oracle_page_url(url: str, *, limit: int, offset: int) -> str:
+    out = re.sub(r'([?&,])limit=\d+', rf'\1limit={limit}', url, count=1)
+    if out == url:
+        sep = '&' if '?' in out else '?'
+        out = f"{out}{sep}limit={limit}"
+    out = re.sub(r'([?&,])offset=\d+', rf'\1offset={offset}', out, count=1)
+    if 'offset=' not in out:
+        out = out.replace('sortBy=', f'offset={offset},sortBy=', 1) if 'sortBy=' in out else f"{out},offset={offset}"
+    return out
+
+
+def _oracle_total_count(data: dict) -> int:
+    wrapper = data.get('items')
+    if not isinstance(wrapper, list) or not wrapper or not isinstance(wrapper[0], dict):
+        return 0
+    try:
+        return int(wrapper[0].get('TotalJobsCount') or 0)
+    except Exception:
+        return 0
+
+
+def _scrape_oracle_nested(portal: Portal, headers: dict, max_jobs: int | None = None) -> list[dict] | None:
+    base_url = portal['endpoint']
+    page_limit = min(max_jobs or 100, 100)
+    offset = 0
+    total = None
+    jobs: list[dict] = []
+    seen_ids = set()
+
+    while True:
+        page_url = _oracle_page_url(base_url, limit=page_limit, offset=offset)
+        r = _fetch_response(page_url, headers)
+        if r is None:
+            return jobs if jobs else None
+        if not _is_json_response(r):
+            return [{'_needs_firecrawl': True, '_url': page_url, '_company': portal['company'],
+                     '_platform': portal.get('ats', 'Custom')}]
+
+        try:
+            data = r.json()
+        except Exception:
+            _log.error(f"    [ERROR] Oracle JSON decode failed: {page_url}")
+            return jobs if jobs else None
+
+        total = total or _oracle_total_count(data)
+        page_jobs = _parse_json_response(data, portal, page_url, max_jobs=None)
+        for job in page_jobs:
+            jid = job.get('job_id') or job_hash(job.get('title', ''), job.get('job_url', ''))
+            if jid in seen_ids:
+                continue
+            seen_ids.add(jid)
+            jobs.append(job)
+            if max_jobs and len(jobs) >= max_jobs:
+                return jobs[:max_jobs]
+
+        if not page_jobs:
+            break
+        offset += page_limit
+        if total and offset >= total:
+            break
+
+    return jobs
+
+
 def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
     """Best-effort GET-based scraper for Amazon, Microsoft, Apple, SAP, etc.
     Returns None on hard request error (caller maps to ScrapeReason.API_BLOCKED).
@@ -110,15 +189,14 @@ def scrape_get(portal: Portal, max_jobs: int | None = None) -> list[dict] | None
             headers.update(extra)
             break
 
-    try:
-        r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        r.raise_for_status()
-    except Exception as e:
-        _log.error(f"    [ERROR] GET {portal['company']}: {e}")
+    if portal.get('oracle_nested'):
+        return _scrape_oracle_nested(portal, headers, max_jobs=max_jobs)
+
+    r = _fetch_response(url, headers)
+    if r is None:
         return None
 
-    ct = r.headers.get('Content-Type', '')
-    if 'json' in ct or r.text.lstrip().startswith(('{', '[')):
+    if _is_json_response(r):
         try:
             return _parse_json_response(r.json(), portal, url, max_jobs=max_jobs)
         except Exception:

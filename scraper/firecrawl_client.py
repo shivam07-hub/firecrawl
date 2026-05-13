@@ -3,8 +3,9 @@ from __future__ import annotations
 """
 Firecrawl cloud API client — uses the official firecrawl-py SDK.
 
-ONE singleton _app instance. Two permitted calls:
+ONE singleton _app instance. Discovery-first calls:
 
+  map_site(url)                      → [{"url","title","description"}] (1 credit per site)
   scrape(url)                        → markdown str  (1 credit per URL)
   extract(urls, schema, prompt)      → structured dict (js-required portals only)
   batch_scrape(urls)                 → {url: markdown} (Workday JD fetch)
@@ -13,11 +14,17 @@ crawl() is intentionally NOT exposed — banned, too expensive (N credits per co
 
 Usage in providers / main.py:
     import firecrawl_client as fc
+    links    = fc.map_site(career_url, search="jobs careers india")
     markdown = fc.scrape(career_url)
     data     = fc.extract([career_url], schema, prompt)
 """
 from firecrawl import Firecrawl
 from config import FIRECRAWL_API_KEY, FIRECRAWL_URL
+import hashlib
+import json
+import os
+from pathlib import Path
+import time
 
 # ── One instance, shared across all calls ─────────────────────────────────────
 # FIRECRAWL_URL=http://localhost:3002  → Docker (self-hosted, any key works)
@@ -30,6 +37,132 @@ def _is_local(url: str) -> bool:
 # Singletons — None until first use
 _app: Firecrawl | None = None
 _v1 = None
+
+_CACHE_PATH = Path(os.getenv("FIRECRAWL_CACHE_PATH", Path(__file__).parent / "firecrawl_cache.json"))
+_CACHE_TTL_SECONDS = int(os.getenv("FIRECRAWL_CACHE_TTL_SECONDS", str(7 * 24 * 60 * 60)))
+_cache: dict | None = None
+
+
+def _now() -> int:
+    return int(time.time())
+
+
+def _cache_key(kind: str, url: str, actions: list[dict] | None) -> str:
+    payload = {
+        "kind": kind,
+        "url": url,
+        "actions": actions or [],
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _payload_cache_key(kind: str, payload: dict) -> str:
+    raw = json.dumps({"kind": kind, "payload": payload}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _load_cache() -> dict:
+    global _cache
+    if _cache is not None:
+        return _cache
+    try:
+        _cache = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        _cache = {"version": 1, "entries": {}}
+    _cache.setdefault("entries", {})
+    return _cache
+
+
+def _save_cache() -> None:
+    if _CACHE_TTL_SECONDS <= 0:
+        return
+    try:
+        _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _CACHE_PATH.with_suffix(_CACHE_PATH.suffix + ".tmp")
+        tmp.write_text(json.dumps(_load_cache(), indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(_CACHE_PATH)
+    except Exception as e:
+        print(f"    [FC CACHE WARN] could not persist cache: {e}")
+
+
+def _is_fresh(entry: dict) -> bool:
+    ts = int(entry.get("ts") or 0)
+    return bool(ts and _now() - ts <= _CACHE_TTL_SECONDS)
+
+
+def _cache_get_markdown(kind: str, url: str, actions: list[dict] | None = None) -> str:
+    if _CACHE_TTL_SECONDS <= 0:
+        return ""
+    entry = _load_cache().get("entries", {}).get(_cache_key(kind, url, actions), {})
+    markdown = entry.get("markdown", "")
+    if markdown and _is_fresh(entry):
+        return markdown
+    return ""
+
+
+def _cache_set_markdown(kind: str, url: str, markdown: str, actions: list[dict] | None = None) -> None:
+    if _CACHE_TTL_SECONDS <= 0 or not markdown:
+        return
+    cache = _load_cache()
+    cache["entries"][_cache_key(kind, url, actions)] = {
+        "ts": _now(),
+        "markdown": markdown,
+    }
+    _save_cache()
+
+
+def _cache_get_json(kind: str, payload: dict):
+    if _CACHE_TTL_SECONDS <= 0:
+        return None
+    entry = _load_cache().get("entries", {}).get(_payload_cache_key(kind, payload), {})
+    if _is_fresh(entry):
+        return entry.get("json")
+    return None
+
+
+def _cache_set_json(kind: str, payload: dict, value) -> None:
+    if _CACHE_TTL_SECONDS <= 0 or value is None:
+        return
+    cache = _load_cache()
+    cache["entries"][_payload_cache_key(kind, payload)] = {
+        "ts": _now(),
+        "json": value,
+    }
+    _save_cache()
+
+
+def _normalize_map_links(result) -> list[dict[str, str]]:
+    if hasattr(result, "model_dump"):
+        result = result.model_dump(exclude_none=True)
+    if isinstance(result, dict):
+        links = result.get("links") or result.get("data") or []
+    else:
+        links = result or []
+    out: list[dict[str, str]] = []
+    for item in links:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump(exclude_none=True)
+        elif hasattr(item, "__dict__") and not isinstance(item, dict):
+            item = {
+                "url": getattr(item, "url", ""),
+                "title": getattr(item, "title", ""),
+                "description": getattr(item, "description", ""),
+            }
+        if isinstance(item, str):
+            out.append({"url": item, "title": "", "description": ""})
+            continue
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        out.append({
+            "url": url,
+            "title": str(item.get("title") or "").strip(),
+            "description": str(item.get("description") or "").strip(),
+        })
+    return out
 
 
 def _get_app() -> Firecrawl:
@@ -54,16 +187,68 @@ def scrape(url: str, actions: list[dict] | None = None) -> str:
     actions: optional Firecrawl action list (click, wait, scroll) run before extraction.
     Actions require Fire Engine (cloud only) — silently ignored when using Docker.
     """
+    cached = _cache_get_markdown("scrape", url, actions)
+    if cached:
+        return cached
     try:
         kwargs: dict = {"formats": ["markdown"], "only_main_content": True}
         # actions require Fire Engine (cloud). Skip silently when using Docker.
         if actions and not _is_local(FIRECRAWL_URL):
             kwargs["actions"] = actions
         doc = _get_app().scrape(url, **kwargs)
-        return doc.markdown or ""
+        markdown = doc.markdown or ""
+        _cache_set_markdown("scrape", url, markdown, actions)
+        return markdown
     except Exception as e:
         print(f"    [FC SCRAPE ERROR] {url}: {e}")
         return ""
+
+
+def map_site(
+    url: str,
+    *,
+    search: str | None = None,
+    include_subdomains: bool = True,
+    ignore_query_parameters: bool = False,
+    limit: int = 50,
+    sitemap: str = "include",
+    timeout: int = 60000,
+    location=None,
+) -> list[dict[str, str]]:
+    """
+    Fast URL discovery pass via Firecrawl /map.
+    Returns normalized link dicts: {"url", "title", "description"}.
+    """
+    payload = {
+        "url": url,
+        "search": search or "",
+        "include_subdomains": bool(include_subdomains),
+        "ignore_query_parameters": bool(ignore_query_parameters),
+        "limit": int(limit),
+        "sitemap": sitemap,
+        "timeout": int(timeout),
+        "location": location,
+    }
+    cached = _cache_get_json("map", payload)
+    if isinstance(cached, list):
+        return cached
+    try:
+        result = _get_app().map(
+            url,
+            search=search,
+            include_subdomains=include_subdomains,
+            ignore_query_parameters=ignore_query_parameters,
+            limit=limit,
+            sitemap=sitemap,
+            timeout=timeout,
+            location=location,
+        )
+        links = _normalize_map_links(result)
+        _cache_set_json("map", payload, links)
+        return links
+    except Exception as e:
+        print(f"    [FC MAP ERROR] {url}: {e}")
+        return []
 
 
 def extract(urls: list[str], schema: dict, prompt: str) -> dict:
@@ -93,9 +278,18 @@ def batch_scrape(urls: list[str]) -> dict[str, str]:
     """
     if not urls:
         return {}
+    out = {}
+    misses = []
+    for url in urls:
+        cached = _cache_get_markdown("scrape", url)
+        if cached:
+            out[url] = cached
+        else:
+            misses.append(url)
+    if not misses:
+        return out
     try:
-        results = _get_app().batch_scrape(urls, formats=["markdown"], only_main_content=True)
-        out = {}
+        results = _get_app().batch_scrape(misses, formats=["markdown"], only_main_content=True)
         # batch_scrape returns a BatchScrapeResponse; iterate its data list
         pages = getattr(results, "data", None) or []
         for doc in pages:
@@ -103,7 +297,8 @@ def batch_scrape(urls: list[str]) -> dict[str, str]:
             md  = getattr(doc, "markdown", None) or ""
             if url and md:
                 out[url] = md
+                _cache_set_markdown("scrape", url, md)
         return out
     except Exception as e:
-        print(f"    [FC BATCH ERROR] {len(urls)} URLs: {e}")
-        return {}
+        print(f"    [FC BATCH ERROR] {len(misses)} URLs: {e}")
+        return out

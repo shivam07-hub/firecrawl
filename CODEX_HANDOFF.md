@@ -7,6 +7,60 @@
 
 ---
 
+## Token-Expiry Handoff (2026-05-13)
+
+This section is the important fresh handoff from the latest Codex session. Weekly token budget was close to expiry, so the key state is captured here explicitly for Claude to continue from.
+
+### Operating rule for the current crack-hunt phase
+
+- **Do not block on tests.**
+- If an endpoint **looks like the correct ATS/XHR endpoint**, capture it in `KNOWN_PORTALS.md`, `portal_reader.py`, and/or the relevant provider/registry and **move forward immediately**.
+- **Testing is deferred.** The current priority is to capture as many durable endpoints / domains / site numbers / location IDs / ATS routes as possible.
+- If `main.py` hangs or a full smoke run is flaky, that is **not** a blocker for promotion during this phase.
+
+### Firecrawl usage model now approved
+
+- Firecrawl cloud was actually used in this session, not just Docker.
+- Discovery should now follow: **`map -> selective scrape -> save direct route`**
+- Implementation lives in:
+  - [CLAUDE.md](/Users/incognito/firecrawl_Supabase/CLAUDE.md)
+  - [scraper/firecrawl_client.py](/Users/incognito/firecrawl_Supabase/scraper/firecrawl_client.py)
+  - [scraper/discover_endpoints.py](/Users/incognito/firecrawl_Supabase/scraper/discover_endpoints.py)
+- `map_site()` is now cached. Use Firecrawl as a microscope for discovery, not as the end-state architecture.
+
+### Durable wins from this session
+
+Promoted or clarified direct routes:
+
+| Company | Route | Notes |
+|---------|-------|-------|
+| American Express | `ats=oracle` | Migrated off broken Eightfold assumption; Oracle Candidate Experience on `egug.fa.us2.oraclecloud.com`, `siteNumber=CX_1`, India `locationId=300000000228786` |
+| STMicroelectronics | `ats=eightfold` | Direct Eightfold works with `domain=stmicroelectronics.com` |
+| GMR Group | `ats=sap_jobs2web_html` | Direct HTML route at `careers.gmrgroup.in/search/?q=&locationsearch=india` |
+| HP (HPE) | `ats=phenom_ssr` | Correct search route uses `qcountry=India` |
+| HiLabs | `ats=hilabs_careers` | Jobs embedded in `self.__next_f.push` under `groupedByPlaceAndDepartments.india["All Job Listing"]` |
+| Black Brix | `ats=blackbrix_jobs` | WordPress Job Openings HTML route |
+
+### Fresh discovery signals not yet fully promoted
+
+| Company | Signal captured | Next move |
+|---------|-----------------|-----------|
+| Meta | Firecrawl cloud can read `https://www.metacareers.com/jobs/?locations[0]=India` | Capture GraphQL/XHR request; do not wait for tests |
+| Vehere Interactive | Firecrawl cloud surfaced durable `/positions/...` detail URLs; direct HTTP still Cloudflare 403 | Save reusable route/provider pattern even if direct verification stays blocked |
+| Mondee Holdings | Ashby board confirmed at `https://jobs.ashbyhq.com/mondee` | Find real posting API slug if it exists; board may currently be empty |
+| Oliver Wyman | India listings visible via Phenom SSR | Capture the full JD/detail source; do not block on a clean end-to-end scrape |
+| Morgan Stanley / Micron / Qualcomm / HSBC / PMI | Eightfold/PCSX or hosted shells still unresolved | Capture domains, downstream APIs, or browser XHR clues as soon as they appear |
+
+### Extra note on American Express
+
+- The route is worth trusting even if the outer full-run orchestration is imperfect.
+- Live proof captured this session:
+  - Oracle finder route returned `TotalJobsCount=73` for India.
+  - Capped run saved 5 India jobs.
+- `generic_json.py` was improved so Oracle `findReqs` routes paginate with offsets instead of stopping at page 1.
+
+---
+
 ## Progress Update (2026-05-07)
 
 Market Data V1 has been harvested into active mechanisms where verified. Do not run legacy notebooks/scripts directly.

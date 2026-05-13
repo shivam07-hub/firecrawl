@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+    #!/usr/bin/env python3
 """
 Compatibility entrypoint for Phase 3 uploads.
 

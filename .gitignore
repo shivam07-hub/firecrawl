@@ -65,7 +65,10 @@ apps/api/src/lib/scrape-interact/*.md
 
 # scraper output artifacts (do not commit generated job dumps)
 /All_CSV_Outputs_thru_firecrawl/
+/All_CSV_output_version_1/
+/all_csv_output_v1/
 /all_CSV_saved/
 /All_CSV_saved/
 /validation_outputs/
 /logs/
+/scraper/firecrawl_cache.json

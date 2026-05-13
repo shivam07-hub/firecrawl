@@ -29,7 +29,8 @@ class Portal(TypedDict, total=False):
                         # | phenom_ssr | yello | sap_jobs2web_html | pepsico_jobs_api
                         # | skima_careers | hm_wp_jobs | deloitte_usi
                         # | apple_jobs | cognizant_xml | tata_elxsi | vector_consulting
-                        # | deshaw_india
+                        # | deshaw_india | google_careers | intouchcx | microsoft_careers
+                        # | hilabs_careers | blackbrix_jobs
                         # | sap | oracle | eightfold | avature | talentbrew | custom | other
     endpoint:     str   # URL to hit
     careers_url:  str   # human-facing careers page (fallback / reference)
