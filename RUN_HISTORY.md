@@ -1,4 +1,4 @@
-# RUN HISTORY
+/cla# RUN HISTORY
 
 Chronological log of scraper sessions, data quality incidents, and resolved bugs.
 Current architecture and run commands live in `CLAUDE.md`. Portal config lives in `KNOWN_PORTALS.md`.

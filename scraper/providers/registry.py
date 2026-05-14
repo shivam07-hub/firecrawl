@@ -11,6 +11,7 @@ from providers.darwinbox import DarwinboxProvider
 from providers.google_careers import GoogleCareersProvider
 from providers.mynexthire import MyNextHireProvider
 from providers.icims_custom import IcimsCustomProvider
+from providers.goldman_higher import GoldmanHigherProvider
 from providers.intouchcx import IntouchCXProvider
 from providers.microsoft_careers import MicrosoftCareersProvider
 from providers.mckinsey import McKinseyProvider
@@ -37,6 +38,7 @@ from providers.michelin_astro import MichelinAstroProvider
 from providers.pinpoint import PinpointProvider
 from providers.spire2grow import Spire2GrowProvider
 from providers.zwayam import ZwayamProvider
+from providers.ripplehire import RippleHireProvider
 from providers.generic_json import GenericJSONProvider
 from providers.greenhouse import GreenhouseProvider
 from providers.lever import LeverProvider
@@ -57,6 +59,7 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "eightfold": EightfoldProvider(),
     "google_careers": GoogleCareersProvider(),
     "icims_custom": IcimsCustomProvider(),
+    "goldman_higher": GoldmanHigherProvider(),
     "intouchcx": IntouchCXProvider(),
     "microsoft_careers": MicrosoftCareersProvider(),
     "darwinbox": DarwinboxProvider(),
@@ -85,6 +88,7 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "michelin_astro": MichelinAstroProvider(),
     "spire2grow": Spire2GrowProvider(),
     "zwayam": ZwayamProvider(),
+    "ripplehire": RippleHireProvider(),
     "zoho_recruit": ZohoRecruitProvider(),
 }
 

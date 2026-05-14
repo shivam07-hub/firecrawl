@@ -194,5 +194,12 @@
   },
   "PwC India": {
     "search_text": "india"
+  },
+  "Samsung": {
+    "india_facet_param": "locations",
+    "india_uuid": "0c974e8c1228010867596ab21b3c3469"
+  },
+  "IBM": {
+    "blocked": true
   }
 }

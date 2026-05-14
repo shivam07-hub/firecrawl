@@ -141,6 +141,8 @@ def _section_portals(header: str, lines: list[str]) -> list[dict]:
         return _spire2grow(rows)
     if 'ZWAYAM' in h:
         return _zwayam(rows)
+    if 'RIPPLEHIRE' in h:
+        return _ripplehire(rows)
     if 'TALEO' in h:
         return _taleo(rows)
     if 'MCKINSEY' in h:
@@ -351,6 +353,8 @@ def _custom(rows) -> list[Portal]:
         "Google": "google_careers",
         "IntouchCX": "intouchcx",
         "Microsoft": "microsoft_careers",
+        "ARM Holdings": "talentbrew",
+        "Goldman Sachs": "goldman_higher",
     }
     for r in rows:
         status  = r.get('Status', '')
@@ -554,6 +558,8 @@ _ATS_OVERRIDES: dict[str, str] = {
     'Nestlé': 'sap_jobs2web_html',
     'Unilever': 'talentbrew',
     'ITC Limited': 'zoho_recruit',
+    "Moody's": 'talentbrew',
+    'Mastercard': 'talentbrew',
 }
 
 _OTHER_ENDPOINT_OVERRIDES: dict[str, str] = {
@@ -563,6 +569,12 @@ _OTHER_ENDPOINT_OVERRIDES: dict[str, str] = {
     "Unilever": "https://careers.unilever.com/en/location/india-jobs/34155/1269750/2",
     # ITC: Zoho Recruit SSR portal (all India, no country filter needed)
     "ITC Limited": "https://recruitment.itcportal.com/jobs/Careers",
+    # Moody's: TalentBrew India path — OrganizationIds=49841, LocationPath=1269750
+    "Moody's": "https://careers.moodys.com/en/search-jobs/India/49841/2/1269750/22/79/50/2",
+    # ARM Holdings: TalentBrew/Radancy search-jobs — orgIds=33099, alp=1269750 (India)
+    "ARM Holdings": "https://careers.arm.com/search-jobs/India?orgIds=33099&alp=1269750&alt=2",
+    # Mastercard: TalentBrew — LocationPath=1269750 is India filter
+    "Mastercard": "https://careers.mastercard.com/us/en/search-results?LocationPath=1269750",
 }
 
 _TALEO_V1: set[str] = {'Standard Chartered Bank', 'Wipro'}
@@ -591,6 +603,9 @@ _INDIA_ONLY_OVERRIDES: dict[str, bool] = {
     'Nestlé': True,
     'Unilever': True,
     'ITC Limited': True,
+    "Moody's": True,
+    "ARM Holdings": True,
+    "Mastercard": True,
 }
 
 
@@ -801,9 +816,10 @@ def _zwayam(rows) -> list[Portal]:
         careers_url = r.get('Careers URL', '').strip()
         domain     = r.get('Zwayam Domain', '').strip()
         company_id = r.get('Company ID (b64)', '').strip()
+        api_url    = r.get('API URL', '').strip()
         if not careers_url or not company_id:
             continue
-        out.append({
+        portal_entry: dict = {
             'company':           company,
             'ats':               'zwayam',
             'endpoint':          careers_url,
@@ -814,6 +830,37 @@ def _zwayam(rows) -> list[Portal]:
             'india_only':        True,
             'status':            status,
             'industry':          _industry(company),
+        }
+        if api_url:
+            portal_entry['zwayam_api_url'] = api_url
+        out.append(portal_entry)
+    return out
+
+
+def _ripplehire(rows) -> list[Portal]:
+    """RippleHire ATS — POST /candidate/candidatejobsearch with session cookie + token."""
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        company    = r.get('Company', '').strip()
+        careers_url = r.get('Careers URL', '').strip()
+        host       = r.get('RippleHire Host', '').strip()
+        token      = r.get('Token', '').strip()
+        if not careers_url or not host or not token:
+            continue
+        out.append({
+            'company':            company,
+            'ats':                'ripplehire',
+            'endpoint':           careers_url,
+            'careers_url':        careers_url,
+            'ripplehire_host':    host,
+            'ripplehire_token':   token,
+            'js_required':        False,
+            'india_only':         True,
+            'status':             status,
+            'industry':           _industry(company),
         })
     return out
 

@@ -21,7 +21,7 @@ from schema import Portal
 from utils import is_india, strip_html
 
 _log = logging.getLogger("mirror")
-_API_URL = "https://apic2.zwayam.com/jobs/search"
+_DEFAULT_API_URL = "https://apic2.zwayam.com/jobs/search"
 _PAGE_SIZE = 50
 
 _HEADERS = {
@@ -52,6 +52,7 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
     domain = portal.get("zwayam_domain") or parsed.netloc
     company_id = portal.get("zwayam_company_id", "")
     india_only = portal.get("india_only", True)
+    api_url = portal.get("zwayam_api_url") or _DEFAULT_API_URL
 
     if not company_id:
         _log.error(f"    [Zwayam] {portal['company']}: missing zwayam_company_id")
@@ -79,7 +80,7 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
             "companyId": (None, company_id),
         }
         try:
-            r = requests.post(_API_URL, headers=headers, files=files, timeout=REQUEST_TIMEOUT)
+            r = requests.post(api_url, headers=headers, files=files, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
             data = r.json()
         except Exception as e:
@@ -112,7 +113,7 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
                 "job_id":          jid,
                 "title":           title,
                 "job_url":         apply_url,
-                "source_api_url":  _API_URL,
+                "source_api_url":  api_url,
                 "business_unit":   src.get("departmentName") or src.get("segment"),
                 "raw_jd_text":     raw_jd,
                 "location_city":   loc,
