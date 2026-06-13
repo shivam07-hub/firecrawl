@@ -24,7 +24,11 @@ files or republish third-party documents.
 
 - All setup work stays under `/Users/incognito/firecrawl_Supabase/`.
 - The new repository is private on GitHub.
-- Cloud LLM APIs are forbidden. Content processing uses LM Studio locally.
+- V1 uses Claude and Codex interactively for corpus review, drafting, and
+  cross-review. LM Studio is not required for V1.
+- V1 does not add Anthropic, OpenAI, or other cloud-LLM API integrations or API
+  keys to either repository. Agent sessions operate only on explicitly
+  approved source files.
 - Firecrawl Cloud may discover and capture authoritative public sources while
   the remaining subscription credits are available.
 - Existing material under `Interview Prep/` is not imported wholesale.
@@ -133,11 +137,27 @@ submodule at `Interview Prep/RAG Sources`. No other part of the existing
 
 The private corpus supports two distinct outputs:
 
+### V1 Agent Workflow
+
+- Codex inventories and structures approved sources, prepares provenance
+  records, drafts content, and runs deterministic repository checks.
+- Claude may independently draft or review questions, pages, and case studies
+  from the same approved source set.
+- Each task receives only the minimum relevant source files rather than the
+  entire archive.
+- Outputs are saved as reviewable Markdown or JSONL artifacts with source IDs.
+- One agent's generation should be reviewed by the other agent, or by the user,
+  before it moves into an approved or publishable state.
+- No unattended model API pipeline is part of V1. LM Studio or a programmatic
+  model provider may be evaluated later as a separate design.
+
 ### Question Bank
 
 - Retrieve passages by canonical skill and target difficulty.
-- Generate original MCQs through LM Studio.
-- Verify answers independently with the existing question-bank pipeline.
+- Use Claude or Codex to generate original MCQs into the existing structured
+  question format.
+- Verify answer keys independently with the other agent or explicit human
+  review before publication.
 - Store source IDs and URLs as provenance.
 - Never persist copied source questions or long source passages in Supabase.
 
@@ -198,6 +218,7 @@ Before public publication:
 - Confirm source redistribution restrictions are respected.
 - Confirm no personal or confidential data appears.
 - Confirm citations resolve to manifest records.
+- Confirm the generation and independent-review agents are recorded.
 - Require explicit approval before moving a draft into the approved set.
 
 ## Verification
@@ -212,6 +233,7 @@ Automated checks will cover:
 - Duplicate detection
 - Derived chunk provenance
 - Public-output similarity and citation requirements
+- Generation and review attribution for V1 artifacts
 
 The initial repository is accepted when it is private, cloned locally at the
 agreed path, has the documented structure and safeguards, passes its validation
