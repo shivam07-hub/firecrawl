@@ -728,7 +728,19 @@ def import_file(
         return {"path": str(json_path), "error": str(e)}
 
     if not isinstance(jobs, list) or not jobs:
-        return {"path": str(json_path), "jobs": 0, "skill_rows": 0}
+        date_str = json_path.parent.name
+        return {
+            "path": str(json_path),
+            "company": json_path.parent.parent.parent.name,
+            "date": date_str,
+            "batch_date": _parse_batch_date(date_str),
+            "job_ids": set(),
+            "jobs": 0,
+            "skill_rows": 0,
+            "drift": 0,
+            "enriched": 0,
+            "unknown_location_rows": 0,
+        }
 
     company    = jobs[0].get("company_name", json_path.parent.parent.parent.name)
     date_str   = json_path.parent.name
