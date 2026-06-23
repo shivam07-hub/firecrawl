@@ -84,7 +84,7 @@ nodes:
       import json
       from pathlib import Path
 
-      base = Path('/Users/incognito/Mirror CV/firecrawl_Supabase/validation_outputs')
+      base = Path('/Users/incognito/firecrawl_Supabase/validation_outputs')
       if not base.exists():
           print("No validation_outputs directory found.")
           exit(0)

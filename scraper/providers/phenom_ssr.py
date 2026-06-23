@@ -264,6 +264,7 @@ def _scrape_phenom_ssr(portal: Portal, max_jobs: int | None = None) -> list[dict
                     "business_unit": item.get("category") or "",
                     "raw_jd_text": raw_jd or strip_html(item.get("descriptionTeaser") or ""),
                     "location_city": location or "India",
+                    "locations": [location] if location else [],
                     "date_posted": item.get("postedDate") or "",
                     "source_platform": "PhenomSSR",
                     "industry": portal.get("industry", ""),

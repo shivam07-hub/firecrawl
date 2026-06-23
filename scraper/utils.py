@@ -57,6 +57,24 @@ def job_hash(title: str, url: str) -> str:
     return hashlib.md5(f"{title}|{url}".encode()).hexdigest()[:16]
 
 
+# Requisition-id tail on a Workday externalPath / apply URL, e.g. "…_R01165624".
+_REQ_TAIL = re.compile(r'_([A-Za-z]{1,5}\d{4,})$')
+
+
+def workday_req_id(posting: dict, external_path: str) -> str | None:
+    """Company requisition id for a Workday CXS posting.
+
+    The CXS list endpoint does not return a ``jobReqId`` field; the real
+    requisition id lives in ``bulletFields[0]`` and at the ``_R…`` tail of the
+    posting's ``externalPath``. Precedence: bulletFields[0] -> path tail -> None.
+    """
+    bf = posting.get('bulletFields') or []
+    if bf and isinstance(bf[0], str) and bf[0].strip():
+        return bf[0].strip()
+    m = _REQ_TAIL.search(external_path or '')
+    return m.group(1) if m else None
+
+
 # ── Company → folder name ─────────────────────────────────────────────────────
 
 def company_slug(name: str) -> str:

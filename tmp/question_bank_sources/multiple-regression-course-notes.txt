@@ -1,0 +1,1803 @@
+
+
+===== PAGE 1 =====
+
+Multiple Regression
+QUANTITATIVE ANALYSIS 
+FOR
+MANAGEMENT –II
+
+
+===== PAGE 2 =====
+
+Regression Analysis…
+• Our objective is to analyze the relationship
+between interval variables; 
+• Regression analysis is used to predict the 
+value of one variable (the dependent variable) 
+on the basis of other variables (the 
+independent variables).
+• Dependent variable: denoted Y
+• Independent variables: denoted X1, X2, …, Xk
+2
+
+
+===== PAGE 3 =====
+
+Regression Analysis…
+• If we are interested only in determining whether 
+a relationship exists, we may employ correlation 
+analysis.
+• Regression analysis with two-variables is 
+sometimes called simple linear regression.
+• Mathematical equations describing their 
+relationships are also called models
+• 2 types: deterministic or probabilistic. 
+
+
+===== PAGE 4 =====
+
+Model Types…
+• Deterministic Model: an equation or set of 
+equations that allow us to fully determine the 
+value of the dependent variable from the 
+values of the independent variables.
+• Contrast this with…
+• Probabilistic Model: a method used to 
+capture the randomness that is part of a real-
+life process.
+• E.g. do all houses of the same size (measured 
+in square feet) sell for exactly the same price?
+
+
+===== PAGE 5 =====
+
+A Model…
+• To create a probabilistic model, we start with a 
+deterministic model that approximates the 
+relationship we want to model and add a 
+random term that measures the error of the 
+deterministic component.
+• Deterministic Model:
+– The cost of building a new house is about $75 per 
+square foot and most lots sell for about $25,000.
+– Hence the approximate selling price (y) would be: 
+y = $25,000 + (75$/ft2) * x
+– (where x is the size of the house in square feet)
+
+
+===== PAGE 6 =====
+
+A Model…
+• A model of the relationship between house size 
+(independent variable) and house price 
+(dependent variable) would be: 
+House size: X
+House
+Price:
+Y
+Most lots sell 
+for $25,000
+In this model, the price of the house is completely determined by the size.
+
+
+===== PAGE 7 =====
+
+A Model…
+• In real life however, the cost of houses will vary, even 
+among for houses of the same size: 
+House size: X
+House
+Price:
+Y
+25K$
+Same square footage, but different price points
+(e.g. décor options, cabinet upgrades, lot location…)
+Lower vs. Higher
+Variability
+x
+House Price = 25,000 + 75*Size +
+
+
+===== PAGE 8 =====
+
+Random Term…
+• We now represent the price of a house as a function of 
+its size in this Probabilistic Model:
+y = 25,000 + 75x +    ,
+where      (Greek letter epsilon) is the random term (a.k.a. 
+error variable). 
+• It is the difference between the actual selling price and 
+the estimated price based on the size of the house 
+(model based price) . 
+• Its value will vary from house sale to house sale, even if 
+the square footage (i.e. x) remains the same.
+
+
+===== PAGE 9 =====
+
+Simple Linear Regression Model…
+• Generally, a straight line model with one 
+independent variable is called a simple linear 
+regression model.
+error term
+dependent
+variable
+independent
+variable
+y-intercept
+slope of the line
+
+
+===== PAGE 10 =====
+
+Simple Linear Regression Model…
+• Note that both     and      are population 
+parameters which are usually unknown and 
+hence estimated from the data. 
+y
+x
+run
+rise
+=slope (=rise/run)
+=y-intercept
+
+
+===== PAGE 11 =====
+
+Which line has the best “fit” to the data?
+?
+?
+?
+
+
+===== PAGE 12 =====
+
+Estimating the Coefficients…
+• In much the same way we based estimates of     
+on     , we estimate      from b0 and      from b1, the 
+y-intercept and slope (respectively) of the least 
+squares or regression line given by:
+• (Recall: this is an application of the least squares 
+method and it produces a straight line that 
+minimizes the sum of the squared differences 
+between the points and the line)
+
+
+===== PAGE 13 =====
+
+Least Squares Line…
+these differences are 
+called residuals
+
+
+===== PAGE 14 =====
+
+Mathematical Optimization Routine 
+(Optional)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.0
+2
+:
+,0
+2
+)1
+(:
+:
+min
+min
+ˆ
+min
+1
+0
+1
+1
+0
+0
+2
+1
+0
+,
+2
+1
+0
+,
+2
+,
+1
+0
+1
+0
+1
+0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+i
+n
+i
+i
+i
+n
+i
+i
+i
+n
+i
+i
+i
+b
+b
+n
+i
+i
+i
+b
+b
+n
+i
+i
+i
+b
+b
+x
+x
+b
+b
+y
+b
+x
+b
+b
+y
+b
+conditions
+order
+first
+the
+get
+we
+s
+derivative
+Taking
+x
+b
+b
+y
+x
+b
+b
+y
+y
+y
+
+
+===== PAGE 15 =====
+
+
+
+
+
+
+
+,
+2
+.
+,
+1
+:
+1
+2
+.
+1
+,
+:
+2
+1
+1
+0
+1
+0
+1
+0
+1
+0
+2
+1
+0
+1
+0
+1
+0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+n
+i
+i
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+n
+i
+i
+x
+b
+x
+x
+b
+y
+x
+y
+in
+back
+b
+ng
+Substituti
+x
+b
+y
+b
+or
+x
+n
+b
+y
+n
+b
+x
+b
+nb
+y
+get
+we
+from
+further
+And
+x
+b
+x
+b
+x
+y
+x
+b
+b
+y
+get
+we
+b
+and
+b
+for
+Solving
+
+
+===== PAGE 16 =====
+
+.
+1
+1
+,
+,
+2
+1
+2
+2
+2
+2
+1
+2
+2
+1
+2
+1
+1
+x
+xy
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+n
+i
+i
+i
+s
+s
+b
+x
+x
+n
+x
+y
+x
+y
+n
+x
+n
+x
+x
+y
+n
+x
+y
+b
+x
+n
+x
+x
+x
+n
+y
+x
+y
+x
+x
+x
+x
+y
+x
+y
+b
+x
+b
+x
+x
+b
+x
+y
+x
+y
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+===== PAGE 17 =====
+
+Least Squares Line…
+• The coefficients b1 and b0 for 
+the least squares line…
+• …are calculated as:
+
+
+===== PAGE 18 =====
+
+Least Squares Line…
+Recall…
+Data
+Statistics
+Information
+Data Points:
+x
+y
+1
+6
+2
+1
+3
+9
+4
+5
+5
+17
+6
+12
+y = .934 + 2.114x
+
+
+===== PAGE 19 =====
+
+Excel
+Y’ = 2.1143 x + 0.9333
+R² = 0.491
+0
+2
+4
+6
+8
+10
+12
+14
+16
+18
+0
+1
+2
+3
+4
+5
+6
+7
+y
+y
+Linear (y)
+x
+y
+1
+6
+2
+1
+3
+9
+4
+5
+5
+17
+6
+12
+•Insert – Scatter 
+•Right click on data point – add trend line (linear)
+•Tick on add equation and add R^2
+
+
+===== PAGE 20 =====
+
+Annual Bonus and Years of Experience
+
+
+===== PAGE 21 =====
+
+Annual Bonus and Years of Experience
+
+
+===== PAGE 22 =====
+
+Annual Bonus and Years of Experience
+
+
+===== PAGE 23 =====
+
+Annual Bonus and Years of Experience
+
+
+===== PAGE 24 =====
+
+Annual Bonus and Years of Experience
+•
+We can measure how well by computing the value of the minimized 
+sum of squared deviations. The deviations between the actual data 
+points and the line are called residuals, denoted ei; that is,
+•
+The residuals are observations of the error variable. Consequently, 
+the minimized sum of squared deviations is called the sum of 
+squares for error, denoted SSE.
+
+
+===== PAGE 25 =====
+
+Annual Bonus and Years of Experience
+Thus, SSE = 81.104. No other straight line will produce a sum of 
+squared deviations as small as 81.104. In that sense, the regression 
+line fits the data best. The sum of squares for error is an important 
+statistic because it is the basis for other statistics that assess how well 
+the linear model fits the data.
+
+
+===== PAGE 26 =====
+
+Least Square Line …
+Exercise : Decide which of these equations fits the given data 
+best.
+•
+MJT = Mean January Temperature
+•
+LAT = Latitude  
+•
+A: MJT’ = 100 -1.8 (LAT)
+•
+B: MJT’ = 108 - 2.1 (LAT)
+•
+C: MJT’ = 115 – 2.5 (LAT)
+City
+MJT
+LAT
+Boise
+22
+43.7
+Philly
+24
+40.9
+Milwaukee
+13
+43.3
+
+
+===== PAGE 27 =====
+
+Model Comparison
+Model predictions:
+Lat (x)
+A (y’)
+B (y’)
+C (y’)
+MJT (y)
+43.7
+21.34
+16.23
+5.75
+22
+40.9
+26.38
+22.11
+12.75
+24
+43.3
+22.06
+17.07
+6.75
+13
+MJT-MJT_A
+MJT-MJT_B
+MJT-MJT_C
+0.66
+5.77
+16.25
+-2.38
+1.89
+11.25
+-9.06
+-4.07
+6.25
+Sum:
+-10.78
+3.59
+33.75
+(MJT-MJT_A)^2
+(MJT-MJT_B)^2
+(MJT-MJT_C)^2
+0.4356
+33.2929
+264.0625
+5.6644
+3.5721
+126.5625
+82.0836
+16.5649
+39.0625
+Sum^2:
+88.1836
+53.4299
+429.6875
+
+
+===== PAGE 28 =====
+
+The Multiple Regression Model
+ε
+X
+β
+X
+β
+X
+β
+β
+Y
+k
+k
+2
+2
+1
+1
+0
+
+
+
+
+
+
+
+Multiple Regression Model with k Independent Variables:
+Y-intercept
+Population slopes
+Random Error
+The equation that describes how the dependent variable 
+y is related to the independent variables x1, x2, . . . xk and 
+an error term. Idea: Examine the linear relationship 
+between 1 dependent (Y) & 2 or more independent 
+variables (Xi)
+
+
+===== PAGE 29 =====
+
+Multiple Regression Model with k 
+Independent Variables
+
+
+===== PAGE 30 =====
+
+Standard Multiple Regression 
+Assumptions
+
+The values  xi  and the error terms  εi  are 
+independent
+
+The error terms are random variables with 
+mean 0 and a constant variance, 2.  
+(The constant variance property is called
+homoscedasticity)
+n)
+,
+ 
+1,
+(i 
+for
+ 
+σ
+]
+E[ε
+and
+0
+]
+E[ε
+2
+2
+i
+i
+
+
+
+
+
+
+===== PAGE 31 =====
+
+Standard Multiple Regression 
+Assumptions
+(continued)
+
+The random error terms, εi , are not correlated 
+with one another, so that
+
+It is not possible to find a set of numbers, c0, 
+c1, . . . , ck, such that
+(This is the property of no linear relation for
+the Xj’s)
+j
+i  
+all
+ 
+for
+ 
+0
+]
+ε
+E[ε
+j
+i
+
+
+0
+x
+c
+x
+c
+x
+c
+c
+Ki
+K
+2i
+2
+1i
+1
+0
+
+
+
+
+
+
+
+
+===== PAGE 32 =====
+
+Multiple Regression Equation
+ki
+k
+2i
+2
+1i
+1
+0
+i
+x
+b
+x
+b
+x
+b
+b
+y
+
+
+
+
+
+
+ˆ
+Estimated 
+(or predicted) 
+value of y
+Estimated slope coefficients
+Multiple regression equation with k independent variables:
+Estimated
+intercept
+The coefficients of the multiple regression model are 
+estimated using sample data
+A simple random sample is used to compute sample statistics b0, 
+b1, b2, . . . , bk that are used as the point estimators of the 
+parameters b0, b1, b2, . . . , bk.
+
+
+===== PAGE 33 =====
+
+Omni Power Bars
+In the Omni Power Bars scenario, your business objective, to
+determine the effect that price and in-store promotional expenses
+will have on sales, calls for examining a multiple regression model
+in which the price of an Omni Power bar in cents (X1) and the
+monthly budget for in-store promotional expenses in dollars (X2)
+are the independent variables and the number of Omni Power bars
+sold in a month (Y) is the dependent variable.
+To develop this model, you collect data from a sample of 34 stores
+in a supermarket chain selected for a test-market study of Omni
+Power. You choose stores in a way to ensure that they all have
+approximately the same monthly sales volume
+
+
+===== PAGE 34 =====
+
+Omni Power Bars
+
+
+===== PAGE 35 =====
+
+Two variable model
+y
+x1
+x2
+2
+2
+1
+1
+0
+x
+b
+x
+b
+b
+y
+
+
+
+ˆ
+Multiple Regression Equation
+(continued)
+
+
+===== PAGE 36 =====
+
+Least Squares Method
+Least Squares Criterion
+2
+ˆ
+min
+(
+)
+i
+i
+y
+y
+
+
+Computation of Coefficient Values
+The formulas for the regression coefficients
+b0, b1, b2, . . . bk involve the use of matrix algebra.  
+
+
+===== PAGE 37 =====
+
+Least Squares Method
+
+
+===== PAGE 38 =====
+
+Least Squares Method
+
+
+===== PAGE 39 =====
+
+Least Squares Method
+Our problem is now to choose an estimate b such that
+
+
+===== PAGE 40 =====
+
+Least Squares Method
+Normal Equation 
+For K=3, we have 
+After solving we get
+
+
+===== PAGE 41 =====
+
+Omni Power Bars
+
+
+===== PAGE 42 =====
+
+Two variable model
+y
+x1
+x2
+2
+2
+1
+1
+0
+x
+b
+x
+b
+b
+y
+
+
+
+ˆ
+yi
+yi
+<
+x2i
+x1i
+Sample 
+observation
+Residuals in Multiple Regression
+Residual = 
+ei = (yi – yi)
+<
+
+
+===== PAGE 43 =====
+
+Omni Power Bars
+The computed values of the net regression coefficients 
+are
+
+
+===== PAGE 44 =====
+
+Interpretation Regression coefficients 
+The sample Y intercept,𝑏0, estimates the number of 
+Omni Power bars sold in a month if the price was zero 
+cents and the total amount spent on promotional 
+expenses was $0.00.
+Using the net regression coefficients 𝑏1 and 𝑏2, the 
+effects of adding one cent to the price of Omni Power 
+bars (𝑋1) or adding $1 to monthly promotion 
+expenditures (𝑋2) can be summarized.
+
+
+===== PAGE 45 =====
+
+Interpretation Regression coefficients 
+A price increase of one cent - Predict mean Omni 
+Power monthly sales to decrease by 53.2173 bars, 
+holding constant the promotional expenditures.
+An increase of $1 in monthly promotional 
+expenditures - Predict mean Omni Power monthly 
+sales to increase by 3.6131 bars, holding constantthe 
+price.
+Which explains the effect of changing one independent 
+variable while holding the value of the all other 
+independent variables constant
+
+
+===== PAGE 46 =====
+
+Predicting the Dependent Variable Y
+What are the predicted mean sales for a store charging 
+79 cents during a month in which promotional expenses 
+are $400?
+Thus, you predict that stores charging 79 cents and 
+spending $400 in promotional expenses will sell a mean 
+of 3,078.57 Omni Power bars per month.
+
+
+===== PAGE 47 =====
+
+Multiple Regression Assumptions
+Assumptions:
+The errors are normally distributed
+Errors have a constant variance
+The model errors are independent
+ei = (yi – yi)
+<
+Errors (residuals) from the regression model:
+
+
+===== PAGE 48 =====
+
+Analysis of Residuals
+in Multiple Regression
+These residual plots are used in multiple 
+regression:
+Residuals vs. yi
+Residuals vs. x1i
+Residuals vs. x2i
+Residuals vs. time (if time series data)
+<
+Use the residual plots to check for 
+violations of regression assumptions
+
+
+===== PAGE 49 =====
+
+Interpreting Multiple Regression Residual 
+Plots
+
+
+===== PAGE 50 =====
+
+Interpreting Multiple Regression 
+Residual Plots
+Residuals versus the predicted value of Y
+Evidence of a possible curvilinear effect in at least one 
+independent variable, a possible violation of the 
+assumption of equal variance, and/or the need to 
+transform the Y variable
+Residuals versus an independent X variable
+Suggests evidence of a curvilinear effect and, therefore,
+indicates the need to add a curvilinear independent
+variable to the multiple regression model
+
+
+===== PAGE 51 =====
+
+How Well Does the Model Fit?
+
+
+
+
+
+i
+i
+i
+i
+i
+e
+Y
+Y
+SSE
+2
+2)
+(
+
+
+
+===== PAGE 52 =====
+
+How Well Does the Model Fit?
+TSS = SSR + SSE
+• The total variation (Total Sum of Squares: TSS) of the 
+dependent variable can be divided into: 
+– The variation explained by the model 
+(Sum of Squares for Regression: SSR) and 
+– The variation unexplained (Sum of Squared Error: SSE).
+• We measure the variation around the mean, Ybar.
+mean
+ 
+ the
+around
+ 
+ variation
+d
+unexplaine
+ ,
+)
+(
+mean
+ 
+ the
+around
+ 
+ variation
+explained
+ ,
+)
+(
+mean
+ 
+ the
+around
+ 
+ variation
+total
+,
+)
+(
+2
+2
+2
+
+
+
+
+
+
+
+
+
+i
+i
+i
+i
+i
+i
+i
+Y
+Y
+SSE
+Y
+Y
+SSR
+Y
+Y
+TSS
+
+
+
+
+===== PAGE 53 =====
+
+TSS = SSR + SSE
+y
+x
+y
+
+
+y
+yi 
+
+
+i
+i
+y
+y
+
+
+
+
+y
+yi 
+
+
+
+
+
+
+
+
+
+
+i
+i
+i
+i
+i
+i
+i
+Y
+Y
+SE
+Y
+Y
+SSR
+Y
+Y
+TSS
+2
+2
+2
+)
+(
+S
+ ,
+)
+(
+,
+)
+(
+
+
+
+
+===== PAGE 54 =====
+
+Coefficient of Determination, R2
+Reports the proportion of total variation in  y 
+explained by all  x  variables taken together
+This is the ratio of the explained variability to 
+total sample variability
+squares
+ 
+of
+ 
+sum
+ 
+total
+squares
+ 
+of
+ 
+sum
+ 
+regression
+TSS
+SSR
+R 2
+
+
+
+
+===== PAGE 55 =====
+
+Coefficient of Determination, R2
+SSE - Sum of Squared Error
+SSR - Sum of Squares for Regression
+TSS – Total Sum of Squares
+TSS
+SSE
+Y
+Y
+Y
+Y
+R
+or
+TSS
+SSR
+Y
+Y
+Y
+Y
+R
+i
+i
+i
+i
+i
+i
+i
+i
+i
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1
+)
+(
+)
+(
+1
+,
+)
+(
+)
+(
+2
+2
+2
+2
+2
+2
+
+
+
+
+===== PAGE 56 =====
+
+Coefficient of Determination, R2
+1. The proportion of the deviation of Y from its 
+mean in the sample that is explained by the 
+regression.
+2. It is always between 0 and 1.
+3. The closer to 1, the better is the fit.
+4. It happens also to be the correlation squared:
+where        is the correlation coefficient
+5. It is the most commonly used measure of the 
+“fit” of a regression.
+2
+2
+
+
+R
+
+
+
+===== PAGE 57 =====
+
+Coefficient of Determination, R2
+
+
+
+===== PAGE 58 =====
+
+Estimation of Error Variance
+Consider the population regression model
+The unbiased estimate of the variance of the errors is
+where 
+The square root of the variance, se , is called the 
+standard error of the estimate
+1
+K
+n
+SSE
+1
+K
+n
+e
+s
+n
+1
+i
+2
+i
+2
+e
+
+
+
+
+
+
+
+i
+Ki
+K
+2i
+2
+1i
+1
+0
+i
+ε
+x
+β
+x
+β
+x
+β
+β
+Y
+
+
+
+
+
+
+
+i
+i
+i
+y
+y
+e
+ˆ
+
+
+
+
+===== PAGE 59 =====
+
+Adjusted Coefficient of 
+Determination,
+R2 never decreases when a new  X  variable is 
+added to the model, even if the new variable is 
+not an important predictor variable
+This can be a disadvantage when comparing 
+models
+What is the net effect of adding a new variable?
+We lose a degree of freedom when a new  X 
+variable is added
+Did the new  X  variable add enough 
+explanatory power to offset the loss of one 
+degree of freedom?
+2
+R
+
+
+===== PAGE 60 =====
+
+Used to correct for the fact that adding non-relevant 
+independent variables will still reduce the error sum of 
+squares 
+(where n = sample size, K = number of independent variables)
+Adjusted R2 provides a better comparison between 
+multiple regression models with different numbers of 
+independent variables
+Penalize excessive use of unimportant independent 
+variables
+Smaller than R2
+(continued)
+Adjusted Coefficient of 
+Determination,
+2
+R
+1)
+(n
+/
+TSS
+1)
+K
+(n
+/
+SSE
+1
+R 2
+
+
+
+
+
+
+
+===== PAGE 61 =====
+
+Adjusted Coefficient of 
+Determination, 
+
+2
+R
+
+
+===== PAGE 62 =====
+
+Evaluating Individual 
+Regression Coefficients
+Use t-tests for individual coefficients
+Shows if a specific independent variable is 
+conditionally important
+Hypotheses:
+H0: βj = 0 (no linear relationship)
+H1: βj ≠0  (linear relationship does exist
+between xj and y)
+
+
+===== PAGE 63 =====
+
+Tests of Hypotheses for the Regression 
+Coefficients
+
+
+
+===== PAGE 64 =====
+
+Tests of Hypotheses for the Regression 
+Coefficients
+
+
+===== PAGE 65 =====
+
+Omni Power Bars
+
+
+
+===== PAGE 66 =====
+
+Omni Power Bars
+At the 0.05 level of significance, is there evidence that 
+the slope of sales with price is different from zero?
+
+
+===== PAGE 67 =====
+
+Confidence Interval Estimation
+To construct a 95% confidence interval estimate of the
+population slope, b1(the effect of price, X1, on sales, Y,
+holding constant the effect of promotional expenses, X2),
+the critical value of t at the 95% confidence level with 31
+degrees of freedom is 2.0395.
+
+
+===== PAGE 68 =====
+
+Confidence Interval Estimation
+Taking into account the effect of promotional expenses, the
+estimated effect of a 1-cent increase in price is to reduce mean
+sales
+by
+approximately
+39.2
+to
+67.2
+bars.
+You
+have
+95%
+confidence that this interval correctly estimates the relationship
+between these variables. From a hypothesis-testing viewpoint,
+because this confidence interval does not include 0, you conclude
+that the regression coefficient, for price, has a significant effect.
+
+
+===== PAGE 69 =====
+
+Confidence Interval Estimation
+
+Construct a 95% confidence interval estimate of the population 
+slope of sales with promotional expenses.
+
+
+===== PAGE 70 =====
+
+Test on All Coefficients
+F-Test for Overall Significance of the Model
+Shows if there is a linear relationship between all 
+of the  X  variables considered together and  Y
+Use F test statistic
+Hypotheses:
+H0: β1 = β2 = … = βk = 0  (no linear relationship)
+H1: at least one  βi ≠0   (at least one independent
+variable affects Y)
+
+
+===== PAGE 71 =====
+
+ANOVA Summary Table
+for the Overall F Test
+Source of 
+Variation
+df
+SS
+MS
+(Variance)
+Regression
+SSR
+MSR =
+Error
+n – K-1
+SSE
+MSE =
+Total
+n - 1
+TSS =
+SSR+SSE
+K 
+MSR
+MSE
+F ratio
+SSR
+K 
+SSE
+n – K-1
+F =
+
+
+===== PAGE 72 =====
+
+F-Test for Overall Significance
+Test statistic:
+where F has   k  (numerator) and
+(n – K – 1)  (denominator)
+degrees of freedom
+The decision rule is
+1)
+K
+SSE/(n
+SSR/K
+s
+MSR
+F
+2
+e
+
+
+
+
+α
+1,
+K
+n
+k,
+0
+F
+F
+   
+if 
+H
+ 
+Reject
+
+
+
+
+
+===== PAGE 73 =====
+
+Omni Power Bars
+

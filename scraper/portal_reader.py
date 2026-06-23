@@ -256,6 +256,11 @@ def _smartrecruiters(rows) -> list[Portal]:
 
 
 def _greenhouse(rows) -> list[Portal]:
+    greenhouse_overrides: dict[str, dict] = {
+        # Cloudflare's Greenhouse board uses generic location labels, while the
+        # India signal lives in title/body text such as "Bengaluru, India".
+        "Cloudflare": {"greenhouse_match_content": True},
+    }
     out = []
     for r in rows:
         status = r.get('Status', '')
@@ -263,7 +268,7 @@ def _greenhouse(rows) -> list[Portal]:
             continue
         token   = r.get('Board Token', '').strip()
         company = r.get('Company', '').strip()
-        out.append({
+        portal = {
             'company':      company,
             'ats':          'greenhouse',
             'endpoint':     f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true",
@@ -271,7 +276,9 @@ def _greenhouse(rows) -> list[Portal]:
             'js_required':  False,
             'status':       status,
             'industry':     _industry(company),
-        })
+        }
+        portal.update(greenhouse_overrides.get(company, {}))
+        out.append(portal)
     return out
 
 
@@ -319,6 +326,10 @@ def _eightfold(rows) -> list[Portal]:
 # country=India filter (e.g. portals that use location=india instead).
 _ICIMS_OVERRIDES: dict[str, dict] = {
     "Keysight Technologies": {"icims_location_param": "location"},
+    "JAGGAER": {
+        "ats": "icims_html",
+        "endpoint": "https://incareers-jaggaer.icims.com/jobs/search?ss=1&hashed=-435832948&mobile=false&country=IN&in_iframe=1",
+    },
 }
 
 
@@ -350,11 +361,61 @@ def _custom(rows) -> list[Portal]:
     ats_overrides: dict[str, str] = {
         "Apple": "apple_jobs",
         "Cognizant": "cognizant_xml",
+        "Confluent": "ashby",
         "Google": "google_careers",
         "IntouchCX": "intouchcx",
+        "Juspay": "juspay_astro",
         "Microsoft": "microsoft_careers",
+        "NPCI": "zoho_recruit",
+        "Publicis Sapient": "publicis_sapient",
+        "Rippling": "rippling",
+        "Snowflake": "ashby",
+        "UiPath": "ashby",
         "ARM Holdings": "talentbrew",
         "Goldman Sachs": "goldman_higher",
+        "Costco Wholesale": "talent500",
+        "Airwallex": "ashby",
+        "Notion": "ashby",
+        "Atlan": "ashby",
+        "Cartesia": "ashby",
+        "Fermi AI": "ashby",
+        "Flagright": "ashby",
+        "Skylo Technologies": "ashby",
+        "Cognition": "ashby",
+        "Sarvam AI": "ashby",
+        "Skyflow": "ashby",
+        "Lyric": "ashby",
+        "NETGEAR": "ashby",
+        "Pebl": "ashby",
+        "SentiLink": "ashby",
+        "Waaree Group": "waaree_static",
+    }
+    endpoint_overrides: dict[str, str] = {
+        "Confluent": "https://api.ashbyhq.com/posting-api/job-board/confluent",
+        "Rippling": "https://www.rippling.com/careers/open-roles",
+        "Snowflake": "https://api.ashbyhq.com/posting-api/job-board/snowflake",
+        "UiPath": "https://api.ashbyhq.com/posting-api/job-board/uipath",
+        "Costco Wholesale": "https://prod-warmachine.talent500.co/api/jobs/?company_slug=costco",
+        "Airwallex": "https://api.ashbyhq.com/posting-api/job-board/airwallex",
+        "Notion": "https://api.ashbyhq.com/posting-api/job-board/notion",
+        "Atlan": "https://api.ashbyhq.com/posting-api/job-board/atlan",
+        "Cartesia": "https://api.ashbyhq.com/posting-api/job-board/cartesia",
+        "Fermi AI": "https://api.ashbyhq.com/posting-api/job-board/Fermi%20AI",
+        "Flagright": "https://api.ashbyhq.com/posting-api/job-board/flagright.com",
+        "Skylo Technologies": "https://api.ashbyhq.com/posting-api/job-board/skylo",
+        "Cognition": "https://api.ashbyhq.com/posting-api/job-board/cognition",
+        "Sarvam AI": "https://api.ashbyhq.com/posting-api/job-board/sarvam",
+        "Skyflow": "https://api.ashbyhq.com/posting-api/job-board/skyflow",
+        "Lyric": "https://api.ashbyhq.com/posting-api/job-board/lyric",
+        "NETGEAR": "https://api.ashbyhq.com/posting-api/job-board/netgear",
+        "Pebl": "https://api.ashbyhq.com/posting-api/job-board/pebl",
+        "SentiLink": "https://api.ashbyhq.com/posting-api/job-board/sentilink",
+    }
+    custom_extra: dict[str, dict] = {
+        "NPCI": {"zoho_page_id": "190737000000336688"},
+    }
+    talent500_slugs: dict[str, str] = {
+        "Costco Wholesale": "costco",
     }
     for r in rows:
         status  = r.get('Status', '')
@@ -366,7 +427,8 @@ def _custom(rows) -> list[Portal]:
         js_req  = '🟡' in status or ep is None
         company = r.get('Company', '').strip()
         ats = ats_overrides.get(company, 'custom')
-        out.append({
+        endpoint = endpoint_overrides.get(company, endpoint)
+        portal = {
             'company':      company,
             'ats':          ats,
             'endpoint':     endpoint,
@@ -374,7 +436,12 @@ def _custom(rows) -> list[Portal]:
             'js_required':  False if ats != 'custom' else js_req,
             'status':       status,
             'industry':     _industry(company),
-        })
+        }
+        if company in talent500_slugs:
+            portal['talent500_company_slug'] = talent500_slugs[company]
+            portal['india_only'] = True
+        portal.update(custom_extra.get(company, {}))
+        out.append(portal)
     return out
 
 
@@ -397,6 +464,13 @@ _SAP_ATS_OVERRIDES: dict[str, str] = {
     "Volvo Group": "sap_jobs2web_html",
     "Nestlé": "sap_jobs2web_html",
     "Adidas": "sap_jobs2web_html",
+    "Teradyne": "sap_jobs2web_html",
+    "McDonald's GCC": "sap_jobs2web_html",
+    "Asian Paints": "sap_jobs2web_html",
+    "Bajaj Auto": "sap_jobs2web_html",
+    "Tata Consumer Products": "sap_jobs2web_html",
+    "Sun Pharma": "sap_jobs2web_html",
+    "Syngene": "sap_jobs2web_html",
 }
 
 _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
@@ -411,6 +485,8 @@ _SAP_ENDPOINT_OVERRIDES: dict[str, str] = {
     "Volvo Group": "https://jobs.volvogroup.com/search/?q=&locationsearch=India",
     "Nestlé": "https://jobdetails.nestle.com/search/?q=&locationsearch=india",
     "Adidas": "https://jobs.adidas-group.com/search/?q=&optionsFacetsDD_country=IN",
+    "Teradyne": "https://jobs.teradyne.com/search/?q=&locationsearch=india",
+    "McDonald's GCC": "https://jobs.mcdonalds.com/search/?q=&locationsearch=india",
 }
 
 
@@ -447,6 +523,18 @@ _ORACLE_ENDPOINT_OVERRIDES: dict[str, str] = {
         "requisitionList.secondaryLocations,flexFieldsFacet.values,"
         "requisitionList.requisitionFlexFields"
         "&finder=findReqs;siteNumber=CX_45001,"
+        "facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3B"
+        "CATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,"
+        "limit=25,location=India,sortBy=POSTING_DATES_DESC"
+    ),
+    # Icertis uses an Oracle CE siteNumber slug and location=India text param.
+    "Icertis": (
+        "https://iaaviz.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+        "?onlyData=true"
+        "&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,"
+        "requisitionList.secondaryLocations,flexFieldsFacet.values,"
+        "requisitionList.requisitionFlexFields"
+        "&finder=findReqs;siteNumber=Jobs-at-Icertis,"
         "facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3B"
         "CATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,"
         "limit=25,location=India,sortBy=POSTING_DATES_DESC"
@@ -560,6 +648,26 @@ _ATS_OVERRIDES: dict[str, str] = {
     'ITC Limited': 'zoho_recruit',
     "Moody's": 'talentbrew',
     'Mastercard': 'talentbrew',
+    'Boeing': 'talentbrew',
+    'MSCI': 'msci_algolia',
+    'Nutanix': 'dejobs_rss',
+    'Palo Alto Networks': 'talentbrew',
+    'Cargill': 'talentbrew',
+    'Syngenta': 'smartrecruiters',
+    'Goldman Sachs': 'goldman_higher',
+    'Whatfix': 'trakstar',
+    'MoEngage': 'trakstar',
+    'Exotel': 'trakstar',
+    'Meta': 'meta_graphql',
+    'Sanas': 'rippling',
+    'Premji Invest': 'zoho_recruit',
+    'SBI Mutual Fund': 'workline',
+    'Lodha Group': 'peoplestrong',
+    'UBS': 'ubs_brassring',
+    'BDO India': 'bdo_firecrawl',
+    'Simon-Kucher & Partners': 'cornerstone',
+    'Virtusa': 'virtusa_firecrawl',
+    'Kearney': 'yello',
 }
 
 _OTHER_ENDPOINT_OVERRIDES: dict[str, str] = {
@@ -575,6 +683,44 @@ _OTHER_ENDPOINT_OVERRIDES: dict[str, str] = {
     "ARM Holdings": "https://careers.arm.com/search-jobs/India?orgIds=33099&alp=1269750&alt=2",
     # Mastercard: TalentBrew — LocationPath=1269750 is India filter
     "Mastercard": "https://careers.mastercard.com/us/en/search-results?LocationPath=1269750",
+    # Palo Alto Networks: TalentBrew/Radancy India location page.
+    "Palo Alto Networks": "https://jobs.paloaltonetworks.com/en/location/india-jobs/47263/1269750/2",
+    # Nutanix: careers site blocks direct HTTP, but DirectEmployers RSS is public and complete.
+    "Nutanix": "https://nutanix.dejobs.org/jobs/feed/rss?location=India",
+    # Cargill: TalentBrew/Radancy India location page with plain result anchors.
+    "Cargill": "https://careers.cargill.com/en/search-jobs/India/23251/2/1269750/20/79/50/2",
+    # Whatfix: Trakstar Hire / Recruiterbox server-rendered careers page.
+    "Whatfix": "https://whatfix101.hire.trakstar.com/",
+    # MoEngage: Trakstar Hire server-rendered board (same markup as Whatfix).
+    "MoEngage": "https://moengage.hire.trakstar.com/",
+    # Exotel: Trakstar Hire server-rendered board (also exotel.recruiterbox.com).
+    "Exotel": "https://exotel.hire.trakstar.com/",
+    # Boeing: TalentBrew/Radancy India location page.
+    "Boeing": "https://jobs.boeing.com/location/india-jobs/185/1269750/2/1",
+    # Sanas: Rippling public board; India filtering happens in the provider.
+    "Sanas": "https://ats.rippling.com/sanas/jobs",
+    # Premji Invest: public Zoho Recruit board with SSR-embedded job JSON.
+    "Premji Invest": "https://premjiinvest.zohorecruit.in/jobs/Careers",
+    # SBI Mutual Fund: Workline public JSON method plus server-rendered detail pages.
+    "SBI Mutual Fund": "https://app1397.workline.hr/Cportal/GeneralOpening.aspx",
+    # Lodha: PeopleStrong public listing API is rooted at this candidate portal.
+    "Lodha Group": "https://lodhacareers.peoplestrong.com",
+    # UBS: BrassRing bootstrap page provides the anti-CSRF/session values needed
+    # for the public India-filtered PowerSearchJobs JSON request.
+    "UBS": (
+        "https://jobs.ubs.com/TGnewUI/Search/Home/Home"
+        "?partnerid=25008&siteid=5012"
+    ),
+    "BDO India": "https://www.bdo.in/en-gb/careers/new-job-openings",
+    # Cornerstone board exposes a tokenized public search API and detail API.
+    "Simon-Kucher & Partners": (
+        "https://simon-kucher.csod.com/ux/ats/careersite/6/home/"
+        "?c=simon-kucher"
+    ),
+    # Virtusa blocks direct clients; Firecrawl map yields stable India detail URLs.
+    "Virtusa": "https://www.virtusa.com/careers",
+    # Official Kearney careers page links this public Yello/Recsolu board.
+    "Kearney": "https://kearney.recsolu.com/job_boards/1",
 }
 
 _TALEO_V1: set[str] = {'Standard Chartered Bank', 'Wipro'}
@@ -606,6 +752,21 @@ _INDIA_ONLY_OVERRIDES: dict[str, bool] = {
     "Moody's": True,
     "ARM Holdings": True,
     "Mastercard": True,
+    "Nutanix": True,
+    "Palo Alto Networks": True,
+    "Cargill": True,
+    "Whatfix": True,
+    "Boeing": True,
+    "Meta": True,
+    "Sanas": True,
+    "Premji Invest": True,
+    "SBI Mutual Fund": True,
+    "Lodha Group": True,
+    "UBS": True,
+    "BDO India": True,
+    "Simon-Kucher & Partners": True,
+    "Virtusa": True,
+    "Kearney": True,
 }
 
 
@@ -668,6 +829,9 @@ def _phenom_api(rows, india_only: bool = True) -> list[Portal]:
         "Procter & Gamble": "https://www.pgcareers.com/in/en/search-results?qcountry=India",
         "BCG": "https://careers.bcg.com/global/en/search-results?keywords=india",
         "HP (HPE)": "https://careers.hpe.com/us/en/search-results?qcountry=India",
+        "Godrej Consumer Products": "https://careers.godrejindustries.com/in/en/search-results?qcountry=India",
+        "Philip Morris International": "https://join.pmicareers.com/gb/en/search-results",
+        "Oliver Wyman": "https://careers.marsh.com/global/en/oliver-wyman-search",
     }
     out = []
     for r in rows:

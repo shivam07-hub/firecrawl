@@ -11,7 +11,7 @@ from pathlib import Path
 import firecrawl_client as fc
 from config import REQUEST_TIMEOUT, WORKDAY_PAGE_SIZE, WORKDAY_MAX_JOBS, WORKDAY_JD_FETCH_LIMIT
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
-from utils import is_india, job_hash, strip_html
+from utils import is_india, job_hash, strip_html, workday_req_id
 
 _REGISTRY_PATH = Path(__file__).parent.parent / "workday_registry.json"
 _registry_lock = threading.Lock()
@@ -168,14 +168,16 @@ def scrape_workday(
         page_jobs: list[dict] = []
         new_on_page = 0
         for p in postings:
-            jid = p.get('jobReqId') or ''
+            ext = p.get('externalPath', '')
+            # CXS list endpoint has no 'jobReqId'; derive the requisition id from
+            # bulletFields[0] / the _R… path tail, hash only as last resort.
+            jid = p.get('jobReqId') or workday_req_id(p, ext) or ''
             if jid and jid in seen_ids:
                 continue
             if jid:
                 seen_ids.add(jid)
             new_on_page += 1
 
-            ext = p.get('externalPath', '')
             tenant   = portal['tenant']
             instance = portal['instance']
             url = f"https://{tenant}.{instance}.myworkdayjobs.com{ext}" if ext else ''
@@ -320,6 +322,12 @@ def _fetch_workday_jds(jobs: list[dict], portal: Portal) -> None:
             r = requests.get(detail_url, headers=_HEADERS, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
             info = r.json().get('jobPostingInfo', {})
+            detail_location = _workday_detail_location(info)
+            if detail_location:
+                job['location_city'] = detail_location
+            detail_locations = _workday_detail_locations(info, detail_location)
+            if detail_locations:
+                job['locations'] = detail_locations
             jd   = info.get('jobDescription', '') or info.get('jobSummary', '')
             if jd:
                 job['raw_jd_text'] = strip_html(jd)
@@ -346,3 +354,50 @@ def _fetch_workday_jds(jobs: list[dict], portal: Portal) -> None:
                     job['raw_jd_text'] = md
                     fc_ok += 1
         _log.info(f"    [FC FALLBACK] JDs via Firecrawl: {fc_ok} ok  {len(still_missing) - fc_ok} missing")
+
+
+def _workday_detail_location(info: dict) -> str:
+    """Return the most concrete location string from a Workday detail payload."""
+    location = info.get('location')
+    if isinstance(location, str) and location.strip():
+        return location.strip()
+    if isinstance(location, dict):
+        descriptor = location.get('descriptor')
+        if isinstance(descriptor, str) and descriptor.strip():
+            return descriptor.strip()
+
+    req_location = info.get('jobRequisitionLocation')
+    if isinstance(req_location, dict):
+        descriptor = req_location.get('descriptor')
+        if isinstance(descriptor, str) and descriptor.strip():
+            return descriptor.strip()
+
+    country = info.get('country')
+    if isinstance(country, dict):
+        descriptor = country.get('descriptor')
+        if isinstance(descriptor, str) and descriptor.strip():
+            return descriptor.strip()
+    return ''
+
+
+def _workday_detail_locations(info: dict, primary: str = '') -> list[str]:
+    """All cities for a multi-location Workday posting (firecrawl #6).
+
+    Workday CXS detail returns extra cities under additionalLocations (list of
+    {descriptor}). Combine with the primary location, deduped and ordered.
+    """
+    out: list[str] = []
+    if primary and primary.strip():
+        out.append(primary.strip())
+    additional = info.get('additionalLocations')
+    if isinstance(additional, list):
+        for entry in additional:
+            descriptor = ''
+            if isinstance(entry, str):
+                descriptor = entry
+            elif isinstance(entry, dict):
+                descriptor = entry.get('descriptor') or ''
+            descriptor = descriptor.strip() if isinstance(descriptor, str) else ''
+            if descriptor and descriptor not in out:
+                out.append(descriptor)
+    return out

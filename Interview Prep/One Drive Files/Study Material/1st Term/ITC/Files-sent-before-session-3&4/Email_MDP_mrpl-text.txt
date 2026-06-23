@@ -1,0 +1,15 @@
+Hello,
+
+One of our MDP participant wrote to us the following problem, that is amenable to be resolved using a macro...
+Try it out... At least, try formulating the steps on paper...
+------------------------------------------------
+I am attaching the files we normally use.
+
+MRPL staff.xlsx  [ MRPL - Mahakoshal Refractories Pvt. Ltd., Katni, MP]
+I have a problem with the attendance sheet - I want the attendance to be totalled automatically. For example in row 14 we want to total Ps , HLD, T , WO, Q_PL and others.
+
+thanks 
+---------------------------------------------
+
+Regards,
+Vivek

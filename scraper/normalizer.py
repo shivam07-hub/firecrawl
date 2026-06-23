@@ -6,9 +6,11 @@ Single source of truth for:
   - Skill name → canonical L3 name matching (3-tier: exact → stripped → fuzzy)
   - LLM JSON response parsing
 
-Used by enricher.py, csv_importer.py, and supabase_enricher.py.
-Replaces three independent re-implementations of the same matching logic.
+Used by enricher.py and csv_importer.py.
+Replaces independent re-implementations of the same matching logic.
 """
+from __future__ import annotations
+
 import re
 import json
 import difflib
@@ -105,6 +107,38 @@ def get_all_canonical_names() -> set[str]:
     """Return the full set of canonical L3 skill names (for batch validation)."""
     l3_index, _, _ = _ensure_index()
     return set(l3_index.values())
+
+
+# ── JD pre-clean (for LLM input only) ───────────────────────────────────────────
+# Some providers (e.g. cognizant_xml) carry page-scrape junk inside the JD text:
+# markdown nav links, rule lines, requisition IDs, "Date published …", "Location […]".
+# We strip these from the COPY fed to the LLM so the summary stays clean and the
+# context window isn't wasted. The stored job_description is left untouched (Tailor CV).
+
+_MD_LINK_RE   = re.compile(r'\[([^\]]+)\]\((?:[^)]*)\)')          # [text](url) → text
+_RULE_RE      = re.compile(r'^[\s=*_-]{4,}$', re.MULTILINE)        # ==== / **** rules
+_NAV_RE       = re.compile(r'(?im)^\s*(skip to (main )?content|apply now|share this job|save job)\s*$')
+_META_LINE_RE = re.compile(r'(?im)^\s*[*\-]?\s*(date published|posted on|requisition id|req id|job id)\b.*$')
+_MULTISPACE   = re.compile(r'[ \t]{2,}')
+_MULTINL      = re.compile(r'\n{3,}')
+
+
+def clean_jd_for_llm(text: str) -> str:
+    """Return a de-junked copy of a job description for LLM summarisation.
+
+    Removes markdown links (keeps link text), horizontal rules, nav boilerplate,
+    and metadata lines (date/requisition) that belong in their own columns.
+    Does NOT mutate or replace the stored raw job_description.
+    """
+    if not text:
+        return ''
+    t = _MD_LINK_RE.sub(r'\1', text)
+    t = _NAV_RE.sub('', t)
+    t = _META_LINE_RE.sub('', t)
+    t = _RULE_RE.sub('', t)
+    t = _MULTISPACE.sub(' ', t)
+    t = _MULTINL.sub('\n\n', t)
+    return t.strip()
 
 
 def parse_json_response(text: str):

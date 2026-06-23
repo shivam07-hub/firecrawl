@@ -25,6 +25,16 @@ from schema import CANONICAL_FIELDS, RAW_FIELD_MAP
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
 SCHEMA = CANONICAL_FIELDS
 
+
+def _skills_to_csv(skills) -> str:
+    """Serialize the structured skills list to a human-readable CSV cell: 'name:level | …'.
+    JSON remains the importer's source of truth; this is only for the human-facing CSV."""
+    out = []
+    for s in skills or []:
+        if isinstance(s, dict) and s.get('name'):
+            out.append(f"{s['name']}:{s.get('required_level', 2)}")
+    return ' | '.join(out)
+
 COMPLETE_MARKER_NAME = "jobs.complete"
 
 
@@ -55,6 +65,7 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "job_id":           raw.get('job_id') or '',
         "job_title":        _get('title', 'job_title'),
         "job_description":  _get('raw_jd_text', 'job_description'),
+        "job_summary":      raw.get('job_summary') or '',
         "industry":         raw.get('industry') or '',
         "industry_group":   raw.get('industry_group') or '',
         "company_name":     company_name,
@@ -64,10 +75,22 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "location_country": raw.get('location_country') or ('India' if location else ''),
         "location_mode":    raw.get('location_mode') or '',
         "location_quality": raw.get('location_quality') or '',
+        # per-city raw strings for multi-location postings (firecrawl #6).
+        # csv_importer._normalize_location canonicalizes; empty list → derived from scalar.
+        "locations":        [l for l in (raw.get('locations') or []) if isinstance(l, str) and l.strip()],
         "apply_url":        _get('job_url', 'apply_url'),
         "role_domain":      raw.get('role_domain') or raw.get('business_unit') or '',
+        # One flat skill list. `skills` carries model required_level → job_skills;
+        # `main_skills` mirrors the names (True_Yodha chips); `side_skills` always [].
+        "skills":           raw.get('skills') or [],
         "main_skills":      raw.get('main_skills') or [],
-        "side_skills":      raw.get('side_skills') or [],
+        "side_skills":      [],
+        # Structured card-chip facts (provider-supplied; empty when unavailable).
+        "date_posted":            raw.get('date_posted') or raw.get('date_posted_raw') or '',
+        "seniority_level":        raw.get('seniority_level') or '',
+        "work_mode":              raw.get('work_mode') or '',
+        "min_years_experience":   raw.get('min_years_experience') if raw.get('min_years_experience') is not None else '',
+        "max_years_experience":   raw.get('max_years_experience') if raw.get('max_years_experience') is not None else '',
         "batch_date":       raw.get('batch_date') or _today(),
     }
     return {field: row.get(field, '') for field in CANONICAL_FIELDS}
@@ -125,8 +148,10 @@ def save_jobs(
             w.writeheader()
             for job in all_jobs:
                 row = dict(job)
+                row['skills'] = _skills_to_csv(job.get('skills'))
                 row['main_skills'] = ', '.join(job.get('main_skills') or [])
-                row['side_skills'] = ', '.join(job.get('side_skills') or [])
+                row['side_skills'] = ''
+                row['locations'] = ' | '.join(job.get('locations') or [])
                 w.writerow(row)
 
     # Marker written only after BOTH JSON and CSV succeed (skipped for page-level saves)

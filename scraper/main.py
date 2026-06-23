@@ -18,6 +18,8 @@ Usage:
     python main.py --resume             # skip companies already scraped
     python main.py --enrich-only        # enrich saved jobs (LM Studio on)
 """
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -32,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
 from providers import dispatch_scrape
 from enricher import enrich_job
-from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker
+from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker, _skills_to_csv
 from run_checkpoint import RunCheckpoint
 from typing import Callable
 from utils import company_slug
@@ -428,8 +430,9 @@ def enrich_only_run(log: logging.Logger) -> None:
             w.writeheader()
             for job in jobs:
                 row = dict(job)
+                row['skills'] = _skills_to_csv(job.get('skills'))
                 row['main_skills'] = ', '.join(job.get('main_skills') or [])
-                row['side_skills'] = ', '.join(job.get('side_skills') or [])
+                row['side_skills'] = ''
                 w.writerow(row)
 
         # Marker after both JSON and CSV succeed
@@ -570,6 +573,31 @@ def main():
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log.info(f"  Run summary JSON    : {summary_path}")
     _persist_diagnostics_to_supabase(summary, log)
+    _run_self_diagnosis(summary, log)
+
+
+def _run_self_diagnosis(summary: dict, log: logging.Logger) -> None:
+    """Best-effort: classify this run's 0/low companies and write the handoff.
+
+    Cheap and network-free — no probing here. Heavy re-testing stays in the
+    standalone `python diagnose.py --probe`. Never let this break a scrape.
+    """
+    try:
+        from diagnose import LOGS_DIR, load_blocked_tenants, render_report
+        from heal.baseline import load_ledger
+        from heal.classifier import classify_run, bucket_counts, BUCKET_ORDER, OK
+
+        verdicts = classify_run(summary, load_ledger(), load_blocked_tenants())
+        counts = bucket_counts([v for v in verdicts if v.is_failure])
+        log.info(f"  Self-diagnosis      : {sum(counts.values())} companies need attention")
+        for b in BUCKET_ORDER:
+            if b != OK and counts.get(b):
+                log.info(f"    {b:<18} {counts[b]}")
+        out = Path(LOGS_DIR) / f"diagnosis_{summary.get('run_id', 'latest')}.md"
+        out.write_text(render_report(summary, verdicts) + "\n", encoding="utf-8")
+        log.info(f"  Diagnosis report    : {out}  (run `python diagnose.py --probe` to re-test regressions)")
+    except Exception as e:  # noqa: BLE001 — diagnostics must never fail a run
+        log.warning(f"  Self-diagnosis skipped: {e}")
 
 
 if __name__ == "__main__":

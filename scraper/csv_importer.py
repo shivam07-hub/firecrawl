@@ -3,8 +3,9 @@ csv_importer.py — Phase 3: upload enriched local JSON to Supabase.
 
 Reads All_CSV_Outputs/*/Outputs/*/jobs.json and:
   1. Upserts core job fields to the `jobs` table (with lifecycle tracking).
-  2. Resolves structured skills or main_skills/side_skills → skill_ids.
+  2. Resolves the flat `skills` list (or legacy main_skills fallback) → skill_ids.
   3. Upserts rows to `job_skills (job_id, skill_id, is_primary, required_level)`.
+     One bucket: is_primary is always True; importance lives in required_level (1-4).
   4. Logs skills that don't resolve (taxonomy drift signal).
 
 Usage:
@@ -51,10 +52,13 @@ log = logging.getLogger("csv_importer")
 from config import OUTPUT_BASE
 
 _JOB_FIELDS = [
-    "job_id", "job_title", "job_description",
+    "job_id", "job_title", "job_description", "job_summary",
     "industry", "company_name", "location", "apply_url",
     "role_domain", "main_skills", "side_skills", "batch_date",
     "location_raw", "location_city", "location_country", "location_mode", "location_quality",
+    "locations",
+    "date_posted", "seniority_level", "work_mode",
+    "min_years_experience", "max_years_experience",
 ]
 
 _BATCH_SIZE = 200
@@ -124,6 +128,7 @@ class NormalizedLocation:
     location_country: str | None
     location_mode: str
     location_quality: str
+    locations: tuple[str, ...] = ()
 
 
 _SPACE_RE = re.compile(r"\s+")
@@ -228,9 +233,27 @@ def _display_location(
     return city or country or raw
 
 
-def _normalize_location(value: str | None) -> NormalizedLocation:
+def _canonical_city_list(raw_locations: list | tuple | None) -> list[str]:
+    """Canonicalize a provider's per-city array into ordered, deduped city names."""
+    out: list[str] = []
+    for entry in raw_locations or []:
+        if not isinstance(entry, str):
+            continue
+        s = _clean_text(entry)
+        if not s:
+            continue
+        canonical = _infer_city(s.lower(), s)
+        if canonical and canonical not in out:
+            out.append(canonical)
+    return out
+
+
+def _normalize_location(
+    value: str | None,
+    raw_locations: list | tuple | None = None,
+) -> NormalizedLocation:
     raw = _clean_text(value)
-    if raw is None:
+    if raw is None and not raw_locations:
         return NormalizedLocation(
             location=None,
             location_raw=None,
@@ -238,24 +261,60 @@ def _normalize_location(value: str | None) -> NormalizedLocation:
             location_country=None,
             location_mode="unknown",
             location_quality="unknown",
+            locations=(),
         )
 
-    lower = raw.lower()
-    mode = _infer_mode(lower)
-    city = _infer_city(lower, raw)
-    country = _infer_country(lower)
-    if city in _INDIA_CITIES and not country:
-        country = "India"
+    # Cities the provider enumerated (multi-location postings, firecrawl #6).
+    multi = _canonical_city_list(raw_locations)
 
-    if mode == "unknown" and _MULTI_LOCATION_RE.search(lower):
-        quality = "unknown"
+    if raw is None:
+        # No scalar string, but the provider gave a city array — synthesize.
+        lower = ""
+        mode = "unknown"
         city = None
-    elif mode == "unknown" and city is None and country is None:
+        country = None
         quality = "unknown"
     else:
-        quality = "ok"
+        lower = raw.lower()
+        mode = _infer_mode(lower)
+        city = _infer_city(lower, raw)
+        country = _infer_country(lower)
+        if city in _INDIA_CITIES and not country:
+            country = "India"
+
+        if mode == "unknown" and _MULTI_LOCATION_RE.search(lower):
+            quality = "unknown"
+            city = None  # "N Locations" phrase carries no real city by itself
+        elif mode == "unknown" and city is None and country is None:
+            quality = "unknown"
+        else:
+            quality = "ok"
+
+    # Recover cities from the array when the scalar parse failed / was a count phrase.
+    if multi:
+        if city is None:
+            city = multi[0]
+        if country is None:
+            for entry in raw_locations or []:
+                inferred = _infer_country((entry or "").lower()) if isinstance(entry, str) else None
+                if inferred:
+                    country = inferred
+                    break
+        if city in _INDIA_CITIES and not country:
+            country = "India"
+        if quality == "unknown" and city:
+            quality = "ok"
+
     if mode == "unknown" and quality == "ok" and (city or country):
         mode = "onsite"
+
+    # Final locations array: scalar primary city first, then the rest, deduped.
+    locations: list[str] = []
+    if city:
+        locations.append(city)
+    for c in multi:
+        if c not in locations:
+            locations.append(c)
 
     return NormalizedLocation(
         location=_display_location(city=city, country=country, mode=mode, quality=quality, raw=raw),
@@ -264,6 +323,7 @@ def _normalize_location(value: str | None) -> NormalizedLocation:
         location_country=country,
         location_mode=mode,
         location_quality=quality,
+        locations=tuple(locations),
     )
 
 
@@ -367,7 +427,75 @@ def _job_skills_has_required_level() -> bool:
     return "required_level" in (table.get("properties") or {})
 
 
+def _jobs_has_locations_column() -> bool:
+    """Return True when live Supabase jobs exposes the locations[] column.
+
+    _upsert_jobs sends `locations` on every row, so this MUST exist before real
+    writes or the whole upsert batch fails (firecrawl #6).
+    """
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return False
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return False
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("jobs") or schemas.get("public.jobs") or {}
+    return "locations" in (table.get("properties") or {})
+
+
+# Card-data columns added for the job_summary + structured-chip work.
+# _upsert_jobs sends these on every row, so they MUST exist before real writes.
+_CARD_COLUMNS = (
+    "job_summary", "date_posted", "seniority_level",
+    "work_mode", "min_years_experience", "max_years_experience",
+)
+
+
+def _jobs_missing_card_columns() -> list[str]:
+    """Return card columns absent from live Supabase jobs (empty list = all present)."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return list(_CARD_COLUMNS)
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return list(_CARD_COLUMNS)
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("jobs") or schemas.get("public.jobs") or {}
+    props = table.get("properties") or {}
+    return [c for c in _CARD_COLUMNS if c not in props]
+
+
 def _job_skill_entries(job: dict) -> list[dict]:
+    """One flat bucket of needed skills → job_skills rows.
+
+    There is no primary/side split: is_primary is always True and importance is
+    carried by required_level (1-4). The structured `skills` list (model levels)
+    is preferred; legacy main_skills/side_skills name lists are the fallback for
+    older dump files (no model levels → default L2).
+    """
     structured = job.get("skills")
     if isinstance(structured, list) and structured:
         result = []
@@ -377,23 +505,20 @@ def _job_skill_entries(job: dict) -> list[dict]:
             name = item.get("name")
             if not isinstance(name, str) or not name.strip():
                 continue
-            is_primary = bool(item.get("is_primary"))
             level = item.get("required_level")
             if not isinstance(level, int) or level not in (1, 2, 3, 4):
-                level = 2 if is_primary else 1
+                level = 2
             result.append({
                 "name": name,
-                "is_primary": is_primary,
+                "is_primary": True,
                 "required_level": level,
             })
         return result
 
+    names = list(job.get("main_skills") or []) + list(job.get("side_skills") or [])
     return [
         {"name": skill, "is_primary": True, "required_level": 2}
-        for skill in (job.get("main_skills") or [])
-    ] + [
-        {"name": skill, "is_primary": False, "required_level": 1}
-        for skill in (job.get("side_skills") or [])
+        for skill in names if isinstance(skill, str) and skill.strip()
     ]
 
 
@@ -474,8 +599,17 @@ def _upsert_jobs(
         if not job.get("job_id"):
             continue
 
-        row = {f: job.get(f) for f in _JOB_FIELDS if job.get(f) is not None}
-        normalized_location = _normalize_location(job.get("location"))
+        # Drop None always; drop "" only for smallint numeric columns (Postgres
+        # rejects "" for smallint). Empty strings are kept for text columns to
+        # preserve prior insert behavior (e.g. NOT NULL job_description).
+        _INT_FIELDS = {"min_years_experience", "max_years_experience"}
+        row = {}
+        for f in _JOB_FIELDS:
+            v = job.get(f)
+            if v is None or (v == "" and f in _INT_FIELDS):
+                continue
+            row[f] = v
+        normalized_location = _normalize_location(job.get("location"), job.get("locations"))
 
         # Derived fields
         row["industry_group"] = _industry_group(job.get("industry"))
@@ -485,6 +619,7 @@ def _upsert_jobs(
         row["location_country"] = normalized_location.location_country
         row["location_mode"] = normalized_location.location_mode
         row["location_quality"] = normalized_location.location_quality
+        row["locations"] = list(normalized_location.locations)
         row["apply_url"]      = _valid_apply_url(job.get("apply_url"))
         if normalized_location.location_quality == "unknown":
             unknown_location_rows += 1
@@ -553,8 +688,8 @@ def _resolve_and_upsert_skills(
                 drift_counter[skill] += 1
                 local_drift += 1
 
-    # Deduplicate by (job_id, skill_id) — a skill can appear in both main + side;
-    # keep is_primary=True and the strongest required_level if either occurrence is primary.
+    # Deduplicate by (job_id, skill_id) — keep the strongest required_level.
+    # (is_primary is uniformly True; the primary/side split was removed.)
     seen: dict[tuple[str, int], dict] = {}
     for r in skill_rows:
         key = (r["job_id"], r["skill_id"])
@@ -562,7 +697,6 @@ def _resolve_and_upsert_skills(
         if not existing:
             seen[key] = r
             continue
-        existing["is_primary"] = existing["is_primary"] or r["is_primary"]
         existing["required_level"] = max(existing["required_level"], r["required_level"])
     skill_rows = list(seen.values())
 
@@ -604,6 +738,25 @@ def _write_diagnostic(
         "saved_new":    saved_new,
         "reason":       f"{enriched_pct}% enriched, {drift} skill drift",
     }).execute()
+
+
+def _sync_baseline_ledger(company: str, jobs: list[dict], raw_jobs: int, run_id: str) -> None:
+    """Forward-only sync of the official load count into baseline_ledger.json.
+
+    This is the source of truth for the self-healing diagnostic's regression
+    detection: next run, diagnose.py diffs the scrape against this last-good
+    count. Only count>0 ever writes (a bad run is the regression signal, not a
+    new baseline). Best-effort — never fail an import over the ledger.
+    """
+    try:
+        from datetime import date
+        from heal.baseline import load_ledger, save_ledger, update_ledger
+        ledger = load_ledger()
+        ats = (jobs[0].get("ats", "") if jobs else "") or ""
+        if update_ledger(ledger, company, ats, raw_jobs, run_id, updated=date.today().isoformat()):
+            save_ledger(ledger)
+    except Exception:  # noqa: BLE001 — ledger sync must never break a load
+        pass
 
 
 def _write_location_audit(
@@ -753,7 +906,7 @@ def import_file(
     else:
         jobs_written = sum(1 for j in jobs if j.get("job_id"))
         for job in jobs:
-            normalized = _normalize_location(job.get("location"))
+            normalized = _normalize_location(job.get("location"), job.get("locations"))
             if normalized.location_quality == "unknown":
                 local_unknown += 1
                 if normalized.location_raw:
@@ -765,6 +918,7 @@ def import_file(
 
     if not dry_run and run_id:
         _write_diagnostic(sb, run_id, company, len(jobs), jobs_written, enriched, drift)
+        _sync_baseline_ledger(company, jobs, len(jobs), run_id)
 
     return {
         "path": str(json_path),
@@ -778,6 +932,40 @@ def import_file(
         "enriched": enriched,
         "unknown_location_rows": local_unknown,
     }
+
+
+# ── Myro intel-page refresh ─────────────────────────────────────────────────--
+
+def _refresh_analytics_snapshot() -> None:
+    """Tell the Myro backend to recompute its public intel snapshot after a load.
+
+    Fire-and-forget: never raises, so a refresh failure cannot fail the import.
+    Skipped silently if either env var is absent. Sends the secret in a header
+    (not the query string) so it does not leak into HTTP access / proxy logs.
+    """
+    backend_url = (os.getenv("MYRO_BACKEND_URL", "") or "").rstrip("/")
+    secret = (os.getenv("MYRO_ANALYTICS_REFRESH_SECRET", "") or "").strip()
+    if not backend_url or not secret:
+        log.info("Intel refresh skipped: MYRO_BACKEND_URL / MYRO_ANALYTICS_REFRESH_SECRET not set")
+        return
+
+    endpoint = f"{backend_url}/jobs/analytics/refresh-snapshot"
+    try:
+        resp = requests.post(
+            endpoint,
+            headers={"X-Myro-Refresh-Secret": secret},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            log.info("Intel refresh: backend snapshot refreshed (%s)", endpoint)
+        else:
+            log.warning(
+                "Intel refresh: backend returned %s (%s) — snapshot may be stale",
+                resp.status_code,
+                endpoint,
+            )
+    except requests.RequestException as e:
+        log.warning("Intel refresh failed (%s): %s — snapshot may be stale", endpoint, e)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -865,6 +1053,39 @@ def main() -> None:
         )
         if not args.dry_run:
             log.error("Stopping before writes to avoid a partial jobs-only upload.")
+            raise SystemExit(2)
+
+    if _jobs_has_locations_column():
+        log.info("jobs.locations[] contract OK")
+    else:
+        log.warning(
+            "jobs.locations[] column is missing; dry-run can continue, "
+            "but real uploads require scraper/sql/add_jobs_locations_array.sql"
+        )
+        if not args.dry_run:
+            log.error(
+                "Stopping before writes: _upsert_jobs sends locations[] on every row, "
+                "so the upsert would fail. Run scraper/sql/add_jobs_locations_array.sql "
+                "in the Supabase SQL editor first."
+            )
+            raise SystemExit(2)
+
+    _missing_card_cols = _jobs_missing_card_columns()
+    if not _missing_card_cols:
+        log.info("jobs card columns (job_summary + chips) contract OK")
+    else:
+        log.warning(
+            "jobs is missing card columns %s; dry-run can continue, "
+            "but real uploads require scraper/sql/add_jobs_summary_cols.sql",
+            ", ".join(_missing_card_cols),
+        )
+        if not args.dry_run:
+            log.error(
+                "Stopping before writes: _upsert_jobs sends %s on every row, "
+                "so the upsert would fail. Run scraper/sql/add_jobs_summary_cols.sql "
+                "in the Supabase SQL editor first.",
+                ", ".join(_missing_card_cols),
+            )
             raise SystemExit(2)
 
     drift_counter: Counter = Counter()
@@ -1001,6 +1222,10 @@ def main() -> None:
 
     if status == "blocked" or blocked_deactivation:
         raise SystemExit(2)
+
+    # Clean, real load only — tell the Myro intel page to refresh its snapshot.
+    if not args.dry_run:
+        _refresh_analytics_snapshot()
 
 
 if __name__ == "__main__":

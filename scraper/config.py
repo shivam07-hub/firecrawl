@@ -22,6 +22,7 @@ LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL") or (
 # Defaults to cloud API (api.firecrawl.dev) if unset or set to the cloud URL.
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 FIRECRAWL_URL     = os.getenv("FIRECRAWL_URL", "")   # empty = cloud default
+FIRECRAWL_CLOUD_API_KEY = os.getenv("FIRECRAWL_CLOUD_API_KEY", "")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _ROOT = Path(__file__).parent.parent          # firecrawl/

@@ -8,6 +8,16 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 All work must stay within the `firecrawl_Supabase/` directory. Do not read, write, or modify files outside this folder.
 
+## CHANGE DISCIPLINE
+
+Prefer running and reusing the existing pipeline code, configuration, CLI flags, scripts, and diagnostics before changing implementation.
+
+- Do not write or modify code by default during scraper runs or pipeline iteration.
+- First try existing commands, env flags, providers, importer dry-runs, logs, and Supabase diagnostics.
+- Only propose a code change after a concrete failure is observed and the existing code/config cannot handle it safely.
+- Before writing code, discuss the failure, root cause, options, and tradeoffs with the user, then wait for explicit approval.
+- User-requested documentation updates are allowed, but implementation files should stay untouched unless approved.
+
 ## LLM CONFIGURATION — LM Studio only
 
 **No cloud AI APIs are permitted.** All LLM calls must route through a locally running LM Studio instance.
@@ -176,6 +186,17 @@ JS-heavy: use direct ATS APIs where possible; otherwise use Firecrawl Docker fir
 python main.py --enrich-only
 ```
 Walks every `jobs.json`, enriches jobs that have `job_description` but missing `main_skills`, and rewrites `.json`.
+
+### Company run health tracking
+
+Official per-company job-count tracking happens **only after final Supabase load** for that company.
+
+- Treat scrape-only counts from `main.py`, local `run_summary_*.json`, and intermediate JSON files as provisional debugging signals only.
+- During Phase 1 scrape-only iteration runs, prefer disabling Supabase scrape diagnostics so provisional counts do not become official history:
+  `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "<Company>" --skip-enrich`
+- The official health record is written by `csv_importer.py` after the enriched company output is loaded into Supabase.
+- For every loaded company, track/report: `company_name`, `run_id`, `raw_jobs`, `saved_new`, enriched percent, skill drift, unknown location rows, status/reason.
+- Do not use scrape-only diagnostics as the source of truth for company hiring volume or scraper health. If a company fails before final load, report it as a pipeline issue, not as an official company count.
 
 ### ATS routing
 
@@ -472,7 +493,7 @@ Do not use this section as current state or an active task list. Current state l
 
 **Phase 1 run results (2026-04-17):**
 - `python main.py --skip-enrich` completed. 94 output files, 2,376 total jobs, 1,730 with `job_description`.
-- Output path: `/Users/incognito/Mirror CV/firecrawl/All_CSV_Outputs_thru_firecrawl/` (set via `OUTPUT_BASE` in .env)
+- Output path: `/Users/incognito/firecrawl_Supabase/All_CSV_Outputs_thru_firecrawl/` (set via `OUTPUT_BASE` in .env)
 
 **Historical Phase 2 status (completed later):**
 - `python main.py --enrich-only` running as PID 58046, log at `/tmp/enrich_rag.log`

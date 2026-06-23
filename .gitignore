@@ -72,3 +72,9 @@ apps/api/src/lib/scrape-interact/*.md
 /validation_outputs/
 /logs/
 /scraper/firecrawl_cache.json
+/scraper/question_bank_inputs/
+
+# graphify artifacts + personal / one-off files (never commit)
+/graphify-out/
+*.pdf
+*.xlsx

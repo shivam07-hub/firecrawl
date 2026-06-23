@@ -19,7 +19,7 @@ Usage in providers / main.py:
     data     = fc.extract([career_url], schema, prompt)
 """
 from firecrawl import Firecrawl
-from config import FIRECRAWL_API_KEY, FIRECRAWL_URL
+from config import FIRECRAWL_API_KEY, FIRECRAWL_CLOUD_API_KEY, FIRECRAWL_URL
 import hashlib
 import json
 import os
@@ -37,6 +37,7 @@ def _is_local(url: str) -> bool:
 # Singletons — None until first use
 _app: Firecrawl | None = None
 _v1 = None
+_cloud_app: Firecrawl | None = None
 
 _CACHE_PATH = Path(os.getenv("FIRECRAWL_CACHE_PATH", Path(__file__).parent / "firecrawl_cache.json"))
 _CACHE_TTL_SECONDS = int(os.getenv("FIRECRAWL_CACHE_TTL_SECONDS", str(7 * 24 * 60 * 60)))
@@ -165,6 +166,25 @@ def _normalize_map_links(result) -> list[dict[str, str]]:
     return out
 
 
+def _document_source_url(document) -> str:
+    metadata = getattr(document, "metadata", None)
+    if hasattr(metadata, "model_dump"):
+        metadata = metadata.model_dump(exclude_none=True)
+    if isinstance(metadata, dict):
+        return str(
+            metadata.get("source_url")
+            or metadata.get("sourceURL")
+            or metadata.get("url")
+            or ""
+        )
+    return str(
+        getattr(metadata, "source_url", "")
+        or getattr(metadata, "sourceURL", "")
+        or getattr(metadata, "url", "")
+        or ""
+    )
+
+
 def _get_app() -> Firecrawl:
     global _app, _v1
     if _app is None:
@@ -178,6 +198,16 @@ def _get_app() -> Firecrawl:
         # SDK v4.22+ routes extract() to /v2/extract; Docker only has /v1/extract.
         _v1 = _app._v1_client if hasattr(_app, '_v1_client') else _app
     return _app
+
+
+def _get_cloud_app() -> Firecrawl:
+    global _cloud_app
+    if _cloud_app is None:
+        if not FIRECRAWL_CLOUD_API_KEY:
+            raise RuntimeError("FIRECRAWL_CLOUD_API_KEY is not configured")
+        _cloud_app = Firecrawl(api_key=FIRECRAWL_CLOUD_API_KEY)
+        print("[FC] Using cloud API")
+    return _cloud_app
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -251,6 +281,56 @@ def map_site(
         return []
 
 
+def cloud_map_site(
+    url: str,
+    *,
+    search: str | None = None,
+    include_subdomains: bool = True,
+    ignore_query_parameters: bool = False,
+    limit: int = 50,
+    sitemap: str = "include",
+    timeout: int = 60000,
+    location=None,
+) -> list[dict[str, str]]:
+    """Explicit paid-cloud map for portals that cannot be reached through direct HTTP."""
+    payload = {
+        "url": url,
+        "search": search or "",
+        "include_subdomains": bool(include_subdomains),
+        "ignore_query_parameters": bool(ignore_query_parameters),
+        "limit": int(limit),
+        "sitemap": sitemap,
+        "timeout": int(timeout),
+        "location": location,
+        "provider": "cloud",
+    }
+    cached = _cache_get_json("map", payload)
+    if isinstance(cached, list):
+        return cached
+    legacy_payload = {key: value for key, value in payload.items() if key != "provider"}
+    cached = _cache_get_json("map", legacy_payload)
+    if isinstance(cached, list):
+        _cache_set_json("map", payload, cached)
+        return cached
+    try:
+        result = _get_cloud_app().map(
+            url,
+            search=search,
+            include_subdomains=include_subdomains,
+            ignore_query_parameters=ignore_query_parameters,
+            limit=limit,
+            sitemap=sitemap,
+            timeout=timeout,
+            location=location,
+        )
+        links = _normalize_map_links(result)
+        _cache_set_json("map", payload, links)
+        return links
+    except Exception as e:
+        print(f"    [FC CLOUD MAP ERROR] {url}: {e}")
+        return []
+
+
 def extract(urls: list[str], schema: dict, prompt: str) -> dict:
     """
     LLM-powered structured extraction via /v1/extract (Docker-compatible).
@@ -268,6 +348,27 @@ def extract(urls: list[str], schema: dict, prompt: str) -> dict:
         return {}
     except Exception as e:
         print(f"    [FC EXTRACT ERROR] {urls}: {e}")
+        return {}
+
+
+def cloud_extract(urls: list[str], schema: dict, prompt: str) -> dict:
+    """Explicit paid-cloud LLM extraction (v2). Use for JS/logo-wall pages where
+    markdown scraping misses content (e.g. recruiter logo grids on placement pages).
+    Returns {} on failure. Results are cached by url+prompt+schema."""
+    payload = {"urls": sorted(urls), "schema": schema, "prompt": prompt}
+    cached = _cache_get_json("extract", payload)
+    if isinstance(cached, dict):
+        return cached
+    try:
+        result = _get_cloud_app().extract(urls, prompt=prompt, schema=schema)
+        if hasattr(result, "model_dump"):
+            result = result.model_dump(exclude_none=True)
+        data = result.get("data") if isinstance(result, dict) else None
+        out = data if isinstance(data, dict) else (result if isinstance(result, dict) else {})
+        _cache_set_json("extract", payload, out)
+        return out
+    except Exception as e:
+        print(f"    [FC CLOUD EXTRACT ERROR] {urls}: {e}")
         return {}
 
 
@@ -293,7 +394,7 @@ def batch_scrape(urls: list[str]) -> dict[str, str]:
         # batch_scrape returns a BatchScrapeResponse; iterate its data list
         pages = getattr(results, "data", None) or []
         for doc in pages:
-            url = getattr(getattr(doc, "metadata", None), "url", None) or ""
+            url = _document_source_url(doc)
             md  = getattr(doc, "markdown", None) or ""
             if url and md:
                 out[url] = md
@@ -302,3 +403,35 @@ def batch_scrape(urls: list[str]) -> dict[str, str]:
     except Exception as e:
         print(f"    [FC BATCH ERROR] {len(misses)} URLs: {e}")
         return out
+
+
+def cloud_batch_scrape(urls: list[str]) -> dict[str, str]:
+    """Explicit paid-cloud batch scrape. Each uncached URL consumes one credit."""
+    if not urls:
+        return {}
+    out: dict[str, str] = {}
+    misses: list[str] = []
+    for url in urls:
+        cached = _cache_get_markdown("scrape", url)
+        if cached:
+            out[url] = cached
+        else:
+            misses.append(url)
+    if not misses:
+        return out
+    try:
+        results = _get_cloud_app().batch_scrape(
+            misses,
+            formats=["markdown"],
+            only_main_content=True,
+        )
+        pages = getattr(results, "data", None) or []
+        for doc in pages:
+            url = _document_source_url(doc)
+            markdown = getattr(doc, "markdown", None) or ""
+            if url and markdown:
+                out[url] = markdown
+                _cache_set_markdown("scrape", url, markdown)
+    except Exception as e:
+        print(f"    [FC CLOUD BATCH ERROR] {len(misses)} URLs: {e}")
+    return out

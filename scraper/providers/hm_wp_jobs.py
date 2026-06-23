@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from config import REQUEST_TIMEOUT
+from providers._paginate import Page, paginate
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult
 from schema import Portal
 from utils import is_india, job_hash, strip_html
@@ -31,7 +32,6 @@ _HEADERS = {
 }
 
 _INDIA_LOCATION_FILTER = "cou:in"
-_PAGE_SIZE_HINT = 9
 _MAX_PAGES = 1000
 
 
@@ -128,36 +128,46 @@ def _scrape_hm_jobs(portal: Portal, max_jobs: int | None = None) -> list[dict] |
 
     jobs: list[dict] = []
     seen_ids: set[str] = set()
-    page = 1
+    state = {"error_first": False}
 
-    while page <= _MAX_PAGES and len(jobs) < cap:
+    # Page-number API with no total; the shared paginator advances pages and stops
+    # on an empty page or a page whose raw ids are all repeats. We keep an India-
+    # aware `new_on_page == 0` break too (server-side filter can yield a non-India
+    # page). No guessed page size — that was the Zwayam truncation bug.
+    def fetch_page(page: int) -> Page | None:
         payload: dict = {"page": page}
         if india_only:
             payload["locations"] = [_INDIA_LOCATION_FILTER]
-
         try:
             r = session.post(api_url, json=payload, timeout=REQUEST_TIMEOUT)
         except Exception as e:
             _log.warning(f"    [WARN] H&M API request failed page={page} ({company}): {e}")
-            return None if page == 1 else jobs
-
+            state["error_first"] = page == 1
+            return None
         if r.status_code != 200:
             _log.warning(f"    [WARN] H&M API status={r.status_code} page={page} ({company})")
-            return None if page == 1 else jobs
+            state["error_first"] = page == 1
+            return None
         if "json" not in (r.headers.get("Content-Type") or "").lower():
             _log.warning(f"    [WARN] H&M API non-JSON response page={page} ({company})")
-            return None if page == 1 else jobs
-
+            state["error_first"] = page == 1
+            return None
         try:
             data = r.json()
         except Exception:
             _log.warning(f"    [WARN] H&M API invalid JSON page={page} ({company})")
-            return None if page == 1 else jobs
-
+            state["error_first"] = page == 1
+            return None
         batch = data.get("jobs") or []
-        if not isinstance(batch, list) or not batch:
-            break
+        return Page(items=batch if isinstance(batch, list) else [])
 
+    def _raw_id(raw: dict) -> str:
+        return str(raw.get("sr_id") or raw.get("id") or id(raw)) if isinstance(raw, dict) else str(id(raw))
+
+    for batch in paginate(fetch_page, start=1, step=1, max_pages=_MAX_PAGES, id_of=_raw_id):
+        if len(jobs) >= cap:
+            break
+        page_marker = api_url
         new_on_page = 0
         for raw in batch:
             if not isinstance(raw, dict):
@@ -180,7 +190,7 @@ def _scrape_hm_jobs(portal: Portal, max_jobs: int | None = None) -> list[dict] |
 
             job_id = str(raw.get("sr_id") or raw.get("id") or "").strip()
             if not job_id:
-                job_id = job_hash(title, apply_url or f"{api_url}#page={page}")
+                job_id = job_hash(title, apply_url or f"{page_marker}#{title}")
             if job_id in seen_ids:
                 continue
             seen_ids.add(job_id)
@@ -204,15 +214,14 @@ def _scrape_hm_jobs(portal: Portal, max_jobs: int | None = None) -> list[dict] |
             if len(jobs) >= cap:
                 break
 
+        # India-aware end signal: server-side filter can return a page with no
+        # India rows even though raw ids are new. (Empty pages and repeated-id
+        # pages are stopped by the paginator itself.)
         if new_on_page == 0:
             break
 
-        # Deterministic stop for final page in current API shape.
-        if len(batch) < _PAGE_SIZE_HINT:
-            break
-
-        page += 1
-
+    if not jobs and state["error_first"]:
+        return None  # first page unreachable -> treat as provider failure
     scope_label = "India" if india_only else "global"
     _log.info(f"    {len(jobs)} {scope_label} jobs via H&M WP API ({company})")
     return jobs

@@ -6,6 +6,5 @@
     <mapping directory="$PROJECT_DIR$/../True_Yodha/agency-agents" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../True_Yodha/docs/free-llm-api-resources" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../True_Yodha/frontend" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/Archon" vcs="Git" />
   </component>
 </project>

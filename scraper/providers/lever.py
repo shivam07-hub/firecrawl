@@ -59,9 +59,12 @@ def scrape_lever(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
 
     jobs = []
     for p in postings:
-        location = (p.get('categories') or {}).get('location') or ''
+        cats = p.get('categories') or {}
+        location = cats.get('location') or ''
         if india_only and not any(kw in location.lower() for kw in _INDIA_KEYWORDS):
             continue
+        # Lever exposes every city for multi-location postings in allLocations (firecrawl #6)
+        all_locs = [l for l in (cats.get('allLocations') or [location]) if isinstance(l, str) and l.strip()]
 
         jd_plain = p.get('descriptionPlain') or strip_html(p.get('description') or '')
         for lst in (p.get('lists') or []):
@@ -78,6 +81,7 @@ def scrape_lever(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
             'business_unit':   (p.get('categories') or {}).get('team'),
             'raw_jd_text':     jd_plain.strip(),
             'location_city':   location,
+            'locations':       all_locs,
             'date_posted':     None,
             'source_platform': 'Lever',
             'industry':        portal.get('industry', ''),

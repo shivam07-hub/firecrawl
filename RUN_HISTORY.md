@@ -1,9 +1,227 @@
-/cla# RUN HISTORY
+# RUN HISTORY
 
 Chronological log of scraper sessions, data quality incidents, and resolved bugs.
 Current architecture and run commands live in `CLAUDE.md`. Portal config lives in `KNOWN_PORTALS.md`.
 
 ---
+
+## Session 2026-06-13 — Scale-out discovery + board harvester (+33 portals)
+
+**Objective:** spend expiring Firecrawl cloud credits on credit-bound discovery; grow company coverage toward 10k via Tier-1/2 college recruiters. (Question-bank handed to Codex.)
+
+**Built `scraper/discovery/`:**
+- `phase0_discover.py` (cloud credits, `cloud_extract`) — 41 college recruiter pages → 1,146 unique companies.
+- `resolve_ats.py` + `ats_probes.py` (FREE) — probe Greenhouse/Lever/Ashby/SmartRecruiters; 93 matched, 32 India.
+- `harvest_boards.py` (FREE, the 10k lever) — `site:`-collected tokens → probe → India-filter → promote; 29 tokens → 23 net-new India boards (~80% conversion).
+- `promote_candidates.py` — token+name dedup vs live portals.
+
+**Promoted (274 → 307 active, +33 net-new India companies), all validated via `dispatch_scrape`:**
+- College→resolve: Zinnov, Tekion, WorldQuant, Da Vinci Derivatives, Arista Networks, Refyne, Cars24, NoBroker, Lendingkart, Newton School, Leucine, Intervue, GreyCampus, Carbynetech, AdaptNXT, Safe Security, Auxia, Lyric.
+- Harvest: Brillio(80), AHEAD(62), Beghou(54), NETGEAR(22), Atomicwork(21), LinkedIn(18), 6sense(17), Coupa(11), Pebl(8), Meltplan(6), Redpin(4), Resilinc(3), Truecaller(2), SentiLink(2), Binance(1).
+- Parked ⚠️ (identity unverified): TSMG, Genesis, Verve.
+
+**Learnings:**
+- Dedup MUST be by `(ats, token)` not name — suffixes ("Inc") create false net-new and re-trigger generic-duplicate-masking.
+- Slug collisions real (`tcs`→Thornbury, `linkedin`→"LI Test Company") — confirm board name before promoting.
+- SmartRecruiters/some Lever surface staffing/aggregator/microtask boards (Squircle, CapitalAim, TMI, Welocalize, Weekday) — quality-gate before promotion.
+- `--probe-crack` on a STALE diagnosis (June 4) wasted credits re-discovering 10 already-cracked (June 9-11) companies → regenerate diagnosis first.
+- Ashby routing is name-hardcoded in `portal_reader.py` dicts.
+
+Full detail: `docs/handoffs/HANDOFF_scaleout_discovery_20260613.md`. 10k execution sub-tasks (2a/2b/2c): `CLAUDE.md` PENDING WORK §2.
+
+---
+
+## Session 2026-06-11 — NEEDS_CRACK Task 2 closed
+
+**Objective:** Convert the Firecrawl-discovered lead list into durable saved routes or explicit evidence-based dispositions.
+
+**Promoted routes:**
+- Sanas → Rippling dehydrated-state parser.
+- Premji Invest → Zoho Recruit.
+- SBI Mutual Fund → Workline listing JSON + detail HTML.
+- Lodha Group → PeopleStrong listing/detail APIs.
+- UBS → BrassRing TGNewUI tokenized search.
+- BDO India → dynamically discovered Kentico Careers JSON API; cloud map retained only as fallback.
+- Simon-Kucher → Cornerstone OnDemand public search/detail APIs.
+- Virtusa → explicit Firecrawl Cloud map + cached batch detail scrape.
+- Kearney → Yello/Recsolu direct board.
+
+**Merged/closed/parked:**
+- EY Parthenon merged into EY India; Strategy& merged into PwC India.
+- CK Birla, HCL Software, Mu Sigma, Takshashila and TAS have no automatable public feed.
+- Mankind, L.E.K., FinIQ and Ola were verified with no current qualifying India jobs.
+- Mondee's Ashby board is expired; TotalEnergies remains France-scoped.
+- Avendus, IndusInd, Uber and Walmart moved to the parked list with concrete revisit conditions.
+
+**Verification:**
+- Direct provider parser suite and routing suite passed.
+- Live probes returned full JDs for Sanas, Premji, SBI MF, UBS, Virtusa and Lodha.
+- Simon-Kucher and Kearney direct APIs correctly returned `no_jobs` for India rather than route failures.
+- Firecrawl cloud is explicit and cached; `crawl()` remains unavailable.
+
+---
+
+## Session 2026-06-11 — Upskilling question-bank pilot implemented
+
+**Scope:** Built the smallest isolated end-to-end pipeline for the existing
+Supabase `skill_questions` table. No job scraping or enrichment behavior was
+changed, and the out-of-scope `True_Yodha` directory was not accessed.
+
+**Pilot skills:**
+- Machine Learning (`skills.id=2772`)
+- Product Strategy (`skills.id=20985`)
+- Management Consulting (`skills.id=21871`)
+- Financial Accounting (`skills.id=28333`)
+
+**Implementation:**
+- Added `scraper/question_bank/` with a dry-run-by-default CLI, four-skill
+  manifest, transient JSONL ingestion, local LM Studio normalizer, independent
+  verifier prompt, deterministic option shuffling, structural validation,
+  exact/near dedupe, resumable copyright-safe JSONL checkpoints, diagnostics,
+  and guarded Supabase upserts.
+- Added `QUESTION_NORMALIZER_MODEL` and `QUESTION_VERIFIER_MODEL` support. A
+  distinct verifier model is preferred; same-model fallback is recorded locally.
+- Added source-prose safeguards: candidate text is hashed and discarded, raw
+  input lives under git-ignored `scraper/question_bank_inputs/`, and checkpoints
+  reject copyright-sensitive field names.
+- Existing active rows cannot be downgraded or overwritten; review rows may be
+  promoted after successful verification.
+- Added design, implementation plan, and operator runbook.
+
+**Verification:**
+- `pytest -q scraper/tests/question_bank` → 40 passed.
+- Live `python -m question_bank.cli --preflight-only` passed.
+- Live table count remained `0`; all four exact `skills.taxonomy_key` values
+  resolved.
+- LM Studio and local Firecrawl were offline, so no real-model normalization,
+  scrape ingestion, or Supabase publish was performed.
+
+**Next operational step:**
+- Add provenance-bearing candidate JSONL under
+  `scraper/question_bank_inputs/`, load the preferred two local LM Studio
+  models, run a dry-run, inspect `review` diagnostics and explanations, then
+  publish explicitly.
+
+---
+
+## Session 2026-05-21 — Firecrawl cloud endpoint hunt: high-value product companies
+
+**Scope:** User provided Firecrawl cloud key and approved broader search usage for cracking respectable non-services companies hiring in India. Discovery used Firecrawl search/map/scrape as a microscope, then promoted durable direct routes where plain HTTP/ATS endpoints worked.
+
+**Firecrawl discovery evidence:**
+- `Palo Alto Networks`: Firecrawl search/map found India Radancy pages under `jobs.paloaltonetworks.com`; direct listing page exposes `data-total-job-results="104"` and `/en/job/{city}/{slug}/47263/{job_id}` links.
+- `CrowdStrike`: Firecrawl search/scrape surfaced `crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers`; Workday CXS route verified directly.
+- `PayPal`: Firecrawl scrape surfaced `paypal.eightfold.ai/careers?location=india&domain=paypal.com`; PCSX route verified directly.
+- `Nutanix`: Firecrawl search found `careers.nutanix.com` and `nutanix.dejobs.org`; direct RSS feed verified at `https://nutanix.dejobs.org/jobs/feed/rss?location=India`.
+- `Rippling`: Firecrawl search found `rippling.com/careers/open-roles`; direct Next.js payload and `ats.rippling.com` detail pages verified directly.
+- `Uber`, `Walmart Global Tech`, `HashiCorp`: searched/mapped/scraped within the three-career-page cap; no durable non-Firecrawl ATS route promoted in this pass. HashiCorp now points to IBM careers and was skipped as not matching the non-services/product-company target.
+
+**Direct routes promoted as active (existing providers):**
+- `Databricks` — Greenhouse board `databricks`; 80 India jobs with full JDs.
+- `MongoDB` — Greenhouse board `mongodb`; 51 India jobs with full JDs.
+- `Rubrik` — Greenhouse board `rubrik`; 49 India jobs with full JDs.
+- `Zscaler` — Greenhouse board `zscaler`; 112 India jobs with full JDs.
+- `Twilio` — Greenhouse board `twilio`; 20 India jobs with full JDs.
+- `Okta` — Greenhouse board `okta`; 93 India jobs with full JDs.
+- `Pure Storage` — Greenhouse board `purestorage`; 68 India jobs with full JDs.
+- `Datadog` — Greenhouse board `datadog`; 12 India jobs with full JDs.
+- `Elastic` — Greenhouse board `elastic`; 7 India jobs with full JDs.
+- `CrowdStrike` — Workday CXS `https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers/jobs`; 66 India jobs with full JDs.
+- `PayPal` — PCSX `https://paypal.eightfold.ai/api/pcsx/search?domain=paypal.com&query=&location=india&start=0`; 7 India jobs; detail pages expose JSON-LD JDs.
+
+**Routes captured for provider work before activation:**
+- `Snowflake` — Ashby API `https://api.ashbyhq.com/posting-api/job-board/snowflake`; 13 India jobs; full JD in `descriptionPlain` / `descriptionHtml`.
+- `Confluent` — Ashby API `https://api.ashbyhq.com/posting-api/job-board/confluent`; 15 India jobs; full JD in `descriptionPlain` / `descriptionHtml`.
+- `Rippling` — Next.js listing `__NEXT_DATA__.props.pageProps.jobs.items`; 90 India jobs; detail payload at `ats.rippling.com/rippling/jobs/{uuid}`.
+- `Nutanix` — DirectEmployers RSS `https://nutanix.dejobs.org/jobs/feed/rss?location=India`; 82 India jobs with full descriptions.
+- `Palo Alto Networks` — Radancy/TalentBrew India page `https://jobs.paloaltonetworks.com/en/location/india-jobs/47263/1269750/2`; 104 India jobs; provider needs section29 markup support before activation.
+
+**Docs/data updated:**
+- `KNOWN_PORTALS.md` now records all promoted and captured routes.
+- `scraper/company_industries.json` has industry mappings for the new companies.
+
+**Continuation 2026-05-21 — captured routes activated + Perplexity list processed:**
+- Activated previously captured provider-needed companies so they run in the next normal scrape without Firecrawl:
+  - `Snowflake` and `Confluent` via new `ashby` provider.
+  - `Rippling` via new `rippling` Next.js/ATS detail provider.
+  - `Nutanix` via new `dejobs_rss` provider.
+  - `Palo Alto Networks` via enhanced `talentbrew` provider with section29 listing support.
+- Added direct reusable routes for new Perplexity names not already captured:
+  - Greenhouse: `Anthropic`, `Postman`, `Zuora`, `Cloudflare`, `Point72`.
+  - Workday CXS: `Workday`, `Sprinklr`, `Automation Anywhere`, `Vanguard Group`, `KLA Corporation`, `Carrier Global`.
+  - SmartRecruiters: `Western Digital`.
+  - PCSX: `Infineon Technologies`, `Lam Research`.
+  - SAP Jobs2Web HTML: `Teradyne`, `McDonald's GCC`.
+  - Oracle CE: `Vertiv`.
+  - Ashby: `UiPath`.
+  - Talent500: `Costco Wholesale`.
+  - TalentBrew: `Cargill`.
+  - Classic iCIMS HTML: `JAGGAER`.
+- New/updated providers: `ashby`, `rippling`, `dejobs_rss`, `talent500`, `icims_html`; `greenhouse` now supports content/title India matching for generic-location boards; `talentbrew` now handles Palo Alto section29 cards and Cargill bare result anchors.
+- Not promoted: `Qualtrics` currently returns 0 India jobs from its Phenom SSR search; `MathWorks` direct careers search is Akamai 403 from plain HTTP, so no durable non-Firecrawl endpoint was saved in this pass.
+
+**Validation evidence:**
+- `PYTHONPATH=scraper python3 scraper/test_direct_endpoint_providers.py` ✅
+- `PYTHONPATH=scraper python3 scraper/test_direct_endpoint_routing.py` ✅
+- Live `probe_scrape(..., allow_firecrawl=False, max_jobs=3)` succeeded for every new active company above; all returned direct jobs and JDs. Focused McDonald's probe returned 5/5 JDs; focused JAGGAER probe returned 3/3 JDs.
+
+**Continuation 2026-05-22 — second Firecrawl-assisted product-company sweep:**
+- Used Firecrawl search as discovery only, then promoted only direct, reusable ATS/API routes that run with `allow_firecrawl=False`.
+- Added Greenhouse boards: `Figma`, `GitLab`, `Druva`, `Sumo Logic`, `Netskope`, `HackerRank`, `Observe.ai`, `ClickHouse`, `DAT Freight & Analytics`, `Energy Exemplar`, `AlphaSense India`, `Bluevine India`, `Kaseya`, `NICE`, `Ivalua`, `Abacus Insights`.
+- Added Lever boards: `Mindtickle`, `Zeta`, `JumpCloud`, `Zimperium`, `Hevo Data`, `Acceldata`, `Onehouse`.
+- Added Ashby boards: `Airwallex`, `Notion`, `Atlan`, `Cartesia`, `Fermi AI`, `Flagright`, `Skylo Technologies`, `Cognition`.
+- Added Workday CXS: `ThoughtSpot` (`searchText=India`), `Cohesity` (`locationCountry` India UUID), and `BrowserStack` (`searchText=India`; previously skipped only because no India facet UUID existed).
+- Added Oracle CE: `Icertis` via `Jobs-at-Icertis` finder with `location=India`.
+- Added `Whatfix` via new `trakstar` provider for Trakstar Hire / Recruiterbox server-rendered listing cards and detail JDs.
+- Not promoted in this pass: `Chargebee` (SAP SuccessFactors shell found, no stable direct India listing route yet), `Qualtrics` (0 India jobs at current Phenom SSR endpoint), `MathWorks` (Akamai 403 from plain HTTP), and Conviva-style hits with no current India direct route.
+- Validation: JSON sanity checks passed; `PYTHONPATH=scraper python3 scraper/test_direct_endpoint_providers.py` passed; `PYTHONPATH=scraper python3 scraper/test_direct_endpoint_routing.py` passed; live `probe_scrape(..., allow_firecrawl=False, max_jobs=3)` returned jobs for all second-wave active companies. A Whatfix title parsing defect found during live probing was fixed and re-probed successfully.
+
+**Continuation 2026-05-21 — management-recruiter endpoint capture (discovery-only):**
+- User provided a new list of FMCG/BFSI/new-age/industrial recruiters and approved Firecrawl cloud use for endpoint discovery.
+- Raw Firecrawl evidence saved:
+  - `logs/firecrawl_ats_discovery_mgmt_recruiters_20260521_raw.json`
+  - `logs/firecrawl_ats_discovery_mgmt_recruiters_20260521_scrapes.json`
+  - `logs/firecrawl_ats_discovery_mgmt_recruiters_20260521_validated.json`
+  - Plus focused renders for Clear Darwinbox, HDFC Ergo PeopleStrong, and Modelama Adrenalin.
+- `KNOWN_PORTALS.md` now has a non-active "DISCOVERY CAPTURE — MANAGEMENT RECRUITER ATS ENDPOINTS" section so future runs do not spend Firecrawl credits rediscovering these hosts.
+- Validated capture currently covers 21 findings; these are discovery notes only and are intentionally not parsed as active scraper portals.
+- Cracked direct routes ready for promotion with existing/near-existing providers:
+  - SAP Jobs2Web: `Asian Paints`, `Bajaj Auto` (BACL board), `Sun Pharma`, `Syngene`; `Tata Consumer Products` also works but needs bare `IN` location-token tolerance in the provider.
+  - Workday CXS: `AB InBev`, `Mondelez`, `Kraft Heinz`.
+  - Oracle CE: `Kotak Mahindra Bank` (`hcbt.fa.em2.oraclecloud.com`, site `CX_1001`; alternates `CX`, `CX_1`).
+  - RippleHire: `Axis Bank` and `Tata Steel` routes confirmed, but the existing provider needs support for `jobVoList` plus `/candidate/candidatejobdetail`.
+  - Zoho Recruit SSR: `NPCI` embeds 14 full-JD jobs; provider needs page_id/apply URL generalization beyond ITC.
+  - Astro/static/custom: `Juspay` embeds 7 jobs in Astro props; `Waaree Group` renders 3 static roles.
+- Parked / not active:
+  - `HDFC Ergo` PeopleStrong renders via Firecrawl with full JDs, but the direct API still needs session/payload cracking.
+  - `ClearTax` Darwinbox shows 27 jobs through Firecrawl, but direct API is Cloudflare 403 without cookies.
+  - `Policybazaar` is static role categories plus resume form, not a discrete ATS feed.
+  - `Dabur` was already present as blocked; Firecrawl now renders the page, but it currently shows no jobs.
+  - `Amul / GCMMF`, `Lava International`, and `Modelama Exports` need further portal-specific work or are broken.
+
+**Continuation 2026-05-21 — management-recruiter routes promoted into data flow:**
+- Promoted 14 discovery captures into active scraper routes and ran low-cap scrape-only probes with `SCRAPE_DIAGNOSTICS_DISABLED=1` so trial counts do not become official Supabase health history.
+- New/updated provider behavior:
+  - `sap_jobs2web_html` now accepts bare Jobs2Web `IN` location tokens, needed by Tata Consumer Products.
+  - `ripplehire` now supports the `jobVoList` listing shape and `/candidate/candidatejobdetail` full-JD fetch, needed by Axis Bank and Tata Steel.
+  - `zoho_recruit` now reads `input#jobs` hidden JSON and builds company-specific apply URLs, needed by NPCI.
+  - Added `juspay_astro` for Juspay's Astro-embedded job objects.
+  - Added `waaree_static` for Waaree's rendered static careers page; no discrete ATS API exists.
+- Active rows added:
+  - SAP Jobs2Web: `Asian Paints`, `Bajaj Auto`, `Tata Consumer Products`, `Sun Pharma`, `Syngene`.
+  - Workday CXS: `AB InBev`, `Mondelez`, `Kraft Heinz`.
+  - RippleHire: `Axis Bank`, `Tata Steel`.
+  - Oracle CE: `Kotak Mahindra Bank`.
+  - Custom/static: `NPCI`, `Juspay`, `Waaree Group`.
+- Low-cap outputs with JD coverage were written under `All_CSV_Outputs_thru_firecrawl/*/Outputs/2026_05_21/jobs.json`; all 14 promoted companies produced rows with non-empty `job_description`.
+- Still parked and why:
+  - `HDFC Ergo`: Firecrawl renders PeopleStrong job pages, but direct API returns session-expired/500 without the correct browser session + payload contract.
+  - `ClearTax / Clear`: Darwinbox API endpoint is known, but Cloudflare blocks direct POST without live browser cookies.
+  - `Policybazaar`: careers page exposes generic categories and a resume form, not discrete job postings.
+  - `Dabur`: page renders now, but currently reports no matching jobs.
+  - `Amul / GCMMF`: custom ASP.NET portal requires postback/session handling; direct current-vacancies table is not exposed in static HTML.
+  - `Lava International`: Next.js joblist route found, but the listing data API is still hidden in JS bundles.
+  - `Modelama Exports`: Adrenalin CandidateMAX renders an internal system error.
 
 ## Session 2026-05-13 — Firecrawl-as-microscope direct route promotion
 
@@ -447,7 +665,7 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 **Phase 1 run results:**
 - `python main.py --skip-enrich` completed. 94 output files, 2,376 total jobs, 1,730 with `job_description`.
-- Output path: `/Users/incognito/Mirror CV/firecrawl/All_CSV_Outputs_thru_firecrawl/` (set via `OUTPUT_BASE` in .env)
+- Output path: `/Users/incognito/firecrawl_Supabase/All_CSV_Outputs_thru_firecrawl/` (set via `OUTPUT_BASE` in .env)
 
 ---
 

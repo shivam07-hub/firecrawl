@@ -11,18 +11,25 @@ from providers.darwinbox import DarwinboxProvider
 from providers.google_careers import GoogleCareersProvider
 from providers.mynexthire import MyNextHireProvider
 from providers.icims_custom import IcimsCustomProvider
+from providers.icims_html import IcimsHTMLProvider
+from providers.juspay_astro import JuspayAstroProvider
 from providers.goldman_higher import GoldmanHigherProvider
 from providers.intouchcx import IntouchCXProvider
 from providers.microsoft_careers import MicrosoftCareersProvider
 from providers.mckinsey import McKinseyProvider
 from providers.aditya_birla import AdityaBirlaProvider
 from providers.apple_jobs import AppleJobsProvider
+from providers.ashby import AshbyProvider
 from providers.blackbrix_jobs import BlackBrixJobsProvider
 from providers.cognizant_xml import CognizantXMLProvider
+from providers.cornerstone import CornerstoneProvider
+from providers.dejobs_rss import DejobsRSSProvider
 from providers.deshaw_india import DEShawIndiaProvider
 from providers.pcsx import PCSXProvider
 from providers.taleo import TaleoProvider
 from providers.talentbrew import TalentBrewProvider
+from providers.talent500 import Talent500Provider
+from providers.trakstar import TrakstarProvider
 from providers.phenom_ssr import PhenomSSRProvider
 from providers.siemens_externaljobs import SiemensExternalJobsProvider
 from providers.deloitte_usi import DeloitteUSIProvider
@@ -30,7 +37,10 @@ from providers.yello import YelloProvider
 from providers.sap_jobs2web_html import SAPJobs2WebHTMLProvider
 from providers.tata_elxsi import TataElxsiProvider
 from providers.vector_consulting import VectorConsultingProvider
+from providers.waaree_static import WaareeStaticProvider
 from providers.pepsico_jobs_api import PepsiCoJobsAPIProvider
+from providers.publicis_sapient import PublicisSapientProvider
+from providers.rippling import RipplingProvider
 from providers.skima_careers import SkimaCareersProvider
 from providers.hm_wp_jobs import HMWordPressJobsProvider
 from providers.hilabs_careers import HiLabsCareersProvider
@@ -46,6 +56,13 @@ from providers.phenom import PhenomProvider
 from providers.smartrecruiters import SmartRecruitersProvider
 from providers.workday import WorkdayProvider
 from providers.zoho_recruit import ZohoRecruitProvider
+from providers.msci_algolia import MsciAlgoliaProvider
+from providers.meta_graphql import MetaGraphQLProvider
+from providers.peoplestrong import PeopleStrongProvider
+from providers.ubs_brassring import UBSBrassRingProvider
+from providers.virtusa_firecrawl import VirtusaFirecrawlProvider
+from providers.workline import WorklineProvider
+from providers.bdo_firecrawl import BDOFirecrawlProvider
 
 _FIRECRAWL_PROVIDER = FirecrawlJSProvider()
 _GENERIC_PROVIDER = GenericJSONProvider()
@@ -59,6 +76,8 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "eightfold": EightfoldProvider(),
     "google_careers": GoogleCareersProvider(),
     "icims_custom": IcimsCustomProvider(),
+    "icims_html": IcimsHTMLProvider(),
+    "juspay_astro": JuspayAstroProvider(),
     "goldman_higher": GoldmanHigherProvider(),
     "intouchcx": IntouchCXProvider(),
     "microsoft_careers": MicrosoftCareersProvider(),
@@ -67,13 +86,18 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "mckinsey": McKinseyProvider(),
     "aditya_birla": AdityaBirlaProvider(),
     "apple_jobs": AppleJobsProvider(),
+    "ashby": AshbyProvider(),
     "blackbrix_jobs": BlackBrixJobsProvider(),
     "cognizant_xml": CognizantXMLProvider(),
+    "cornerstone": CornerstoneProvider(),
     "deshaw_india": DEShawIndiaProvider(),
+    "dejobs_rss": DejobsRSSProvider(),
     "pinpoint": PinpointProvider(),
     "pcsx": PCSXProvider(),
     "taleo": TaleoProvider(),
     "talentbrew": TalentBrewProvider(),
+    "talent500": Talent500Provider(),
+    "trakstar": TrakstarProvider(),
     "phenom_ssr": PhenomSSRProvider(),
     "siemens_externaljobs": SiemensExternalJobsProvider(),
     "deloitte_usi": DeloitteUSIProvider(),
@@ -81,7 +105,10 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "sap_jobs2web_html": SAPJobs2WebHTMLProvider(),
     "tata_elxsi": TataElxsiProvider(),
     "vector_consulting": VectorConsultingProvider(),
+    "waaree_static": WaareeStaticProvider(),
     "pepsico_jobs_api": PepsiCoJobsAPIProvider(),
+    "publicis_sapient": PublicisSapientProvider(),
+    "rippling": RipplingProvider(),
     "skima_careers": SkimaCareersProvider(),
     "hm_wp_jobs": HMWordPressJobsProvider(),
     "hilabs_careers": HiLabsCareersProvider(),
@@ -90,6 +117,13 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "zwayam": ZwayamProvider(),
     "ripplehire": RippleHireProvider(),
     "zoho_recruit": ZohoRecruitProvider(),
+    "msci_algolia": MsciAlgoliaProvider(),
+    "meta_graphql": MetaGraphQLProvider(),
+    "peoplestrong": PeopleStrongProvider(),
+    "ubs_brassring": UBSBrassRingProvider(),
+    "virtusa_firecrawl": VirtusaFirecrawlProvider(),
+    "workline": WorklineProvider(),
+    "bdo_firecrawl": BDOFirecrawlProvider(),
 }
 
 

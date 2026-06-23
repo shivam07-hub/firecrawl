@@ -30,8 +30,9 @@ class Portal(TypedDict, total=False):
                         # | skima_careers | hm_wp_jobs | deloitte_usi
                         # | apple_jobs | cognizant_xml | tata_elxsi | vector_consulting
                         # | deshaw_india | google_careers | intouchcx | microsoft_careers
-                        # | hilabs_careers | blackbrix_jobs
+                        # | hilabs_careers | blackbrix_jobs | icims_html | trakstar
                         # | sap | oracle | eightfold | avature | talentbrew | custom | other
+                        # | ashby | rippling | dejobs_rss | talent500
     endpoint:     str   # URL to hit
     careers_url:  str   # human-facing careers page (fallback / reference)
     js_required:  bool  # True → route through FirecrawlJSProvider
@@ -54,19 +55,25 @@ class Portal(TypedDict, total=False):
 
     # Greenhouse-specific
     board_token:  str
+    greenhouse_match_content: bool
 
     # Lever-specific
     lever_slug:   str
 
+    # Talent500-specific
+    talent500_company_slug: str
+
     # Phenom-specific (no extra fields beyond endpoint)
 
-# Ordered canonical field list — must match Supabase `jobs` table column order.
-# Lifecycle columns (first_seen, last_seen, is_active, change_fingerprint) are
-# Supabase-managed and not included here.
+# Ordered canonical field list — the schema of the written jobs.json / jobs.csv.
+# Mirrors the Supabase `jobs` table columns EXCEPT `skills` (structured enrichment
+# output consumed for job_skills, not a jobs column). Lifecycle columns (first_seen,
+# last_seen, is_active, change_fingerprint) are Supabase-managed and not included here.
 CANONICAL_FIELDS: list[str] = [
     "job_id",
     "job_title",
-    "job_description",
+    "job_description",         # full raw JD (kept for Tailor CV / detail view)
+    "job_summary",             # LLM-generated ≤100-word clean summary (card body)
     "industry",
     "industry_group",
     "company_name",
@@ -76,10 +83,24 @@ CANONICAL_FIELDS: list[str] = [
     "location_country",
     "location_mode",
     "location_quality",
+    "locations",
     "apply_url",
     "role_domain",
+    # Skills: ONE flat list. `skills` carries the structured {name, required_level}
+    # objects consumed by csv_importer to write job_skills (the FK source of truth).
+    # `main_skills` mirrors the same skill names (back-compat column True_Yodha reads
+    # for chips); `side_skills` is deprecated and always [] (no primary/side split).
+    # `skills` is a JSON-output field only — it is NOT a `jobs` table column
+    # (see csv_importer._JOB_FIELDS, which gates the actual jobs upsert).
+    "skills",
     "main_skills",
     "side_skills",
+    # Structured facts surfaced as card chips (kept OUT of the JD blob).
+    "date_posted",             # original posting date string from the ATS
+    "seniority_level",         # e.g. Entry / Mid / Senior (provider-supplied)
+    "work_mode",               # provider's own onsite/hybrid/remote signal
+    "min_years_experience",    # int or '' — "2–4 yrs" chip
+    "max_years_experience",    # int or ''
     "batch_date",
 ]
 
@@ -93,7 +114,9 @@ RAW_FIELD_MAP: dict[str, str] = {
 }
 
 # Fields populated by LLM enrichment (Phase 2 of the pipeline).
-SKILL_FIELDS: tuple[str, ...] = ("main_skills", "side_skills")
+# `skills` (structured {name, required_level}) is the real output; `main_skills`
+# is the back-compat name mirror; `side_skills` is deprecated (always []).
+SKILL_FIELDS: tuple[str, ...] = ("skills", "main_skills", "side_skills")
 
 # Aliases from pre-Dump4 schemas — used by csv_importer.normalize_job for
 # backward-compatible reading of older dump files.

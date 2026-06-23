@@ -163,6 +163,36 @@ nodes:
     timeout: 300000    # 5 minutes
 
   # ────────────────────────────────────────────────────────────────────────────
+  # LAYER 3.5 — Skill definitions (self-healing, threshold-gated)
+  # Requires: upload done (new jobs -> new skills referenced in job_skills)
+  # Fills public.skills.description from Lightcast skill-page <meta> via plain HTTP
+  # (0 Firecrawl credits, no Docker/LM needed). No-op until >= --threshold skills
+  # are missing a description, so this is cheap on most weeks.
+  # One-time prerequisite: run scraper/sql/add_skills_description.sql in Supabase.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  - id: skill-descriptions
+    bash: |
+      echo "════════════════════════════════════"
+      echo "LAYER 3.5 — SKILL DEFINITIONS"
+      echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "════════════════════════════════════"
+      cd scraper && python skill_descriptions.py --write-supabase --threshold 50 2>&1
+      EXIT=$?
+      echo "────────────────────────────────────"
+      echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"
+      # exit 2 = migration not yet applied; warn but do not fail the whole run
+      if [ $EXIT -eq 2 ]; then
+        echo "⚠️  skills.description migration not applied — see add_skills_description.sql"
+      elif [ $EXIT -ne 0 ]; then
+        echo "❌ Skill-definitions step exited with code $EXIT"
+        exit $EXIT
+      fi
+      echo "✅ Skill-definitions step complete"
+    depends_on: [upload]
+    timeout: 600000    # 10 minutes — ~0.25s/skill, no-op most weeks
+
+  # ────────────────────────────────────────────────────────────────────────────
   # LAYER 4 — Run Summary (AI)
   # Reads output from all phases, produces a concise report + action items
   # Uses haiku — fast and cheap for structured summarisation

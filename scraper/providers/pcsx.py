@@ -113,6 +113,7 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
                 continue
 
             locs = p.get("locations") or p.get("standardizedLocations") or []
+            locs = [l for l in locs if isinstance(l, str) and l.strip()]
             loc = locs[0] if locs else ""
             if isinstance(loc, str):
                 # strip ATS prefix e.g. "Field Worker- IND Cx_MumbaiRSO, Mumbai, ..."
@@ -129,6 +130,7 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
                 "business_unit":   p.get("department"),
                 "raw_jd_text":     jd,
                 "location_city":   loc,
+                "locations":       locs,
                 "date_posted":     str(p.get("postedTs", "")),
                 "source_platform": "PhenomCX",
                 "industry":        portal.get("industry", ""),

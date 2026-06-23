@@ -36,9 +36,34 @@ _LISTING_LINK_RE_RADANCY = re.compile(
     r'<a[^>]+class="[^"]*(?:\bsr-job-item__link\b|\bsearch-results-link\b)[^"]*"[^>]+href="(?P<href>/job/[^"]+/(?P<company_id>\d+)/(?P<job_id>\d+))"[^>]*>(?P<body>.*?)</a>',
     re.IGNORECASE | re.DOTALL,
 )
+_LISTING_LINK_RE_SECTION29 = re.compile(
+    r'<a[^>]+class="[^"]*\bsection29__search-results-link\b[^"]*"[^>]+href="(?P<href>/(?:[a-z]{2}/)?job/[^"]+/(?P<company_id>\d+)/(?P<job_id>\d+))"[^>]*>(?P<body>.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_LISTING_LINK_RE_BARE = re.compile(
+    r'<a[^>]+href="(?P<href>/(?:[a-z]{2}/)?job/[^"]+/(?P<company_id>\d+)/(?P<job_id>\d+))"[^>]*data-job-id="(?P<data_job_id>[^"]+)"[^>]*>(?P<body>.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_LISTING_CARD_RE_RADANCY = re.compile(
+    r'<li[^>]+class="[^"]*\bjob-card\b[^"]*"[^>]*>(?P<body>.*?)</li>',
+    re.IGNORECASE | re.DOTALL,
+)
+_LISTING_CARD_LINK_RE_RADANCY = re.compile(
+    r'<a[^>]+class="[^"]*\bjob-card__title\b[^"]*"[^>]+href="(?P<href>/job/[^"]+/(?P<company_id>\d+)/(?P<job_id>\d+))"[^>]*>(?P<title>.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
 _H2_RE = re.compile(r"<h2[^>]*>(?P<title>.*?)</h2>", re.IGNORECASE | re.DOTALL)
+_HEADING_RE = re.compile(r"<h[23][^>]*>(?P<title>.*?)</h[23]>", re.IGNORECASE | re.DOTALL)
 _LOC_RE = re.compile(
     r'<span[^>]*class="[^"]*\bjob-location\b[^"]*"[^>]*>(?P<loc>.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+_CARD_LOC_RE = re.compile(
+    r'<span[^>]*class="[^"]*\blocation\b[^"]*"[^>]*>(?P<loc>.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+_SECTION29_LOC_RE = re.compile(
+    r'<span[^>]*class="[^"]*\bsection29__result-location\b[^"]*"[^>]*>(?P<loc>.*?)</span>',
     re.IGNORECASE | re.DOTALL,
 )
 _TOTAL_PAGES_RE = re.compile(r'data-total-pages="(?P<n>\d+)"', re.IGNORECASE)
@@ -185,6 +210,86 @@ def _extract_listing_items(listing_html: str) -> list[dict]:
                 "listing_loc": listing_loc,
             }
         )
+
+    # Pattern D: newer TalentBrew section29 cards (Palo Alto Networks).
+    for m in _LISTING_LINK_RE_SECTION29.finditer(listing_html):
+        job_id = (m.group("job_id") or "").strip()
+        href = (m.group("href") or "").strip()
+        body = m.group("body") or ""
+        if not job_id or not href or job_id in seen:
+            continue
+        seen.add(job_id)
+
+        title_m = _H2_RE.search(body)
+        title = strip_html(_html.unescape(title_m.group("title") if title_m else body))
+        if not title:
+            continue
+
+        loc_m = _SECTION29_LOC_RE.search(body)
+        listing_loc = strip_html(_html.unescape(loc_m.group("loc") if loc_m else ""))
+
+        items.append(
+            {
+                "job_id": job_id,
+                "href": href,
+                "title": title,
+                "listing_loc": listing_loc,
+            }
+        )
+
+    # Pattern E: newer Radancy cards (Arm) using li.job-card + a.job-card__title.
+    for card_m in _LISTING_CARD_RE_RADANCY.finditer(listing_html):
+        body = card_m.group("body") or ""
+        link_m = _LISTING_CARD_LINK_RE_RADANCY.search(body)
+        if not link_m:
+            continue
+        job_id = (link_m.group("job_id") or "").strip()
+        href = (link_m.group("href") or "").strip()
+        if not job_id or not href or job_id in seen:
+            continue
+
+        title = strip_html(_html.unescape(link_m.group("title") or ""))
+        if not title:
+            continue
+
+        seen.add(job_id)
+        loc_m = _CARD_LOC_RE.search(body)
+        listing_loc = strip_html(_html.unescape(loc_m.group("loc") if loc_m else ""))
+
+        items.append(
+            {
+                "job_id": job_id,
+                "href": href,
+                "title": title,
+                "listing_loc": listing_loc,
+            }
+        )
+
+    # Pattern F: plain TalentBrew result anchors with h3 + job-location (Cargill).
+    for m in _LISTING_LINK_RE_BARE.finditer(listing_html):
+        job_id = (m.group("job_id") or m.group("data_job_id") or "").strip()
+        href = (m.group("href") or "").strip()
+        body = m.group("body") or ""
+        if not job_id or not href or job_id in seen:
+            continue
+
+        title_m = _HEADING_RE.search(body)
+        title = strip_html(_html.unescape(title_m.group("title") if title_m else body))
+        if not title:
+            continue
+
+        seen.add(job_id)
+        loc_m = _LOC_RE.search(body)
+        listing_loc = strip_html(_html.unescape(loc_m.group("loc") if loc_m else ""))
+
+        items.append(
+            {
+                "job_id": job_id,
+                "href": href,
+                "title": title,
+                "listing_loc": listing_loc,
+            }
+        )
     return items
 
 
@@ -224,10 +329,22 @@ def _parse_location_from_ld(ld: dict, fallback: str) -> str:
             city = (addr.get("addressLocality") or "").strip()
             region = (addr.get("addressRegion") or "").strip()
             country = (addr.get("addressCountry") or "").strip()
+            if country.upper() == "IN":
+                country = "India"
             parts = [p for p in (city, region, country) if p]
             if parts:
                 return ", ".join(parts)
     return fallback or "India"
+
+
+def _compatible_detail_title(listing_title: str, detail_title: str) -> bool:
+    listing = re.sub(r"\s+", " ", listing_title or "").strip().lower()
+    detail = re.sub(r"\s+", " ", detail_title or "").strip().lower()
+    if not detail:
+        return False
+    if not listing:
+        return True
+    return listing in detail or detail in listing
 
 
 def _extract_adp_description(job_html: str) -> str:
@@ -290,6 +407,7 @@ def _scrape_talentbrew(portal: Portal, max_jobs: int | None = None) -> list[dict
 
             job_url = urljoin(base, item["href"])
             title = item["title"]
+            listing_title = title
             listing_loc = item.get("listing_loc", "")
 
             raw_jd = ""
@@ -304,7 +422,9 @@ def _scrape_talentbrew(portal: Portal, max_jobs: int | None = None) -> list[dict
                     if ld:
                         raw_jd = strip_html(ld.get("description", "") or "")
                         location = _parse_location_from_ld(ld, location)
-                        title = (ld.get("title") or title).strip() or title
+                        ld_title = (ld.get("title") or "").strip()
+                        if _compatible_detail_title(listing_title, ld_title):
+                            title = ld_title or title
                     apply_m = _APPLY_URL_RE.search(job_html)
                     if apply_m:
                         apply_url = _html.unescape(apply_m.group("url") or apply_url)
@@ -319,11 +439,11 @@ def _scrape_talentbrew(portal: Portal, max_jobs: int | None = None) -> list[dict
                         loc_m = _DETAIL_LOC_RE.search(job_html)
                         if loc_m:
                             location = strip_html(_html.unescape(loc_m.group("loc") or "")).strip() or location
-                    if title == item["title"]:
+                    if title == listing_title:
                         h1_m = _DETAIL_HEAD_RE.search(job_html)
                         if h1_m:
                             parsed_title = strip_html(_html.unescape(h1_m.group("title") or "")).strip()
-                            if parsed_title:
+                            if _compatible_detail_title(listing_title, parsed_title):
                                 title = parsed_title
                     if apply_url == job_url:
                         apply_m_adp = _APPLY_URL_RE_ADP.search(job_html)

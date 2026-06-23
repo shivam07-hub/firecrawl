@@ -12,8 +12,11 @@ from __future__ import annotations
 import html
 import json
 import logging
+import re
+from urllib.parse import urlsplit
 
 import requests
+from bs4 import BeautifulSoup
 
 from schema import Portal
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
@@ -34,7 +37,21 @@ _JOBS_ARRAY_START = "[{&#34;Remote_Job&#34;"
 
 
 def _parse_embedded_jobs(page_html: str) -> list[dict]:
+    soup = BeautifulSoup(page_html, "html.parser")
+    for node in soup.find_all("input", {"type": "hidden"}):
+        value = node.get("value") or ""
+        if not value or "Posting_Title" not in value or "Job_Description" not in value:
+            continue
+        try:
+            data = json.loads(html.unescape(value))
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            continue
+
     idx = page_html.find(_JOBS_ARRAY_START)
+    if idx < 0:
+        idx = page_html.find("[{&#34;")
     if idx < 0:
         return []
     chunk = page_html[idx : idx + 500_000]
@@ -46,6 +63,14 @@ def _parse_embedded_jobs(page_html: str) -> list[dict]:
         return json.loads(decoded[: end + 2])
     except json.JSONDecodeError:
         return []
+
+
+def _build_apply_url(portal: Portal, job_id: str) -> str:
+    page_id = str(portal.get("zoho_page_id") or _PAGE_ID).strip()
+    endpoint = (portal.get("endpoint") or "").strip()
+    parts = urlsplit(endpoint)
+    root = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "https://recruitment.itcportal.com"
+    return f"{root}/recruit/SingleJobDetail.na?sys_id={job_id}&page_id={page_id}"
 
 
 class ZohoRecruitProvider:
@@ -110,10 +135,7 @@ class ZohoRecruitProvider:
                 "company_name": company,
                 "industry": industry,
                 "location_raw": location_raw,
-                "apply_url": (
-                    f"https://recruitment.itcportal.com/recruit/SingleJobDetail.na"
-                    f"?sys_id={job_id}&page_id={_PAGE_ID}"
-                ),
+                "apply_url": _build_apply_url(portal, job_id),
                 "source_api_url": endpoint,
             })
 

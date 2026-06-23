@@ -1,0 +1,24 @@
+# Career Ops candidate profile — edit freely. Drives both the heuristic
+# prefilter weights (prefilter.py) and the LLM evaluation lens (prompts.py).
+full_name: Shivam Pathak
+location: Delhi NCR (Noida / Gurugram / Delhi), India
+work_mode: hybrid or onsite NCR; open to Hyderabad / Bangalore
+salary: not specified (target a step up from current GTM BDM level)
+superpower: >
+  GTM + Data & AI solutioning for GCCs — turns transformation narratives into
+  qualified pipeline and multi-million-dollar proposals; MBA (IIM-L) + engineering background;
+  builder/operator who has scaled a product 0->10k users and ₹10L->₹2Cr revenue.
+career_goal: >
+  Move into strategy / consulting / GTM leadership in Data & AI — pre-sales,
+  solution consulting, growth strategy, or product roles at top consulting / tech firms.
+deal_breakers: >
+  Not interested in deep pure software-engineering / hardcore coding roles,
+  tax/payroll/audit-adjacent roles, or roles requiring relocation outside India.
+target_roles:
+  - GTM / Business Development Manager
+  - Pre-sales / Solution Consultant
+  - Strategy & Management Consultant
+  - Data & Analytics / Business Analyst
+  - Product Manager
+  - Growth / Sales Strategy
+  - Customer Success / Value Consultant

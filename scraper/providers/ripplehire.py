@@ -12,6 +12,8 @@ Pattern:
 
 import json
 import logging
+import re
+from urllib.parse import urlencode
 
 import requests
 
@@ -22,6 +24,10 @@ from utils import is_india, strip_html
 
 _log = logging.getLogger("mirror")
 _PAGE_SIZE = 50
+_NON_INDIA_LOCATION_RE = re.compile(
+    r"\b(united states|usa|canada|singapore|malaysia|australia|germany|france|uk|united kingdom)\b",
+    re.IGNORECASE,
+)
 
 
 _HEADERS = {
@@ -104,72 +110,19 @@ def _scrape_ripplehire(portal: Portal, max_jobs: int | None = None) -> list[dict
             _log.error(f"    [ERROR] RippleHire {company} page={page}: {e}")
             return jobs or None
 
-        # Response: {"response": {"docs": [...], "numFound": N}} or {"docs": [...]}
-        response_obj = payload.get("response") or payload
-        docs = response_obj.get("docs") or response_obj.get("jobs") or []
+        docs = _extract_listing_docs(payload)
         if not docs:
             break
 
         for doc in docs:
-            title = (
-                doc.get("jobTitle")
-                or doc.get("title")
-                or doc.get("job_title")
-                or ""
-            ).strip()
-            if not title:
+            detail_payload = _fetch_detail_payload(sess, base, token, doc)
+            if detail_payload:
+                doc = _merge_detail_payload(doc, detail_payload)
+
+            job = _doc_to_job(doc, portal, base, search_url)
+            if not job:
                 continue
-
-            loc = (
-                doc.get("location")
-                or doc.get("city")
-                or doc.get("jobLocation")
-                or doc.get("jobCity")
-                or ""
-            )
-            if isinstance(loc, list):
-                loc = ", ".join(str(x) for x in loc if x)
-            loc = str(loc).strip()
-
-            if india_only and not is_india(loc):
-                continue
-
-            jid = str(
-                doc.get("jobid")
-                or doc.get("id")
-                or doc.get("jobId")
-                or doc.get("job_id")
-                or ""
-            ).strip()
-            slug = (
-                doc.get("jobUrl")
-                or doc.get("joburl")
-                or doc.get("urlSlug")
-                or jid
-                or ""
-            )
-            apply_url = f"{base}/job/{slug}" if slug else base
-
-            raw_jd = strip_html(
-                doc.get("shortDescription")
-                or doc.get("longDescription")
-                or doc.get("jobDescription")
-                or doc.get("responsibility")
-                or ""
-            )
-
-            jobs.append({
-                "job_id":          jid or f"{company}_{title[:40]}",
-                "title":           title,
-                "job_url":         apply_url,
-                "source_api_url":  search_url,
-                "business_unit":   doc.get("departmentName") or doc.get("department") or doc.get("division"),
-                "raw_jd_text":     raw_jd,
-                "location_city":   loc or "India",
-                "date_posted":     doc.get("modifiedDate") or doc.get("postedDate") or doc.get("createdDate"),
-                "source_platform": "RippleHire",
-                "industry":        industry,
-            })
+            jobs.append(job)
 
             if max_jobs and len(jobs) >= max_jobs:
                 _log.info(f"    {company}: {len(jobs)} India jobs via RippleHire [cap]")
@@ -181,3 +134,140 @@ def _scrape_ripplehire(portal: Portal, max_jobs: int | None = None) -> list[dict
 
     _log.info(f"    {company}: {len(jobs)} India jobs via RippleHire")
     return jobs
+
+
+def _extract_listing_docs(payload: dict) -> list[dict]:
+    """Normalize RippleHire listing shapes seen across tenants."""
+    response_obj = payload.get("response") or payload
+    docs = (
+        response_obj.get("docs")
+        or response_obj.get("jobs")
+        or response_obj.get("jobVoList")
+        or response_obj.get("jobVOList")
+        or payload.get("jobVoList")
+        or []
+    )
+    return docs if isinstance(docs, list) else []
+
+
+def _job_seq(doc: dict) -> str:
+    return str(
+        doc.get("jobSeq")
+        or doc.get("jobseq")
+        or doc.get("jobid")
+        or doc.get("id")
+        or doc.get("jobId")
+        or doc.get("job_id")
+        or ""
+    ).strip()
+
+
+def _location_text(value) -> str:
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(str(item.get("name") or item.get("location") or item.get("city") or ""))
+            else:
+                parts.append(str(item or ""))
+        return ", ".join(p.strip() for p in parts if p and p.strip())
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("location") or value.get("city") or "").strip()
+    return str(value or "").strip()
+
+
+def _is_allowed_location(loc: str, india_only: bool) -> bool:
+    if not india_only:
+        return True
+    if not loc:
+        return True
+    if is_india(loc):
+        return True
+    # Some India-only RippleHire tenants return only city/site names such as
+    # Kalaburagi or West Bokaro. Reject explicit foreign countries, otherwise
+    # trust the company-specific India portal.
+    return not _NON_INDIA_LOCATION_RE.search(loc)
+
+
+def _fetch_detail_payload(sess: requests.Session, base: str, token: str, doc: dict) -> dict:
+    seq = _job_seq(doc)
+    if not seq:
+        return {}
+    detail_url = f"{base}/candidate/candidatejobdetail"
+    params = {
+        "jobSeq": seq,
+        "token": token,
+        "source": "CAREERSITE",
+        "lang": "en",
+    }
+    try:
+        r = sess.get(detail_url, params=params, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            return {}
+        return r.json()
+    except Exception:
+        return {}
+
+
+def _merge_detail_payload(doc: dict, payload: dict) -> dict:
+    detail = payload.get("jobVO") or payload.get("jobVo") or payload.get("job") or payload
+    if not isinstance(detail, dict):
+        return doc
+    merged = dict(doc)
+    merged.update({k: v for k, v in detail.items() if v not in (None, "")})
+    return merged
+
+
+def _doc_to_job(doc: dict, portal: Portal, base: str, search_url: str) -> dict | None:
+    company = portal.get("company", "")
+    title = (
+        doc.get("jobTitle")
+        or doc.get("title")
+        or doc.get("job_title")
+        or doc.get("designation")
+        or ""
+    )
+    title = str(title).strip()
+    if not title:
+        return None
+
+    loc = _location_text(
+        doc.get("locations")
+        or doc.get("location")
+        or doc.get("city")
+        or doc.get("jobLocation")
+        or doc.get("jobCity")
+        or ""
+    )
+    if not _is_allowed_location(loc, portal.get("india_only", True)):
+        return None
+
+    jid = _job_seq(doc)
+    detail_params = {"jobSeq": jid, "source": "CAREERSITE"} if jid else {}
+    if portal.get("ripplehire_token"):
+        detail_params["token"] = portal["ripplehire_token"]
+    apply_url = f"{base}/candidate/candidatejobdetail"
+    if detail_params:
+        apply_url = f"{apply_url}?{urlencode(detail_params)}"
+
+    raw_jd = strip_html(
+        doc.get("jobDesc")
+        or doc.get("shortDescription")
+        or doc.get("longDescription")
+        or doc.get("jobDescription")
+        or doc.get("responsibility")
+        or ""
+    )
+
+    return {
+        "job_id":          jid or f"{company}_{title[:40]}",
+        "title":           title,
+        "job_url":         apply_url,
+        "source_api_url":  search_url,
+        "business_unit":   doc.get("departmentName") or doc.get("department") or doc.get("division"),
+        "raw_jd_text":     raw_jd,
+        "location_city":   loc or "India",
+        "date_posted":     doc.get("modifiedDate") or doc.get("postedDate") or doc.get("createdDate"),
+        "source_platform": "RippleHire",
+        "industry":        portal.get("industry", ""),
+    }

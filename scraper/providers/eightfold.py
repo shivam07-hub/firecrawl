@@ -6,6 +6,7 @@ import logging
 import requests
 
 from config import REQUEST_TIMEOUT
+from providers._paginate import Page, paginate
 from providers.base import ProviderResult, ScrapeReason
 from utils import is_india, job_hash, strip_html
 
@@ -45,30 +46,23 @@ def _scrape_eightfold(portal: Portal, max_jobs: int | None = None) -> list[dict]
 
     base = f"https://{tenant}.eightfold.ai/api/apply/v2/jobs"
     jobs: list[dict] = []
-    start = 0
 
-    while True:
-        params = {
-            "query":    "",
-            "count":    _PAGE_SIZE,
-            "start":    start,
-            "domain":   api_domain,
-        }
+    # Fixed page size (count=_PAGE_SIZE) at a record offset, with a server total;
+    # the shared paginator advances by _PAGE_SIZE and stops at the total.
+    def fetch_page(offset: int) -> Page | None:
+        params = {"query": "", "count": _PAGE_SIZE, "start": offset, "domain": api_domain}
         if india_only:
             params["location"] = "India"
-
         try:
             r = requests.get(base, params=params, headers=_HEADERS, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
             data = r.json()
         except Exception as e:
-            _log.error(f"    [ERROR] Eightfold list {company} start={start}: {e}")
-            break
+            _log.error(f"    [ERROR] Eightfold list {company} start={offset}: {e}")
+            return None
+        return Page(items=data.get("positions", []), total=data.get("count") or None)
 
-        positions = data.get("positions", [])
-        if not positions:
-            break
-
+    for positions in paginate(fetch_page, step=_PAGE_SIZE):
         for pos in positions:
             loc = pos.get("location", "")
             if india_only and not is_india(loc):
@@ -92,12 +86,8 @@ def _scrape_eightfold(portal: Portal, max_jobs: int | None = None) -> list[dict]
             })
 
             if len(jobs) >= cap:
-                break
-
-        total = data.get("count", 0)
-        start += _PAGE_SIZE
-        if start >= total or len(jobs) >= cap:
-            break
+                _log.info(f"    {len(jobs)} India jobs fetched via Eightfold API")
+                return jobs
 
     _log.info(f"    {len(jobs)} India jobs fetched via Eightfold API")
     return jobs

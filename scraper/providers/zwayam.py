@@ -16,13 +16,13 @@ from urllib.parse import urlparse
 import requests
 
 from config import REQUEST_TIMEOUT
+from providers._paginate import Page, paginate
 from providers.base import ProviderResult, ScrapeReason
 from schema import Portal
 from utils import is_india, strip_html
 
 _log = logging.getLogger("mirror")
 _DEFAULT_API_URL = "https://apic2.zwayam.com/jobs/search"
-_PAGE_SIZE = 50
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -65,11 +65,15 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
     }
 
     jobs: list[dict] = []
-    start = 0
+    state = {"error_first": False}
 
-    while True:
+    # paginationStartNo is a record OFFSET; Zwayam returns a small, variable page
+    # and signals continuation via hasMoreData + totalCount. The shared paginator
+    # owns the stop decision (advance by len, stop on total/has_more) — this is
+    # what the old fixed `< 50` stop got wrong (Persistent 300->2 truncation).
+    def fetch_page(offset: int) -> Page | None:
         filter_cri = {
-            "paginationStartNo": start,
+            "paginationStartNo": offset,
             "selectedCall": "sort",
             "sortCriteria": {"name": "modifiedDate", "isAscending": False},
             "anyOfTheseWords": "",
@@ -82,15 +86,16 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
         try:
             r = requests.post(api_url, headers=headers, files=files, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
-            data = r.json()
+            inner = (r.json().get("data") or {})
         except Exception as e:
-            _log.error(f"    [ERROR] Zwayam {portal['company']} start={start}: {e}")
-            return jobs or None
+            _log.error(f"    [ERROR] Zwayam {portal['company']} start={offset}: {e}")
+            if offset == 0:
+                state["error_first"] = True
+            return None
+        return Page(items=inner.get("data") or [], total=inner.get("totalCount") or None,
+                    has_more=inner.get("hasMoreData"))
 
-        hits = (data.get("data") or {}).get("data") or []
-        if not hits:
-            break
-
+    for hits in paginate(fetch_page, step=None):
         for hit in hits:
             src = hit.get("_source", hit)
             title = (src.get("jobTitle") or "").strip()
@@ -125,9 +130,7 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
             if max_jobs and len(jobs) >= max_jobs:
                 return jobs
 
-        if len(hits) < _PAGE_SIZE:
-            break
-        start += _PAGE_SIZE
-
+    if not jobs and state["error_first"]:
+        return None  # couldn't reach the API at all -> API_BLOCKED
     _log.info(f"    {len(jobs)} jobs via Zwayam ({portal['company']})")
     return jobs

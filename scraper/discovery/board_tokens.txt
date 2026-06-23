@@ -1,0 +1,42 @@
+# Candidate ATS board tokens for harvest_boards.py
+# Collected FREE via site: searches (site:boards.greenhouse.io / jobs.lever.co / etc.) 2026-06-13.
+# Format: `ats:token` (precise) or bare `token` (probe all 4). Harvester dedups vs KNOWN_PORTALS.
+
+# ── greenhouse ──
+greenhouse:truecaller
+greenhouse:meltplan
+greenhouse:atomicwork
+greenhouse:interfaceai
+greenhouse:razorpaysoftwareprivatelimited
+greenhouse:currenciesdirect
+greenhouse:6sense
+
+# ── lever ──
+lever:brillio-2
+lever:resilinc
+lever:binance
+lever:weekdayworks
+lever:weloglobal
+lever:thinkahead
+lever:beghouconsulting
+lever:smart-working-solutions
+
+# ── ashby ──
+ashby:netgear
+ashby:pebl
+ashby:sentilink
+ashby:zzazz
+
+# ── smartrecruiters ──
+smartrecruiters:TechnicolorCreativeStudios1
+smartrecruiters:firstabudhabibank
+smartrecruiters:InfowayGroup
+smartrecruiters:MicroPyramidInformaticsPvtLtd
+smartrecruiters:SQUIRCLEITCONSULTINGSERVICESPVTLTD
+smartrecruiters:CapitalAimFinancialAdvisoryPvtLtd
+smartrecruiters:tminetwork2
+smartrecruiters:PublicisGroupe
+smartrecruiters:LinkedIn3
+
+# ── uncertain ATS (probe all) ──
+coupa

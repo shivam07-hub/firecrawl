@@ -16,6 +16,18 @@ All work must stay within the `firecrawl_Supabase/` directory. Do not read, writ
 
 ---
 
+## CHANGE DISCIPLINE
+
+Prefer running and reusing the existing pipeline code, configuration, CLI flags, scripts, and diagnostics before changing implementation.
+
+- Do not write or modify code by default during scraper runs or pipeline iteration.
+- First try existing commands, env flags, providers, importer dry-runs, logs, and Supabase diagnostics.
+- Only propose a code change after a concrete failure is observed and the existing code/config cannot handle it safely.
+- Before writing code, discuss the failure, root cause, options, and tradeoffs with the user, then wait for explicit approval.
+- User-requested documentation updates are allowed, but implementation files should stay untouched unless approved.
+
+---
+
 ## MISSION
 
 Weekly global scrape of 100+ company portals → full JDs → LM Studio skill extraction → Supabase.
@@ -23,47 +35,24 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 
 ---
 
-## CURRENT STATE (as of 2026-05-13)
+## CURRENT STATE (as of 2026-06-13)
 
-- **Discovery-mode override for the current crack hunt:** do **not** block on tests, smoke runs, or full scrape verification when a likely ATS/XHR endpoint has been identified. For this phase, **capturing the endpoint/host/domain/siteNumber/locationId and saving it into `KNOWN_PORTALS.md`, `portal_reader.py`, or a provider registry is more important than proving it end-to-end.** Validation will happen later in a dedicated pass.
-- **Firecrawl cloud is now approved as a discovery microscope** for endpoint hunting. Use `map -> selective scrape`, then promote the durable direct route. Do not leave Firecrawl as the final architecture unless the portal is genuinely anti-bot / JS-opaque.
-- **American Express moved off the broken Eightfold assumption and onto Oracle Candidate Experience**:
-  - careers shell: `https://careers.americanexpress.com/en/sites/CX_1/jobs`
-  - API host: `egug.fa.us2.oraclecloud.com`
-  - site number: `CX_1`
-  - India location ID: `300000000228786`
-  - response path: `recruitingCEJobRequisitions?finder=findReqs`
-- **Direct-route promotions completed (earlier sessions):** `STMicroelectronics`, `GMR Group`, `HP (HPE)`, `HiLabs`, `Black Brix`, `American Express`.
-- **Crack-hunt session 2026-05-13 — new promotions:**
-  - `Nestlé` ✅ — SAP Jobs2Web HTML at `jobdetails.nestle.com/search/?q=&locationsearch=india`; 31 India jobs across 4 pages; routed via `_ATS_OVERRIDES` + `_OTHER_ENDPOINT_OVERRIDES` in `portal_reader.py`
-  - `ITC Limited` ✅ — Zoho Recruit SSR portal at `recruitment.itcportal.com/jobs/Careers`; 62 India jobs; new provider at `providers/zoho_recruit.py`; apply URL pattern: `SingleJobDetail.na?sys_id={id}&page_id=48611000000181149`
-  - `Adidas` ✅ — SAP Jobs2Web HTML at `jobs.adidas-group.com/search/?q=&optionsFacetsDD_country=IN`; routing fixed in `portal_reader.py`
-  - `Unilever` ✅ — TalentBrew at `careers.unilever.com/en/location/india-jobs/34155/1269750/2`; moved from WORKDAY section (was CF-blocked) to CONSUMER GOODS; endpoint override in `portal_reader.py`
-  - `Oracle` ✅ — Oracle CE (NOT Workday) confirmed via XHR cURL; API host `eeho.fa.us2.oraclecloud.com`; siteNumber `CX_45001`; `location=India` text param (no numeric locationId); moved from WORKDAY to ORACLE HCM section; `_ORACLE_ENDPOINT_OVERRIDES` in `portal_reader.py`; 5+ live India jobs verified
-- **portal_reader.py fixes this session:**
-  - `_workday()` skip condition now checks `'⚠️' in tenant` (not just instance/career_site) — prevents Unilever and other moved entries from leaking through as broken Workday portals
-  - `_OTHER_ENDPOINT_OVERRIDES` dict added — allows `_other()` to use a different endpoint than the `Careers URL` column (used by Nestlé, Unilever, ITC Limited)
-  - `_ATS_OVERRIDES` + `_INDIA_ONLY_OVERRIDES` extended for Adidas, Nestlé, Unilever, ITC Limited
-  - `_ORACLE_ENDPOINT_OVERRIDES` dict added — Oracle Corp uses `location=India` text param instead of numeric locationId; override bypasses standard endpoint builder
-- **Bank of America** — `careers.bankofamerica.com/en/jobs/` URL tested → 404; Workday entry unchanged; still needs correct Oracle CE or Workday URL from browser XHR
-- **Grant Thornton status:** TalentRecruit (`gtprod.talentrecruit.com`) is an **internal SSO-gated ATS** — not a public career page. FC map found `/career-page/jobs` but scrape returns login screen. No public portal found on `grantthornton.in`. Marked as internal/inaccessible in PENDING WORK.
-- **Firecrawl cloud discovery signals captured this session:**
-  - `Vehere Interactive`: Firecrawl surfaced durable `/positions/...` detail URLs even though direct requests still hit Cloudflare 403.
-  - `Meta`: Firecrawl can read the India jobs shell at `https://www.metacareers.com/jobs/?locations[0]=India`, but the stable direct JSON/GraphQL route still needs XHR capture.
-  - `Mondee Holdings`: Ashby board confirmed at `https://jobs.ashbyhq.com/mondee`; obvious posting API slug still unresolved / effectively empty.
-- **Important handoff note:** if `main.py` hangs on a portal during this discovery phase, that is **not** a reason to defer capturing the endpoint. Save the endpoint first, move on, and leave runtime verification for later.
-
-- **Active portals:** see `KNOWN_PORTALS.md` — file has expanded significantly beyond the previous 164 count; now includes 35+ sections with ATS-grouped companies, industry buckets, blocked lists, and a scrape queue. Exact active count = rows with `✅ working` status.
-- **~19,000 jobs** in Supabase (`jobs` table, project `gipvxuugajkugntwkeiz`) — last exact count: 18,991
-- **212,742 job_skills rows** resolved and uploaded
-- Last full run: `upload_20260504_114053` — zero errors, zero taxonomy drift
-- **20 new companies cracked by Codex** (2026-04-30 to 2026-05-02) — see `CODEX_HANDOFF.md` for full list and validation run results
+- **Data:** ~19,000 jobs in Supabase (`jobs`, project `gipvxuugajkugntwkeiz`; last exact 18,991) · 212,742 `job_skills` rows · last full load `upload_20260504_114053` (zero errors/drift).
+- **Portals:** `KNOWN_PORTALS.md` is the source of truth — 36 ATS sections, **307 active rows** (+33 net-new India-hiring companies 2026-06-13 via the new `scraper/discovery/` pipeline; +3 parked `⚠️` pending identity check: TSMG, Genesis, Verve). Per-crack history lives there + in git, not here.
+- **Scale-out discovery pipeline (`scraper/discovery/`, built 2026-06-13):** path to grow company coverage toward 10k. **(a) College-seed path** — `phase0_discover.py` spends Firecrawl **cloud** credits (`cloud_extract`) to pull recruiter names off Tier-1/2 college placement pages (`college_sources.json`, 41 sources → 1,146 companies in `seed_companies.{json,csv}`); then FREE `resolve_ats.py` probes Greenhouse/Lever/Ashby/SmartRecruiters with slug candidates + collision guards → `promote_candidates.py` token+name-dedups. Yield ~18 net-new per ~1,150 seed (diminishing — top recruiters are Workday/Darwinbox, not token boards). **(b) Board-directory harvest (the real 10k lever, FREE)** — `harvest_boards.py` + shared `ats_probes.py`: feed candidate tokens (`board_tokens.txt`, collected free via `site:boards.greenhouse.io`/`jobs.lever.co`/etc. searches → real slugs, no 404 waste), probe, India-filter, dedup vs live portals, emit promote stubs. First run: 29 tokens → 23 net-new India boards (~80% conversion). **Quality caveat: SmartRecruiters + some Lever surface staffing/aggregator/microtask boards (Squircle, CapitalAim, TMI, Welocalize, Weekday) — exclude these from promotion; they pollute the candidate-facing DB. Promote product-company boards only.** Ashby routing is hardcoded in `portal_reader.py` (`ats_overrides`/`endpoint_overrides` dicts) — add new Ashby companies there, not just KNOWN_PORTALS. **Always regenerate `diagnose.py` on a fresh run before `--probe-crack`; a stale NEEDS_CRACK list wastes credits re-discovering already-cracked companies (happened 2026-06-13: all 10 stubs were already live).**
+- **Operating mode:** Firecrawl cloud = discovery microscope (`map → selective scrape`), then promote the durable direct route; never leave Firecrawl as the final architecture unless genuinely anti-bot/JS-opaque. Free plan throttles at **6 req/min** → `diagnose.py --probe-crack` needs `--crack-delay 11`; run cloud via `FIRECRAWL_URL= FIRECRAWL_API_KEY=<cloud key> python …`.
+- **Self-healing diagnostic (Phase 4) is live** — see its section below.
+- **Pagination:** shared `providers/_paginate.py` seam owns the stop decision; zwayam/hm_wp/eightfold migrated, the rest adopt on-touch.
+- **Layout:** tests in `scraper/tests/` (+ conftest); narrative docs + handoffs in `docs/`; root keeps CLAUDE/AGENTS/README/KNOWN_PORTALS/RUN_HISTORY/HANDOVER.
+- **Health tracking:** official per-company counts only after a real `csv_importer.py` load; scrape-only counts are provisional and stay local.
+- **Upskilling question-bank pilot is implemented:** isolated `scraper/question_bank/` pipeline for Machine Learning, Product Strategy, Management Consulting, and Financial Accounting. Live schema/taxonomy preflight passes; `skill_questions` remains empty until source JSONL is supplied, LM Studio is loaded, and an explicit `--publish` run succeeds.
 
 ### Output folder location
-> **Outside this repo.** CSV/JSON outputs are never committed to git.
-> Path: `/Users/incognito/Mirror CV/firecrawl_Supabase/All_CSV_Outputs_thru_firecrawl`
-> Structure: 134 company folders, each containing `Outputs/<YYYYMMDD>/jobs.json` + `jobs.csv`
+> **In-repo.** CSV/JSON outputs live inside the repo (git-ignored, not committed).
+> Path: `/Users/incognito/firecrawl_Supabase/All_CSV_Outputs_thru_firecrawl`
+> Structure: 136 company folders, each containing `Outputs/<YYYY_MM_DD>/jobs.json` + `jobs.csv`
 > This folder is the source of truth for Phase 3 (`csv_importer.py`) — it reads from here to upsert to Supabase.
+> (Old `/Users/incognito/Mirror CV/...` path is retired — repo moved to the main incognito folder.)
 
 ---
 
@@ -112,8 +101,18 @@ main.py + providers/  ←  ATS direct API → raw JSON per company
 enricher.py  ←  LM Studio → role_domain + structured skills with required_level
       ↓
 csv_importer.py  ←  upsert to Supabase on job_id
-                 ←  writes per-company health to scrape_diagnostics
+                 ←  writes official per-company health to scrape_diagnostics after final load
 ```
+
+## COMPANY RUN HEALTH TRACKING
+
+Official company hiring-volume and scraper-health metrics are recorded **only after the final Supabase load for that company**.
+
+- Scrape-only outputs (`main.py` logs, `run_summary_*.json`, and local `jobs.json`) are provisional debugging evidence, not official history.
+- During batch iteration, set `SCRAPE_DIAGNOSTICS_DISABLED=1` for Phase 1 scrape-only runs when Supabase env vars are present, so provisional scrape counts do not write to `scrape_diagnostics`.
+- After enrichment and a successful real `csv_importer.py` load, use importer diagnostics as the source of truth.
+- For each loaded company, report: `company_name`, `run_id`, `raw_jobs`, `saved_new`, enriched percent, skill drift, unknown location rows, status/reason.
+- If a company fails before final load, record it as a pipeline issue to investigate, not as an official company count.
 
 **Key files:**
 
@@ -123,15 +122,46 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `portal_reader.py` | Parses `KNOWN_PORTALS.md` → list of portal dicts |
 | `schema.py` | `Portal` TypedDict + `CANONICAL_FIELDS` — single source of truth |
 | `providers/` | One module per ATS type — all scraping logic lives here |
+| `providers/_paginate.py` | Shared `paginate()` seam — one tested home for the pagination stop decision (empty / `>= total` / `has_more` / no-new-id / max_pages). Adopted by zwayam, hm_wp_jobs, eightfold; other providers migrate on-touch |
 | `workday_registry.json` | Per-tenant: India UUID, facet params, `blocked=true` flag — auto-written |
 | `generic_registry.json` | Per-company: which JSON keys worked — auto-written on first success |
 | `company_industries.json` | Company → Industry mapping — manual |
 | `rag_skills.py` | IDF index over 35,108 Lightcast L3 skills — vocab for LLM |
 | `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → structured `skills` + back-compat arrays |
 | `writer.py` | `to_canonical()` → deduped JSON+CSV saved to output folder |
-| `main.py` | Orchestrator — all CLI flags |
-| `csv_importer.py` | Phase 3 upsert: dedup, lifecycle, apply_url gate, industry_group, location_city |
+| `main.py` | Orchestrator — all CLI flags; auto-runs self-diagnosis at run end |
+| `csv_importer.py` | Phase 3 upsert: dedup, lifecycle, apply_url gate, industry_group, location_city; syncs `baseline_ledger.json` forward after load |
+| `diagnose.py` | Phase 4 self-healing diagnostic — classify a run's 0/low companies into buckets, `--probe` re-tests routes |
+| `heal/` | Self-healing package: `baseline.py` (ledger), `classifier.py` (failure buckets), `probe.py` (live re-test seam) |
+| `baseline_ledger.json` | Per-company last-known-good India count — auto-synced from `scrape_diagnostics`; forward-only |
 | `sql/` | Migration files — run manually via Supabase dashboard |
+
+---
+
+## SELF-HEALING DIAGNOSTIC (Phase 4)
+
+Turns the old hand-written `HANDOFF_skipped_companies_*.md` into a generated artifact. After a scrape, `main.py` auto-classifies every 0/low company; `diagnose.py` re-runs it and (with `--probe`) live-tests the cheap-win routes.
+
+```bash
+cd scraper
+python diagnose.py                          # classify latest run -> logs/diagnosis_<run_id>.md
+python diagnose.py --run <run_id>           # a specific run
+python diagnose.py --bucket REGRESSION      # one bucket only
+python diagnose.py --probe                  # live re-test REGRESSION + PARAM_SUSPECT routes (network, no Docker for direct routes)
+python diagnose.py --propose                # emit reviewable fix diffs (free dedup analysis) -> logs/proposed_fixes_*.md
+python diagnose.py --probe-crack            # Firecrawl-cloud discovery on NEEDS_CRACK companies (spends credits; cached)
+python diagnose.py --json                   # machine-readable verdicts
+```
+
+**Auto-propose (propose-only, never applies).** `--propose` runs `heal/propose.py`: it statically finds *generic-duplicate masking* (a company listed in both its real ATS section and a generic CUSTOM/industry section, so `portal_reader` emits a phantom `ats=custom/other` portal that returns 0 and tanks the company) and emits the deletion diff. This is the bug that silently broke HSBC/Mphasis/Persistent on 2026-06-04; fixed 2026-06-07 and guarded by `test_heal_propose.py`. `--probe-crack` adds the Firecrawl-cloud discovery adapter (`heal/probe.probe_company_firecrawl`): map → rank candidate listing/API URLs → propose a `KNOWN_PORTALS.md` row stub for a human to promote.
+
+**Buckets** (map 1:1 to the old handoff A–E): `REGRESSION` (had a baseline, now 0/dropped — cheapest win) · `PARAM_SUSPECT` (direct route, 0, never confirmed good) · `COOKIE_NEEDED` (Darwinbox) · `NEEDS_CRACK` (JS-opaque / `ats=other`) · `BLOCKED_EXPECTED` (known CF-blocked Workday) · `LOW_COUNT`.
+
+**Regression detection** diffs this run's scrape count against `baseline_ledger.json` (last-known-good, synced from `scrape_diagnostics` after each load). Forward-only: a bad run never lowers a baseline — that drop *is* the signal.
+
+**Probe** = `heal/probe.probe_company()` re-runs the exact provider via `dispatch_scrape` with a small cap and reports `RECOVERED` / `STILL_BROKEN` / `PARTIAL` / `ERROR`. Propose-only — never edits config (CHANGE DISCIPLINE).
+
+> **Bootstrap note:** `baseline_ledger.json` was seeded from documented CLAUDE.md/handoff counts. From the next `csv_importer.py` load onward it self-maintains.
 
 ---
 
@@ -153,8 +183,9 @@ csv_importer.py  ←  upsert to Supabase on job_id
 | `location_mode` | csv_importer `_normalize_location` | `onsite` / `hybrid` / `remote` / `unknown` |
 | `location_quality` | csv_importer `_normalize_location` | `ok` / `unknown` — hydration sentinel in True_Yodha |
 | `apply_url` | ATS direct link | null if image/invalid URL |
-| `main_skills` | LLM Phase 2 | top 5 must-have, Lightcast L3 |
-| `side_skills` | LLM Phase 2 | nice-to-have, Lightcast L3 |
+| `skills` | LLM Phase 2 | ONE flat list of `{name, required_level}` (Lightcast L3); JSON-only field, drives `job_skills` — not a `jobs` column |
+| `main_skills` | LLM Phase 2 | back-compat name mirror of `skills` (all needed skills; True_Yodha chips read this) |
+| `side_skills` | — | **deprecated, always `[]`** (no more primary/side split) |
 | `batch_date` | writer.py | integer YYYYMMDD |
 | `first_seen` | csv_importer | set on INSERT only |
 | `last_seen` | csv_importer | updated every run |
@@ -164,20 +195,23 @@ csv_importer.py  ←  upsert to Supabase on job_id
 ### job_skills table (FK join table — canonical skill source)
 
 `job_skills` is the source of truth for skill↔job relationships in True_Yodha.
-`main_skills` / `side_skills` TEXT arrays on `jobs` are legacy and will be dropped once the contract test passes.
+`main_skills` TEXT array on `jobs` is the back-compat name mirror (True_Yodha chips read it); `side_skills` is deprecated (always `[]`) and can be dropped in a later cleanup.
 
 | Column | Type | Notes |
 |---|---|---|
 | `job_id` | uuid FK → jobs | |
-| `skill_id` | uuid FK → skills | resolved via `skills.taxonomy_key` |
-| `is_primary` | boolean | true = main_skill, false = side_skill |
+| `skill_id` | uuid FK → skills | resolved via `skills.taxonomy_key` (== Lightcast L3 name; verified 35,108/35,108 resolve) |
+| `is_primary` | boolean | **always `true`** — primary/side split removed (2026-06-07); kept for back-compat, importance now lives in `required_level` |
 | `required_level` | smallint (1–4) | scraper-owned proficiency signal; migration file: `scraper/sql/add_job_skills_required_level.sql` |
 
-**`required_level` contract (updated 2026-05-10):**
+**Skill model (ONE bucket + level — updated 2026-06-07):**
+- No more main-skill vs side-skill split. A skill is either needed or it is not; **how deeply** it's needed is the `required_level` (1–4). User directive: *"Either you need a skill or you don't."*
 - L1 = awareness/basic, L2 = working proficiency, L3 = advanced/practitioner, L4 = expert/authority
-- LM Studio returns `skills[]` objects: `{name, is_primary, required_level}`
-- `_validate_enrichment()` canonicalizes skill names, caps primary skills at 5 and side skills at 8, and derives legacy `main_skills` / `side_skills`
-- `csv_importer.py` and `supabase_enricher.py` stop before real writes if Supabase has not run `scraper/sql/add_job_skills_required_level.sql`
+- LM Studio returns `skills[]` objects: `{name, required_level}` (no `is_primary`)
+- `_validate_enrichment()` canonicalizes against Lightcast L3, bounds level to 1–4 (default L2), caps the list at 10, sets `main_skills = [all names]` and `side_skills = []`
+- `writer.to_canonical` now persists the structured `skills` array (with model levels) into `jobs.json` — previously dropped, which is why pre-2026-06-07 rows defaulted to level 2
+- `csv_importer` writes every `job_skills` row with `is_primary=True` and the model `required_level`; the column gate (`add_job_skills_required_level.sql`) is live
+- **Forward-only: no backfill.** Existing rows keep their old levels; correctness applies from the next scrape onward (product philosophy: agile, downstream-only)
 - True_Yodha should read `job_skills.required_level` directly and keep any heuristic only as a fallback
 
 ---
@@ -257,8 +291,9 @@ Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
 1. `job_description` populated by scraper
 2. `rag_skills.py` retrieves top-40 Lightcast L3 skills from JD as vocabulary
 3. `enrich_job()` sends vocab + JD to LM Studio (`gemma-3-4b`, max_tokens=512, temp=0.0)
-4. LLM returns `role_domain` + `skills[]` with `is_primary` and `required_level`
-5. `_validate_enrichment()` validates against Lightcast L3, bounds levels to 1–4, and derives `main_skills` / `side_skills`
+4. LLM returns `role_domain` + a single flat `skills[]` of `{name, required_level}` (no `is_primary`)
+5. `_validate_enrichment()` canonicalizes against Lightcast L3, bounds levels to 1–4 (default L2), caps at 10, sets `main_skills = [all names]` and `side_skills = []`
+6. `writer.to_canonical` persists the structured `skills` (with levels) to `jobs.json`; `csv_importer` resolves them → `job_skills` (`is_primary=True`, model `required_level`)
 
 ---
 
@@ -279,70 +314,78 @@ Confirmed blocked: Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspir
 
 ## KNOWN ISSUES
 
-- Eightfold API returning 404 as of 2026-04-10 — Firecrawl fallback quality varies
-- Goldman Sachs (TAL.NET) requires browser JS — Firecrawl markdown quality varies
-- MSCI: `careers.msci.com` 404; Workday slug unknown — skipped
+- Micron old Eightfold apply API assumption is retired — use PCSX (`micron.eightfold.ai/api/pcsx/search`); Philip Morris remains Phenom client-side, not Eightfold
+- MSCI: ✅ RESOLVED — was wrongly assumed Workday; actually Algolia (`msci_algolia` provider)
 - Dell: Workday returns 200+empty — suspected CF-blocked; add `blocked=true` if confirmed
-- ARM Holdings: TalentBrew cURL was wrong file (not jobs API) — need XHR to actual JSON endpoint
-- EY India Experienced (`sap_jobs2web_html`): many postings have JD text of only `Requisition Id : <id>` — descriptions too short, ~50% drop rate
+- EY India Experienced (`sap_jobs2web_html`): many postings have JD text of only `Requisition Id : <id>` — ~50% drop rate
+- Goldman Sachs: cracked via GraphQL (`api-higher.gs.com`) — old TAL.NET Firecrawl route retired
+- ARM Holdings: cracked as TalentBrew — old iCIMS assumption was wrong
+- Mastercard: cracked as TalentBrew — was wrongly in Workday section
+- Philip Morris: NOT Eightfold (tenant-not-identified error was because it's Phenom, not Eightfold)
+- Syngenta: was in ANTIBOT BLOCKED with wrong SR company ID (`Syngenta`) — correct ID is `SyngentaGroup`
+- **Stale dirty `job_title` rows (127, pre-fix legacy):** title contaminated with escaped `\n`/backslashes/`###`/concatenated Location+Employment Type. Parser already FIXED (zero dirty crawls since 2026-04-30); these are old rows never re-crawled, so never delisted (`is_active` ownership: companies absent from a run-date are untouched) → still served, render raw on Myro cards. Eightfold + D.E. Shaw dominate. Fix = re-scrape the ~10 affected companies (overwrites title clean + refreshes) or one-off SQL truncate; set `is_active=false` on the 10 Morgan Stanley NULL-marker rows; verify the ATS title-extractor guard. Detection query + portal table + full plan: `docs/handoffs/REPORT_stale_dirty_titles_20260621.md` (from Myro/True_Yodha, 2026-06-21).
 
 ---
 
 ## PENDING WORK
 
-### 1 — ATS Crack Hunt (uncracked companies)
+> Agile/forward-only doc: completed work is pruned from here once shipped. History lives in git + `RUN_HISTORY.md`; portal status lives in `KNOWN_PORTALS.md`.
 
-**Workflow:** Open career page → DevTools → Network → XHR tab → find JSON request with job titles → Copy as cURL → paste here → Claude saves the route into `KNOWN_PORTALS.md` / `portal_reader.py` / provider registry.
+### 1 — Parked portals (no durable route)
 
-**Explicit priority rule for this phase:** if an endpoint *looks like the correct ATS endpoint*, capture it and move on. **No test is required before promotion.** A later validation pass can prove whether it runs cleanly.
+| Company | Career URL | Blocker |
+|---|---|---|
+| Vehere | https://vehere.com/company/careers/ | Cloudflare 403 across sessions (`__cf_bm` session-bound, IP-locked). Deprioritized 2026-06-07 after 3+ tries. Revisit only with a browser-session XHR capture that yields a durable cookie-free route. |
+| Godrej Industries (parent) | https://www.godrejcareers.com/ | Akamai 403; separate portal from Godrej Consumer (already live). May be internal/intranet. |
+| Avendus Capital | https://avendus.darwinbox.in/ms/candidatev2/main/careers/allJobs | Darwinbox ATS confirmed, but listing requests still require fresh Cloudflare/session cookies. Revisit only if a cookie-free endpoint or renewable browser bootstrap is captured. |
+| IndusInd Bank | https://app1100.workline.hr/careers/ | Workline ATS confirmed, but its public JSON method returns `not authorized`, unlike SBI MF. Revisit with a browser XHR capture that produces a repeatable token flow. |
+| Uber | https://www.uber.com/careers/list/ | Firecrawl map returned a stale detail URL that now resolves to Uber's not-found page; no current listing API fingerprint. |
+| Walmart | https://careers.walmart.com/results?q=india | Next.js shell renders no listings to direct HTTP or Firecrawl. Cloud map returns US detail pages despite the India query. Revisit only with the browser listing XHR contract. |
 
-| Company | Career URL | Suspected ATS | Notes |
-|---|---|---|---|
-| Meta | https://www.metacareers.com/jobs/?locations[0]=India | Custom GraphQL / JSON | Firecrawl can read listing shell; capture GraphQL/XHR route next |
-| Vehere Interactive | https://vehere.com/company/careers/ | Custom | Firecrawl surfaced `/positions/...` URLs; direct requests still 403 |
-| Mondee Holdings | https://jobs.ashbyhq.com/mondee | Ashby | Board confirmed; posting API slug unresolved / likely empty board |
-| Oliver Wyman | https://mmc.phenompeople.com/global/en/oliver-wyman-search | Phenom + downstream detail blocker | Listings exist; full JD route still unresolved |
-| Morgan Stanley | https://morganstanley.eightfold.ai/careers?location=INDIA&domain=morganstanley.com | Eightfold / PCSX | Direct API 403; needs browser/XHR clue |
-| Micron Technology | https://micron.eightfold.ai/careers?location=India&hl=en | Eightfold / PCSX | Direct API 403 |
-| Qualcomm | https://careers.qualcomm.com | Eightfold hosted / custom | Firecrawl usable; direct API/domain still missing |
-| HSBC | https://hsbc.eightfold.ai/careers?location=India&hl=en | Eightfold | SPA shell only; needs browser/XHR clue |
-| Philip Morris International | https://join.pmicareers.com/search-results | Eightfold hosted | Tenant not identified from direct API |
-| Grant Thornton India | https://gtprod.talentrecruit.com/career-page/jobs | TalentRecruit | **Internal SSO-gated ATS** — not a public portal; FC scrape returns login screen; check `grantthornton.in` for separate public career page or mark inaccessible |
-| Godrej Consumer Products | https://careers.godrejindustries.com/in/en/search-results?qcountry=India | Phenom SSR | DNS corrected — see KNOWN_PORTALS.md CONSUMER GOODS section; probe PCSX `domain=godrejindustries.com` or Phenom SSR to crack |
-| Alvarez & Marsal | https://alvarezandmarsal.wd1.myworkdayjobs.com | Workday | CF-blocked; need browser XHR for India UUID → `workday_registry.json` |
-| 🟡 IIFL Finance | iifl.darwinbox.in | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
-| 🟡 Flipkart | flipkartcareers.com | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
-| 🟡 OYO | oyorooms.com/about/ | Darwinbox | Provider ready — needs CF cookies if/when validation happens |
+### 2 — 10k company scale-out (engine BUILT 2026-06-13; execution left)
 
-**Workday CF-blocked** (need India UUID via browser, then add to workday_registry.json):
-Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspire Brands, Hitachi Vantara, Intuit, Societe Generale, Standard Chartered, ANZ Bank, Alvarez & Marsal.
+Goal: grow tracked companies from ~307 toward **10,000**, biased to Tier-1/2 college recruiters.
+The `scraper/discovery/` engine works; only repeated execution + one gate remain. All FREE — no Firecrawl credits.
 
-### 2 — Fix broken direct scrapers
-- Capture direct detail/JD routes without blocking on runtime:
-  - Oliver Wyman full JD source
-  - Meta GraphQL payload + params
-  - Vehere reusable detail pattern under `/positions/...`
-  - Mondee Ashby job-board slug if a non-empty posting API exists
-- Fix Workday slugs: Capgemini, MSCI (HCL cracked via Taleo — done)
-- Fix SmartRecruiters: Zomato, S&P Global, CRISIL (unconfirmed IDs)
+- **2a — Broad token collection.** Expand `discovery/board_tokens.txt` via many `site:` searches across ATS × sector × city (e.g. `site:boards.greenhouse.io fintech bengaluru`, `site:jobs.lever.co saas hyderabad`, `site:jobs.ashbyhq.com mumbai`, `site:jobs.smartrecruiters.com pune`). These return REAL slugs → no 404 waste. Each query ≈ 8–12 tokens; thousands of tokens = hundreds of queries. Append in `ats:token` form.
+- **2b — Build the harvester quality gate.** In `harvest_boards.py`, downgrade staffing/aggregator/microtask boards to `status='review'` (not `india`) so they never auto-promote: gate on very-high `total` (e.g. >400) OR `board_name`/`slug` matching `consulting|staffing|advisory|recruitment|manpower|outsourc|networks?marketplace`. (2026-06-13 these polluted: Squircle 1784, CapitalAim, TMI, Welocalize, Weekday.)
+- **2c — Run + promote at scale.** `python discovery/harvest_boards.py` → review `harvest_promote.md` → promote product-company India boards. For Ashby, also add `ats_overrides`+`endpoint_overrides` entries in `portal_reader.py` (Ashby is name-hardcoded). Consider an `apply_harvest.py` to auto-append correctly-formatted rows to KNOWN_PORTALS instead of hand-edits.
+- **Reality:** college-seed path (`phase0_discover.py` + `resolve_ats.py`) is credit-bound + diminishing (~18 net-new per ~1,150 seed); the board-directory harvest (2a–2c) is the actual 10k lever.
 
-### 3 — New ATS providers still needed
-- **Workable**: `GET https://apply.workable.com/api/v3/accounts/{slug}/jobs?state=published`
-- **SAP SuccessFactors**: `GET https://{tenant}/odata/v2/JobRequisitionLocale?$filter=...&$format=json` — targets: GMR Group, Deutsche Bank
-- **Ashby**: `GET https://api.ashbyhq.com/posting-api/job-board/{slug}` — target: Mondee
-
-### 4 — Architecture (remaining)
-- **Firecrawl result cache** — `firecrawl_cache.json` keyed by URL, 7-day TTL. Cache hit → skip re-scrape, save credits.
-- **Firecrawl discovery cache** — `map_site()` is now cached too; use it first during endpoint hunting.
-- **Provider override consolidation** — if a future route needs special handling, add it through `portal_reader.py` + `scraper/providers/`, not a bespoke script folder.
-
-### 6 — Backfill real `required_level` values into existing `job_skills`
-
-Migration is complete and verified on 2026-05-10. Existing rows currently carry the default `required_level=2`; newly enriched uploads will write model-derived levels. Run a targeted LM Studio backfill only if level accuracy on existing jobs is needed before the next fresh scrape.
-
-### 5 — Archon weekly cadence
+### 3 — Archon weekly cadence (ongoing)
 - Weekly cron: `0 2 * * 0` via `.archon/workflows/scraper-weekly-run.yaml`
 - After each run: update `RUN_HISTORY.md` + `KNOWN_PORTALS.md`
+
+### 4 — Upskilling question-bank pipeline (pilot implemented 2026-06-11; population pending — OWNED BY CODEX as of 2026-06-13)
+
+Feed the Practice→Upskilling MCQ ladder. The True_Yodha side is **BUILT** (backend serves/grades sets, frontend ladder/quiz/results + job-gap calibration) but reads from an **empty** `skill_questions` table — until this pipeline fills it, the Upskilling home shows a "ladder on the way" empty state. PRD: `True_Yodha/docs/PRD_practice_upskilling_skillgap.md` §4.2 + §6. Migration `True_Yodha/database/migrations/20260609_upskilling_quiz_bank.sql` already applied (shared Supabase `gipvxuugajkugntwkeiz`).
+
+**Implemented hybrid ingest → LLM-clean → verify → publish pipeline:**
+
+1. **Ingest** transient raw candidates from git-ignored JSONL with `source_url`; hash them and never persist source prose. Direct scrape adapters can later emit the same in-memory contract.
+2. **LLM clean** (cheap tier): per raw item → normalized MCQ: `question_text`, exactly 4 `options`, `correct_index` (0–3), one-sentence `explanation`, assigned `level` (1–5: L1 recall → L3 applied → L5 architecture/trade-off). Reject anything not reducible to a single unambiguous MCQ.
+3. **Dedupe** with transient raw hash, normalized-text `dedupe_hash`, and near-duplicate similarity review.
+4. **Answer-key verifier** — independent prompt, deterministically shuffled options, preferably a distinct local model. Disagreement/ambiguity/large level drift → `status='review'`.
+5. **Publish** only behind explicit `--publish`; dry-run is the default. Existing active rows cannot be downgraded or overwritten by routine reruns.
+
+**Target table `skill_questions` (already exists, service-write):** `skill_id INT REFERENCES skills(id)`, `skill_key TEXT` (== `skills.taxonomy_key`), `level SMALLINT 1–5`, `question_text TEXT`, `options JSONB` (4 strings), `correct_index SMALLINT 0–3`, `explanation TEXT`, `source_url TEXT`, `dedupe_hash TEXT`, `status TEXT default 'active'`. Aim **50–60 Qs/skill** (≥10 per level) so a skill's full ladder unlocks; the backend gracefully shows only levels with ≥10 active Qs.
+
+- **Pilot skills locked:** Machine Learning (`skills.id=2772`), Product Strategy (`20985`), Management Consulting (`21871`), Financial Accounting (`28333`).
+- **Scope boundary:** `True_Yodha/reference/Interview Prep/` was not accessed. Source candidates must be supplied inside this repository under the git-ignored `scraper/question_bank_inputs/`.
+- **Legal posture (PRD §4.2 note):** store LLM-NORMALIZED questions + our own answer keys + `source_url` provenance — never verbatim scraped prose. Counsel sign-off on sourcing is an open item (cross-link True_Yodha Backlog #17).
+- **Verification 2026-06-11:** `pytest -q scraper/tests/question_bank` → 40 passed. Live read-only preflight confirmed the table contract, all four taxonomy keys, and zero existing rows. LM Studio was offline, so no real model call or Supabase write was attempted.
+
+**Commands:**
+
+```bash
+cd scraper
+python -m question_bank.cli --preflight-only
+python -m question_bank.cli --input question_bank_inputs/pilot.jsonl --dry-run
+python -m question_bank.cli --input question_bank_inputs/pilot.jsonl --resume-run <run_id> --dry-run
+python -m question_bank.cli --input question_bank_inputs/pilot.jsonl --publish
+```
+
+Operational details and safeguards: `scraper/question_bank/README.md`.
 
 ---
 

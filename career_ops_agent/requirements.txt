@@ -1,0 +1,2 @@
+# Career Ops Agent — only one runtime dep (already present in the scraper env).
+requests>=2.31.0

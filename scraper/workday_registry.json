@@ -1,10 +1,22 @@
 {
-  "_comment": "Workday tenant overrides \u2014 edit here, no Python change needed. See portal_reader.py:_load_workday_registry(). Keys must match Company column in KNOWN_PORTALS.md exactly.",
+  "_comment": "Workday tenant overrides — edit here, no Python change needed. See portal_reader.py:_load_workday_registry(). Keys must match Company column in KNOWN_PORTALS.md exactly.",
   "_blocked_comment": "blocked=true: Cloudflare rejects ALL POSTs even with valid India UUID. Scraper skips API immediately, falls straight to Firecrawl on careers_url. Verified 2026-04-29.",
   "Coca-Cola": {
     "search_text": "india"
   },
   "Nike": {
+    "search_text": "india"
+  },
+  "AB InBev": {
+    "search_text": "India"
+  },
+  "Mondelez": {
+    "search_text": "India"
+  },
+  "Kraft Heinz": {
+    "search_text": "India"
+  },
+  "Genpact": {
     "search_text": "india"
   },
   "Intel": {
@@ -64,6 +76,9 @@
       "358cbd5a2fcc01e0783eb441a1012864",
       "a05309e84f810165f53b47218532188d"
     ]
+  },
+  "BrowserStack": {
+    "search_text": "India"
   },
   "Barclays": {
     "india_facet_param": "locations",
@@ -201,5 +216,39 @@
   },
   "IBM": {
     "blocked": true
+  },
+  "CrowdStrike": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Workday": {
+    "india_facet_param": "Location_Country",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Sprinklr": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Automation Anywhere": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Vanguard Group": {
+    "search_text": "India"
+  },
+  "KLA Corporation": {
+    "india_facet_param": "Country",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Carrier Global": {
+    "india_facet_param": "location_Country",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "Cohesity": {
+    "india_facet_param": "locationCountry",
+    "india_uuid": "c4f78be1a8f14da0ab49ce1162348a5e"
+  },
+  "ThoughtSpot": {
+    "search_text": "India"
   }
 }

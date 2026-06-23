@@ -36,6 +36,19 @@ _POSTING_ID_RE = re.compile(r"/(\d{6,})/?$")
 _IN_COUNTRY_TOKEN_RE = re.compile(r"(?:,\s*IN(?:\s*,|\s*$)|\bIndia\b)", re.IGNORECASE)
 
 
+def _is_india_listing_location(text: str) -> bool:
+    """Accept Jobs2Web India tokens while avoiding Indiana/US false positives."""
+    s = (text or "").strip()
+    if not s:
+        return False
+    if s.upper() == "IN":
+        return True
+    tokens = [tok.strip(" ,") for tok in s.split()]
+    if tokens and all(tok.upper() == "IN" for tok in tokens):
+        return True
+    return bool(is_india(s) or _IN_COUNTRY_TOKEN_RE.search(s))
+
+
 class SAPJobs2WebHTMLProvider:
     key = "sap_jobs2web_html"
 
@@ -207,7 +220,7 @@ def _scrape_sap_jobs2web_html(portal: Portal, max_jobs: int | None = None) -> li
             # expensive per-job detail fetch.
             listing_loc = (row.get("listing_location") or "").strip()
             if india_only and listing_loc:
-                if not (is_india(listing_loc) or _IN_COUNTRY_TOKEN_RE.search(listing_loc)):
+                if not _is_india_listing_location(listing_loc):
                     continue
 
             detail_url = urljoin(endpoint, row["href"])
@@ -224,7 +237,7 @@ def _scrape_sap_jobs2web_html(portal: Portal, max_jobs: int | None = None) -> li
             if india_only:
                 loc_check = f"{loc} {detail.get('location','')}"
                 # Jobs2Web list rows usually include country code token "IN".
-                if not (is_india(loc_check) or _IN_COUNTRY_TOKEN_RE.search(loc_check)):
+                if not _is_india_listing_location(loc_check):
                     continue
 
             jid = str(detail.get("job_id") or "").strip()
