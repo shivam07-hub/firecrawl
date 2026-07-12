@@ -135,10 +135,12 @@ The scraper reads `KNOWN_PORTALS.md`, routes each portal through `scraper/provid
 | `schema.py` | `Portal` TypedDict + canonical field list |
 | `providers/` | Workday, SmartRecruiters, Greenhouse, Lever, Phenom, SAP, Oracle, custom provider modules |
 | `firecrawl_client.py` | Firecrawl singleton helpers; `crawl()` is intentionally not exposed |
-| `enricher.py` | LM Studio enrichment: `enrich_job()` fills `main_skills` + `side_skills` |
+| `enricher.py` | Open-weight enrichment: `enrich_job()` fills `job_summary`, `role_domain`, and structured skills |
+| `enrichment_state.py` | Forward-only source hash + core enrichment version contract |
+| `enrichment_worker.py` | Lazy Supabase queue worker for post-cutover jobs only |
 | `writer.py` | `to_canonical()` → canonical schema; `save_jobs()` → deduplicated JSON + CSV |
 | `main.py` | Orchestrator: `--company`, `--ats`, `--dry-run`, `--skip-enrich`, `--resume`, `--enrich-only` |
-| `csv_importer.py` | Supabase upsert, lifecycle, diagnostics |
+| `csv_importer.py` | Source-only immediate publish or legacy full upsert; lifecycle + diagnostics |
 | `test_llm.py` / `test_pipeline.py` | Test scripts |
 
 ### Setup (once)
@@ -166,12 +168,14 @@ python main.py --company "Syngenta"      # test single company
 python main.py --ats smartrecruiters     # test one ATS type
 python main.py --skip-enrich --scope global --global-cap 2000  # full scrape, no LLM
 python main.py --resume --skip-enrich    # resume an interrupted run only
-python main.py --enrich-only             # enrich saved jobs in-place — use when LM Studio on, Docker off
+python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"  # publish this completed run only
+python enrichment_worker.py --max-messages 100  # lazy Phase 2 when inference is available
+python main.py --enrich-only             # legacy local-file enrichment during cutover only
 ```
 
-### Two-phase run (low-RAM machines)
+### Forward-only publish + lazy enrichment
 
-Split between Docker/Firecrawl and LM Studio because local RAM is constrained. Finish scraping first, then start LM Studio for enrichment.
+Source publication and model enrichment are independent. Historical jobs are not backfilled.
 
 **Phase 1 — Scraping** (Docker/Firecrawl on, LM Studio off):
 ```bash
@@ -181,11 +185,17 @@ Scrapes all active portals. Workday uses CXS API + JD fetch.
 JS-heavy: use direct ATS APIs where possible; otherwise use Firecrawl Docker first and cloud only as a last resort.
 `--skip-enrich` suppresses the LM Studio enrichment pass only.
 
-**Phase 2 — Enrichment** (LM Studio on, no firecrawl needed):
+**Phase 3A — Immediate source publication** (queue migration deployed 2026-07-11):
 ```bash
-python main.py --enrich-only
+python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"
 ```
-Walks every `jobs.json`, enriches jobs that have `job_description` but missing `main_skills`, and rewrites `.json`.
+This writes source-owned fields and lifecycle evidence without touching model-owned fields. New post-cutover jobs become visible immediately and are queued.
+
+**Lazy Phase 2/3B — Enrichment** (local LM Studio or approved remote open-weight endpoint available; no Firecrawl needed):
+```bash
+python enrichment_worker.py --batch-size 10 --max-messages 100
+```
+The worker reads only durable queue messages created after cutover. It never scans missing historical enrichment. If LM Studio is disconnected, it exits without claiming work.
 
 ### Company run health tracking
 
@@ -194,7 +204,7 @@ Official per-company job-count tracking happens **only after final Supabase load
 - Treat scrape-only counts from `main.py`, local `run_summary_*.json`, and intermediate JSON files as provisional debugging signals only.
 - During Phase 1 scrape-only iteration runs, prefer disabling Supabase scrape diagnostics so provisional counts do not become official history:
   `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "<Company>" --skip-enrich`
-- The official health record is written by `csv_importer.py` after the enriched company output is loaded into Supabase.
+- The official health record is written by `csv_importer.py` after the source snapshot is loaded into Supabase; enrichment completion is tracked separately.
 - For every loaded company, track/report: `company_name`, `run_id`, `raw_jobs`, `saved_new`, enriched percent, skill drift, unknown location rows, status/reason.
 - Do not use scrape-only diagnostics as the source of truth for company hiring volume or scraper health. If a company fails before final load, report it as a pipeline issue, not as an official company count.
 
@@ -209,13 +219,18 @@ Official per-company job-count tracking happens **only after final Supabase load
 
 ### LLM enrichment flow (Dump 4+)
 
-1. Scraper populates `job_description` (raw JD text from ATS or Firecrawl)
-2. `enrich_job()` sends first all chars to LM Studio
-3. LLM extracts **two fields only**:
-   - `main_skills` — top 5 must-have / hard technical skills (from the skill_taxonomy.md)
-   - `side_skills` — nice-to-have / soft skills (from skill_taxonomy.md)
-4. LLM output is validated by `_validate_enrichment()` before writing — invalid values dropped, not kept
-5. Enriched jobs are loaded to Supabase via `load_to_supabase()` / `csv_importer.py`
+1. Scraper populates `job_description` and source fields.
+2. `csv_importer.py --source-only` publishes the job and the database queues new post-cutover rows.
+3. `enrichment_worker.py` sends the cleaned JD to the configured open-weight inference endpoint when compute is available.
+4. LLM extracts the active enrichment fields only:
+   - `job_summary` — factual role summary, capped at 100 words
+   - `role_domain` — one controlled functional area
+   - `skills` — up to 10 Lightcast L3 skills with `required_level`
+   - `main_skills` mirrors skill names for backward compatibility; `side_skills` stays empty/deprecated
+5. LLM output is validated by `_validate_enrichment()` before writing — invalid values dropped, not kept.
+6. A hash-guarded RPC patches enrichment fields and `job_skills` atomically; stale or inactive work is discarded.
+
+Do not seed or scan historical missing enrichment. Existing rows use NULL enrichment state as the deliberate legacy/untracked sentinel.
 
 **Do NOT add other enrichment fields** — seniority, work_mode, employment_type, degree_required, etc. are all retired from the schema. If needed in future, add as a separate enrichment pass, not in the core flow.
 
@@ -662,26 +677,35 @@ The old 3-day cadence proposal is retired. The active operating model is a weekl
 
 ---
 
-## WEEKLY SCRAPER RUN
+## DAILY SCRAPER RUN
 
-**Goal:** Execute a full fresh weekly scrape, enrich with LM Studio, upload to Supabase, and update `RUN_HISTORY.md` + changed `KNOWN_PORTALS.md` rows.
+**Current deployment state:** The database queue migration and live queue drain
+are complete. One daily cycle publishes source data first, then starts/loads the
+selected local open-weight model and drains enrichment. Publication never waits
+for inference, and historical rows are never backfilled.
+
+**Daily command:**
+
+```bash
+cd scraper
+python daily_cycle.py --scope india --company-cap 2000 --max-messages 10000
+```
 
 **How to run through Archon:**
 ```bash
 archon workflow run scraper-weekly-run --no-worktree "Weekly dump $(date +%Y-%m-%d)"
 ```
-- Layer 0: check-docker + check-lm + test-portals (parallel pre-flight)
-- Layer 1: scrape — `python main.py --skip-enrich --scope global --global-cap 2000` (full fresh scrape, 40-90 min)
-- Layer 2: enrich — `python main.py --enrich-only` (LM Studio, 20-40 min)
-- Layer 3: upload — `python csv_importer.py` (Supabase upsert, < 5 min)
-- Layer 4: summarize — AI run report
+- Layer 0: validate portals.
+- Layer 1: scrape and publish source fields to Supabase.
+- Layer 2: start/load LM Studio only after publication, then drain the durable queue.
+- Final layer: write `logs/daily_cycle_*.json` and re-anchor the next automation run.
 
-**If LM Studio is off (Phase 1 only):**
+**If inference cannot start:** source publication remains committed and queue
+messages remain durable. The cycle report identifies the inference failure.
+
+**Legacy workflow before cutover:**
 ```bash
-# Scrape runs, enrich/upload skipped automatically
 archon workflow run scraper-weekly-run --no-worktree "Weekly dump $(date +%Y-%m-%d)"
-# Then later, when LM Studio is on:
-archon workflow run scraper-weekly-run --no-worktree --resume "Weekly dump $(date +%Y-%m-%d)"
 ```
 
 **IMPORTANT — do NOT add --resume for a fresh weekly run.** `--resume` is only for recovering from a mid-run crash within the same session. Using it on a new week skips all companies that already have output folders (18 min run that does nothing).
@@ -693,9 +717,13 @@ KNOWN_PORTALS.md  ←  portal config (URL, ATS type, company name)
 providers/  ←  ATS direct API → canonical raw JSON per company
   (Firecrawl scrape/extract only as JS-heavy fallback; Docker first, cloud last)
       ↓
-enricher.py  ←  LM Studio → main_skills + side_skills from job_description
+csv_importer.py --source-only  → immediate source-field publication
       ↓
-csv_importer.py / load_to_supabase()  ←  upsert to Supabase on job_id
+Supabase forward-only pgmq queue
+      ↓
+enrichment_worker.py  ← open-weight inference endpoint
+      ↓
+hash-guarded enrichment patch + job_skills
 ```
 
 **What to do for Market Data_V1_of_Scrapers/ folder:**

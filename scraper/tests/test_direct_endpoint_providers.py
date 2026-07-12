@@ -785,6 +785,13 @@ def test_ashby_job_board_parser_maps_description_plain() -> None:
                 "location": "New York, United States",
                 "descriptionPlain": "US-only role.",
             },
+            {
+                "id": "india-title",
+                "title": "Senior Solutions Architect - India",
+                "department": "Solutions",
+                "location": "APAC | Remote",
+                "descriptionPlain": "Support customers across the India market.",
+            },
         ]
     }
     jobs = parse_ashby_job_board(
@@ -796,10 +803,11 @@ def test_ashby_job_board_parser_maps_description_plain() -> None:
             "india_only": True,
         },
     )
-    check("ashby filters india", len(jobs) == 1)
+    check("ashby filters india", len(jobs) == 2)
     check("ashby title", jobs[0]["title"] == "Senior Solution Engineer")
     check("ashby jd", "data cloud solutions" in jobs[0]["raw_jd_text"])
     check("ashby apply url", jobs[0]["job_url"].endswith("/application"))
+    check("ashby title country signal", jobs[1]["location_city"] == "APAC | Remote | India")
 
 
 def test_trakstar_listing_fetches_detail_and_filters_india() -> None:

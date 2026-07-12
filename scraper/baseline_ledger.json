@@ -320,6 +320,14 @@
     "route": null,
     "updated": "2026-06-13"
   },
+  "Boomi": {
+    "company": "Boomi",
+    "ats": "",
+    "last_good_count": 26,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
+  },
   "Bosch": {
     "company": "Bosch",
     "ats": "",
@@ -391,6 +399,14 @@
     "last_good_run": "ea37379e-5f3c-46d0-9c36-6ddaaac6e8fd",
     "route": null,
     "updated": "2026-06-13"
+  },
+  "Celonis": {
+    "company": "Celonis",
+    "ats": "",
+    "last_good_count": 32,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
   },
   "Chanel": {
     "company": "Chanel",
@@ -534,7 +550,23 @@
     "last_good_count": 7,
     "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
     "route": null,
-    "updated": "2026-06-13"
+    "updated": "2026-07-07"
+  },
+  "Deepgram": {
+    "company": "Deepgram",
+    "ats": "",
+    "last_good_count": 2,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
+  },
+  "Dell": {
+    "company": "Dell",
+    "ats": "",
+    "last_good_count": 77,
+    "last_good_run": "ff6e9718-027c-4eca-ae88-9a5b73bd1269",
+    "route": null,
+    "updated": "2026-07-07"
   },
   "Deutsche Bank": {
     "company": "Deutsche Bank",
@@ -688,6 +720,14 @@
     "route": null,
     "updated": "2026-06-13"
   },
+  "Glean": {
+    "company": "Glean",
+    "ats": "",
+    "last_good_count": 26,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
+  },
   "Godrej Consumer Products": {
     "company": "Godrej Consumer Products",
     "ats": "",
@@ -774,7 +814,23 @@
     "last_good_count": 61,
     "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
     "route": null,
-    "updated": "2026-06-13"
+    "updated": "2026-07-07"
+  },
+  "Hightouch": {
+    "company": "Hightouch",
+    "ats": "",
+    "last_good_count": 2,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
+  },
+  "Hitachi Vantara": {
+    "company": "Hitachi Vantara",
+    "ats": "",
+    "last_good_count": 1,
+    "last_good_run": "ff6e9718-027c-4eca-ae88-9a5b73bd1269",
+    "route": null,
+    "updated": "2026-07-07"
   },
   "Honeywell": {
     "company": "Honeywell",
@@ -782,7 +838,23 @@
     "last_good_count": 317,
     "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
     "route": null,
-    "updated": "2026-06-13"
+    "updated": "2026-07-07"
+  },
+  "Hootsuite": {
+    "company": "Hootsuite",
+    "ats": "",
+    "last_good_count": 1,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
+  },
+  "IIFL Finance": {
+    "company": "IIFL Finance",
+    "ats": "",
+    "last_good_count": 1,
+    "last_good_run": "ff6e9718-027c-4eca-ae88-9a5b73bd1269",
+    "route": null,
+    "updated": "2026-07-07"
   },
   "ITC Limited": {
     "company": "ITC Limited",
@@ -1435,10 +1507,10 @@
   "Stripe": {
     "company": "Stripe",
     "ats": "",
-    "last_good_count": 49,
-    "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
+    "last_good_count": 37,
+    "last_good_run": "094a7380-5f1b-47db-81b5-2cda00ddbfdb",
     "route": null,
-    "updated": "2026-06-13"
+    "updated": "2026-07-11"
   },
   "Sumo Logic": {
     "company": "Sumo Logic",
@@ -1655,6 +1727,14 @@
     "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
     "route": null,
     "updated": "2026-06-13"
+  },
+  "Zapier": {
+    "company": "Zapier",
+    "ats": "",
+    "last_good_count": 3,
+    "last_good_run": "04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a",
+    "route": null,
+    "updated": "2026-07-12"
   },
   "Zeta": {
     "company": "Zeta",

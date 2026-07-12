@@ -35,17 +35,18 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 
 ---
 
-## CURRENT STATE (as of 2026-06-13)
+## CURRENT STATE (as of 2026-07-12)
 
-- **Data:** ~19,000 jobs in Supabase (`jobs`, project `gipvxuugajkugntwkeiz`; last exact 18,991) · 212,742 `job_skills` rows · last full load `upload_20260504_114053` (zero errors/drift).
-- **Portals:** `KNOWN_PORTALS.md` is the source of truth — 36 ATS sections, **307 active rows** (+33 net-new India-hiring companies 2026-06-13 via the new `scraper/discovery/` pipeline; +3 parked `⚠️` pending identity check: TSMG, Genesis, Verve). Per-crack history lives there + in git, not here.
+- **Data:** 53,046 jobs in Supabase (`jobs`, project `gipvxuugajkugntwkeiz`), 46,206 currently active, and 413,836 `job_skills` rows (read-only snapshot 2026-07-12; active count moves as the delisting loop runs).
+- **Portals:** `KNOWN_PORTALS.md` is the source of truth — current parser count **316 active rows**. The 2026-07-12 `career-ops` audit added five Greenhouse boards and first-class Ashby parsing for Deepgram/Zapier; ElevenLabs remains parked for location-semantic review. Per-crack history lives there + in git, not here.
 - **Scale-out discovery pipeline (`scraper/discovery/`, built 2026-06-13):** path to grow company coverage toward 10k. **(a) College-seed path** — `phase0_discover.py` spends Firecrawl **cloud** credits (`cloud_extract`) to pull recruiter names off Tier-1/2 college placement pages (`college_sources.json`, 41 sources → 1,146 companies in `seed_companies.{json,csv}`); then FREE `resolve_ats.py` probes Greenhouse/Lever/Ashby/SmartRecruiters with slug candidates + collision guards → `promote_candidates.py` token+name-dedups. Yield ~18 net-new per ~1,150 seed (diminishing — top recruiters are Workday/Darwinbox, not token boards). **(b) Board-directory harvest (the real 10k lever, FREE)** — `harvest_boards.py` + shared `ats_probes.py`: feed candidate tokens (`board_tokens.txt`, collected free via `site:boards.greenhouse.io`/`jobs.lever.co`/etc. searches → real slugs, no 404 waste), probe, India-filter, dedup vs live portals, emit promote stubs. First run: 29 tokens → 23 net-new India boards (~80% conversion). **Quality caveat: SmartRecruiters + some Lever surface staffing/aggregator/microtask boards (Squircle, CapitalAim, TMI, Welocalize, Weekday) — exclude these from promotion; they pollute the candidate-facing DB. Promote product-company boards only.** Ashby routing is hardcoded in `portal_reader.py` (`ats_overrides`/`endpoint_overrides` dicts) — add new Ashby companies there, not just KNOWN_PORTALS. **Always regenerate `diagnose.py` on a fresh run before `--probe-crack`; a stale NEEDS_CRACK list wastes credits re-discovering already-cracked companies (happened 2026-06-13: all 10 stubs were already live).**
 - **Operating mode:** Firecrawl cloud = discovery microscope (`map → selective scrape`), then promote the durable direct route; never leave Firecrawl as the final architecture unless genuinely anti-bot/JS-opaque. Free plan throttles at **6 req/min** → `diagnose.py --probe-crack` needs `--crack-delay 11`; run cloud via `FIRECRAWL_URL= FIRECRAWL_API_KEY=<cloud key> python …`.
 - **Self-healing diagnostic (Phase 4) is live** — see its section below.
 - **Pagination:** shared `providers/_paginate.py` seam owns the stop decision; zwayam/hm_wp/eightfold migrated, the rest adopt on-touch.
 - **Layout:** tests in `scraper/tests/` (+ conftest); narrative docs + handoffs in `docs/`; root keeps CLAUDE/AGENTS/README/KNOWN_PORTALS/RUN_HISTORY/HANDOVER.
 - **Health tracking:** official per-company counts only after a real `csv_importer.py` load; scrape-only counts are provisional and stay local.
-- **Upskilling question-bank pilot is implemented:** isolated `scraper/question_bank/` pipeline for Machine Learning, Product Strategy, Management Consulting, and Financial Accounting. Live schema/taxonomy preflight passes; `skill_questions` remains empty until source JSONL is supplied, LM Studio is loaded, and an explicit `--publish` run succeeds.
+- **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation runs `daily_cycle.py`: poll → publish → start/load LM Studio → drain enrichment. The next run is re-anchored 24 hours after the preceding run finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
+- **Upskilling question-bank pilot is implemented:** isolated `scraper/question_bank/` pipeline for Machine Learning, Product Strategy, Management Consulting, and Financial Accounting. Live schema/taxonomy preflight passes; `skill_questions` remains empty until source JSONL is supplied, local LM Studio is loaded, and an explicit `--publish` run succeeds. Unlike job enrichment, question-bank config still intentionally refuses non-loopback LLM URLs.
 
 ### Output folder location
 > **In-repo.** CSV/JSON outputs live inside the repo (git-ignored, not committed).
@@ -75,16 +76,21 @@ python portal_inventory.py --probe --include-js --sample-size 3 # includes JS ro
 python portal_inventory.py --probe --include-js --from-inventory ../logs/portal_inventory_<merged>.json --probe-states skipped_needs_docker,fallback_needs_docker --needs-docker-only --limit 10 --offset 0
                                                                # re-probe only prior Docker-needed rows
 
-# Phase 2 — enrich (LM Studio on, Docker off)
-python main.py --enrich-only
+# Phase 3A — publish source fields immediately
+python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)" --dry-run
+python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"
 
-# Phase 3 — upload to Supabase
+# Lazy Phase 2/3B — enrich queued forward-only jobs when inference is available
+ENRICH_FORCE_LLM=1 python enrichment_worker.py --batch-size 10 --max-messages 100
+
+# Legacy linear path (kept until async cutover verification)
+python main.py --enrich-only
 python csv_importer.py --dry-run    # verify counts, no writes
 python csv_importer.py              # full upsert
 python csv_importer.py --company "Stripe"  # single company smoke test
 ```
 
-**Two-phase run required** — Docker and LM Studio can't run simultaneously (RAM constraint).
+**During the legacy cutover path**, if using local LM Studio on a low-RAM machine, keep Docker off during enrichment. After the async migration is deployed, source publication no longer waits for inference; the worker can run later or against an approved remote open-weight endpoint.
 **Never use `--resume` for a fresh weekly run** — it skips companies with existing output folders.
 **Docker is only needed for** full scrape fallback paths or `portal_inventory.py --probe --include-js`.
 
@@ -93,15 +99,18 @@ python csv_importer.py --company "Stripe"  # single company smoke test
 ## SCRAPER PIPELINE
 
 ```
-KNOWN_PORTALS.md  ←  portal config (URL, ATS type, company name)
-      ↓
-main.py + providers/  ←  ATS direct API → raw JSON per company
-  (Firecrawl scrape() only as JS-heavy fallback, via Docker)
-      ↓
-enricher.py  ←  LM Studio → role_domain + structured skills with required_level
-      ↓
-csv_importer.py  ←  upsert to Supabase on job_id
-                 ←  writes official per-company health to scrape_diagnostics after final load
+KNOWN_PORTALS.md → main.py/providers → raw JSON
+                                      ↓
+                       csv_importer.py --source-only
+                                      ↓
+                     Supabase job visible immediately
+                                      ↓
+                  durable forward-only enrichment queue
+                                      ↓
+               enrichment_worker.py (LM Studio / approved
+                       remote open-weight endpoint)
+                                       ↓
+                    hash-guarded enrichment patch + job_skills
 ```
 
 ## COMPANY RUN HEALTH TRACKING
@@ -110,7 +119,7 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 
 - Scrape-only outputs (`main.py` logs, `run_summary_*.json`, and local `jobs.json`) are provisional debugging evidence, not official history.
 - During batch iteration, set `SCRAPE_DIAGNOSTICS_DISABLED=1` for Phase 1 scrape-only runs when Supabase env vars are present, so provisional scrape counts do not write to `scrape_diagnostics`.
-- After enrichment and a successful real `csv_importer.py` load, use importer diagnostics as the source of truth.
+- After a successful real source load, use importer diagnostics as the source of truth; enrichment completion is tracked independently.
 - For each loaded company, report: `company_name`, `run_id`, `raw_jobs`, `saved_new`, enriched percent, skill drift, unknown location rows, status/reason.
 - If a company fails before final load, record it as a pipeline issue to investigate, not as an official company count.
 
@@ -130,7 +139,11 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → structured `skills` + back-compat arrays |
 | `writer.py` | `to_canonical()` → deduped JSON+CSV saved to output folder |
 | `main.py` | Orchestrator — all CLI flags; auto-runs self-diagnosis at run end |
-| `csv_importer.py` | Phase 3 upsert: dedup, lifecycle, apply_url gate, industry_group, location_city; syncs `baseline_ledger.json` forward after load |
+| `csv_importer.py` | Phase 3A source-only publish or legacy full upsert; source-only mode preserves model-owned columns |
+| `enrichment_state.py` | Forward-only source hash and enrichment-version contract |
+| `enrichment_worker.py` | Lazy Supabase queue consumer; retries inference outages and rejects stale/inactive work |
+| `ASYNC_ENRICHMENT.md` | Cutover contract, commands, and rollout verification |
+| `CAREER_OPS_AUDIT.md` | Upstream provider audit, adopted boards, trust comparison, and direct-ATS expansion backlog |
 | `diagnose.py` | Phase 4 self-healing diagnostic — classify a run's 0/low companies into buckets, `--probe` re-tests routes |
 | `heal/` | Self-healing package: `baseline.py` (ledger), `classifier.py` (failure buckets), `probe.py` (live re-test seam) |
 | `baseline_ledger.json` | Per-company last-known-good India count — auto-synced from `scrape_diagnostics`; forward-only |
@@ -351,10 +364,6 @@ The `scraper/discovery/` engine works; only repeated execution + one gate remain
 - **2b — Build the harvester quality gate.** In `harvest_boards.py`, downgrade staffing/aggregator/microtask boards to `status='review'` (not `india`) so they never auto-promote: gate on very-high `total` (e.g. >400) OR `board_name`/`slug` matching `consulting|staffing|advisory|recruitment|manpower|outsourc|networks?marketplace`. (2026-06-13 these polluted: Squircle 1784, CapitalAim, TMI, Welocalize, Weekday.)
 - **2c — Run + promote at scale.** `python discovery/harvest_boards.py` → review `harvest_promote.md` → promote product-company India boards. For Ashby, also add `ats_overrides`+`endpoint_overrides` entries in `portal_reader.py` (Ashby is name-hardcoded). Consider an `apply_harvest.py` to auto-append correctly-formatted rows to KNOWN_PORTALS instead of hand-edits.
 - **Reality:** college-seed path (`phase0_discover.py` + `resolve_ats.py`) is credit-bound + diminishing (~18 net-new per ~1,150 seed); the board-directory harvest (2a–2c) is the actual 10k lever.
-
-### 3 — Archon weekly cadence (ongoing)
-- Weekly cron: `0 2 * * 0` via `.archon/workflows/scraper-weekly-run.yaml`
-- After each run: update `RUN_HISTORY.md` + `KNOWN_PORTALS.md`
 
 ### 4 — Upskilling question-bank pipeline (pilot implemented 2026-06-11; population pending — OWNED BY CODEX as of 2026-06-13)
 

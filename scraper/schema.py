@@ -13,6 +13,16 @@ Do not add fields here without also updating the Supabase DDL and CLAUDE.md.
 from __future__ import annotations
 from typing import TypedDict
 
+MIN_JOB_DESCRIPTION_LEN = 50
+MISSING_JD_NOTE = (
+    "No JD provided on the company page. Matching and skill extraction are "
+    "unavailable for this role until a job description is published."
+)
+
+
+def is_missing_jd_description(value: str | None) -> bool:
+    return (value or "").strip() == MISSING_JD_NOTE
+
 
 class Portal(TypedDict, total=False):
     """
@@ -66,9 +76,10 @@ class Portal(TypedDict, total=False):
     # Phenom-specific (no extra fields beyond endpoint)
 
 # Ordered canonical field list — the schema of the written jobs.json / jobs.csv.
-# Mirrors the Supabase `jobs` table columns EXCEPT `skills` (structured enrichment
-# output consumed for job_skills, not a jobs column). Lifecycle columns (first_seen,
-# last_seen, is_active, change_fingerprint) are Supabase-managed and not included here.
+# Mirrors the Supabase `jobs` table columns EXCEPT JSON-only enrichment fields:
+# `skills` (consumed for job_skills) and `candidate_profile*` (consumed for
+# job_candidate_profiles). Lifecycle columns (first_seen, last_seen, is_active,
+# change_fingerprint) are Supabase-managed and not included here.
 CANONICAL_FIELDS: list[str] = [
     "job_id",
     "job_title",
@@ -85,6 +96,10 @@ CANONICAL_FIELDS: list[str] = [
     "location_quality",
     "locations",
     "apply_url",
+    "source_url",
+    "source_platform",
+    "ingestion_source",
+    "quality_status",
     "role_domain",
     # Skills: ONE flat list. `skills` carries the structured {name, required_level}
     # objects consumed by csv_importer to write job_skills (the FK source of truth).
@@ -95,6 +110,13 @@ CANONICAL_FIELDS: list[str] = [
     "skills",
     "main_skills",
     "side_skills",
+    # Candidate-profile fields are JSON-output only — imported into the
+    # `job_candidate_profiles` table, not the `jobs` table.
+    "candidate_profile",
+    "candidate_profile_version",
+    "candidate_profile_hash",
+    "candidate_profile_model",
+    "job_content_hash",        # scraper-owned change signal for True_Yodha job embeddings; not the vector
     # Structured facts surfaced as card chips (kept OUT of the JD blob).
     "date_posted",             # original posting date string from the ATS
     "seniority_level",         # e.g. Entry / Mid / Senior (provider-supplied)

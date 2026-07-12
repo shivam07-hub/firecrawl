@@ -33,14 +33,15 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
 from providers import dispatch_scrape
-from enricher import enrich_job
-from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker, _skills_to_csv
+from enricher import InferenceQuotaExceeded, enrich_job, has_terminal_core_enrichment
+from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker, _skills_to_csv, stamp_job_content_hash
 from run_checkpoint import RunCheckpoint
 from typing import Callable
 from utils import company_slug
 from config import OUTPUT_BASE
 from validation import LOW_COUNT_THRESHOLD
 from pipeline_validator import run_gate
+from schema import is_missing_jd_description
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
@@ -223,6 +224,12 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
 
         log.info(f"  {len(raw_jobs)} raw jobs scraped")
 
+        for raw_job in raw_jobs:
+            raw_job.setdefault("source_platform", ats)
+            raw_job.setdefault("source_url", raw_job.get("source_api_url") or portal.get("endpoint") or portal.get("careers_url") or "")
+            raw_job.setdefault("ingestion_source", "scraper")
+            raw_job.setdefault("quality_status", "auto_extracted")
+
         # ── Normalise to 7-field schema ───────────────────────────────────────
         canonical = [to_canonical(j, company) for j in raw_jobs]
 
@@ -367,49 +374,104 @@ def _persist_diagnostics_to_supabase(summary: dict, log: logging.Logger) -> None
 # ── Enrich-only pass ──────────────────────────────────────────────────────────
 
 def _needs_enrichment(job: dict) -> bool:
-    """True if the job has job_description but no skills enrichment yet."""
+    """True if the job has JD text and is missing core Phase 2 skills."""
     has_jd     = bool((job.get('job_description') or '').strip())
-    has_skills = bool(job.get('skills') or job.get('main_skills'))
-    return has_jd and not has_skills
+    if is_missing_jd_description(job.get('job_description')):
+        return False
+    return has_jd and not has_terminal_core_enrichment(job)
 
 
-def enrich_only_run(log: logging.Logger) -> None:
+def _company_name_from_json_path(json_path: Path) -> str:
+    return json_path.parent.parent.parent.name
+
+
+def _filter_enrich_json_files(json_files: list[Path], company_filter: str | None) -> list[Path]:
+    if not company_filter:
+        return json_files
+    needle = company_filter.lower()
+    return [path for path in json_files if needle in _company_name_from_json_path(path).lower()]
+
+
+def _latest_enrich_json_files(json_files: list[Path]) -> list[Path]:
+    latest: dict[str, Path] = {}
+    for path in json_files:
+        company = _company_name_from_json_path(path)
+        current = latest.get(company)
+        if current is None or path.parent.name > current.parent.name:
+            latest[company] = path
+    return sorted(latest.values())
+
+
+def enrich_only_run(
+    log: logging.Logger,
+    *,
+    company_filter: str | None = None,
+    max_jobs_per_company: int | None = None,
+    latest_only: bool = False,
+) -> None:
     """
     Walk All_CSV_Outputs/*/Outputs/*/jobs.json — enrich unenriched jobs in-place.
     LM Studio must be running. No Firecrawl calls are made.
     """
     base = Path(OUTPUT_BASE)
-    json_files = sorted(base.rglob("jobs.json"))
+    json_files = _filter_enrich_json_files(sorted(base.rglob("jobs.json")), company_filter)
+    if latest_only:
+        json_files = _latest_enrich_json_files(json_files)
     log.info(f"Enrich-only mode: found {len(json_files)} jobs.json file(s)")
+    if company_filter:
+        log.info(f"Enrich-only company filter: {company_filter}")
+    if latest_only:
+        log.info("Enrich-only latest-output mode enabled")
+    if max_jobs_per_company:
+        log.info(f"Enrich-only cap: {max_jobs_per_company} jobs/company")
 
     total_enriched = total_failed = 0
+    attempted_by_company: dict[str, int] = {}
 
     for json_path in json_files:
+        folder_company = _company_name_from_json_path(json_path)
+        remaining_cap = None
+        if max_jobs_per_company:
+            used = attempted_by_company.get(folder_company, 0)
+            remaining_cap = max_jobs_per_company - used
+            if remaining_cap <= 0:
+                log.info(f"  {folder_company}: enrich-only cap reached — skipping remaining files")
+                continue
+
         try:
             jobs = json.loads(json_path.read_text(encoding='utf-8'))
         except Exception as e:
             log.warning(f"  Could not read {json_path}: {e}")
             continue
 
-        to_enrich = [j for j in jobs if _needs_enrichment(j)]
+        pending = [j for j in jobs if _needs_enrichment(j)]
+        to_enrich = pending[:remaining_cap] if remaining_cap else pending
         if not to_enrich:
             log.info(f"  {json_path.parent.parent.parent.name}: all jobs already enriched — skipping")
             continue
 
         company = jobs[0].get('company_name', json_path.parent.parent.parent.name) if jobs else '?'
-        log.info(f"  {company}: enriching {len(to_enrich)}/{len(jobs)} jobs")
+        log.info(f"  {company}: enriching {len(to_enrich)}/{len(pending)} pending jobs ({len(jobs)} total)")
 
         ok = fail = 0
+        quota_exhausted = False
         _workers = int(os.getenv("ENRICH_WORKERS", "4"))
         with ThreadPoolExecutor(max_workers=_workers) as pool:
             futures = {
                 pool.submit(enrich_job, job): job
-                for job in jobs if _needs_enrichment(job)
+                for job in to_enrich
             }
             for fut in as_completed(futures):
                 try:
                     fut.result()
                     ok += 1
+                except InferenceQuotaExceeded as e:
+                    log.warning(f"    inference quota exhausted for '{futures[fut].get('job_title')}': {e}")
+                    fail += 1
+                    quota_exhausted = True
+                    for pending_fut in futures:
+                        pending_fut.cancel()
+                    break
                 except Exception as e:
                     log.warning(f"    enrich failed for '{futures[fut].get('job_title')}': {e}")
                     fail += 1
@@ -417,8 +479,12 @@ def enrich_only_run(log: logging.Logger) -> None:
         log.info(f"    {ok} ok  {fail} failed")
         total_enriched += ok
         total_failed   += fail
+        attempted_by_company[folder_company] = attempted_by_company.get(folder_company, 0) + len(to_enrich)
 
         # Write back JSON (atomic: tmp → rename)
+        for job in jobs:
+            stamp_job_content_hash(job)
+
         tmp_path = json_path.with_name("jobs.tmp.json")
         tmp_path.write_text(json.dumps(jobs, indent=2, ensure_ascii=False), encoding='utf-8')
         tmp_path.rename(json_path)
@@ -437,6 +503,9 @@ def enrich_only_run(log: logging.Logger) -> None:
 
         # Marker after both JSON and CSV succeed
         write_complete_marker(json_path.parent, len(jobs), ok)
+        if quota_exhausted:
+            log.warning("Enrich-only stopped early because inference quota was exhausted")
+            break
 
     log.info(f"Enrich-only complete — {total_enriched} enriched, {total_failed} failed")
 
@@ -451,6 +520,7 @@ def main():
     parser.add_argument("--skip-enrich",           action="store_true", help="Skip LLM enrichment, save raw scraped data")
     parser.add_argument("--resume",                action="store_true", help="Skip companies that already have output in All_CSV_Outputs")
     parser.add_argument("--enrich-only",           action="store_true", help="Enrich already-scraped jobs (no scraping, LM Studio only)")
+    parser.add_argument("--latest-only",           action="store_true", help="With --enrich-only, process only each company's latest output folder")
     parser.add_argument("--scope", choices=["india", "global"], default="india",
                         help="Job geography scope (default: india).")
     parser.add_argument("--company-cap", type=int, default=_DEFAULT_COMPANY_CAP,
@@ -468,7 +538,14 @@ def main():
     log = setup_logging()
 
     if args.enrich_only:
-        enrich_only_run(log)
+        raw_cap = args.global_cap if args.global_cap is not None else args.company_cap
+        max_jobs = raw_cap if raw_cap else None
+        enrich_only_run(
+            log,
+            company_filter=args.company,
+            max_jobs_per_company=max_jobs,
+            latest_only=args.latest_only,
+        )
         return
 
     # --validate: cap to 5 jobs/company, no enrichment, separate output folder

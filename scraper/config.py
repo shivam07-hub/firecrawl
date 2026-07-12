@@ -1,22 +1,145 @@
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-# ── LM Studio (local, no cloud) ───────────────────────────────────────────────
-LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
-LM_STUDIO_API_KEY  = os.getenv("LM_STUDIO_API_KEY",  "lm-studio")
+# ── Open-weight inference ────────────────────────────────────────────────────
+_LOCAL_INFERENCE_BASE_URL = "http://localhost:1234/v1"
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_CLOUDFLARE_HOST = "api.cloudflare.com"
 
-# MODEL_SPEED selects between fast (small, quick) and quality (larger, slower).
-# Override via .env: MODEL_SPEED=fast|quality
-# Or set LM_STUDIO_MODEL directly to bypass the preset logic.
+
+@dataclass(frozen=True)
+class InferenceConfig:
+    base_url: str
+    api_key: str
+    model: str
+    provider: str
+    model_allowlist: tuple[str, ...]
+
+
+def _first_env(values: Mapping[str, str], *names: str, default: str = "") -> str:
+    for name in names:
+        value = (values.get(name) or "").strip()
+        if value:
+            return value
+    return default
+
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def _is_loopback_base_url(base_url: str) -> bool:
+    return urlparse(base_url).hostname in _LOOPBACK_HOSTS
+
+
+def _cloudflare_workers_ai_base_url(values: Mapping[str, str]) -> str:
+    account_id = _first_env(values, "CLOUDFLARE_ACCOUNT_ID", "CF_ACCOUNT_ID")
+    model = _first_env(values, "CLOUDFLARE_WORKERS_AI_MODEL")
+    if not account_id or not model:
+        return ""
+    return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+
+
+def _is_cloudflare_workers_ai_base_url(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    return parsed.hostname == _CLOUDFLARE_HOST and "/ai/v1" in parsed.path
+
+
+def resolve_inference_config(env: Mapping[str, str] | None = None) -> InferenceConfig:
+    """Resolve local LM Studio or an allowlisted remote open-weight endpoint."""
+    values = os.environ if env is None else env
+    cloudflare_base_url = _cloudflare_workers_ai_base_url(values)
+    base_url = _first_env(
+        values,
+        "INFERENCE_BASE_URL",
+        "OPEN_WEIGHT_BASE_URL",
+        default=cloudflare_base_url
+        or _first_env(values, "LM_STUDIO_BASE_URL", default=_LOCAL_INFERENCE_BASE_URL),
+    ).rstrip("/")
+    using_cloudflare = _is_cloudflare_workers_ai_base_url(base_url)
+    api_key = _first_env(
+        values,
+        "INFERENCE_API_KEY",
+        "OPEN_WEIGHT_API_KEY",
+        *(("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY") if using_cloudflare else ()),
+        "LM_STUDIO_API_KEY",
+        default="lm-studio",
+    )
+
+    speed = (values.get("MODEL_SPEED") or "fast").strip().lower()
+    fast_model = _first_env(
+        values,
+        "INFERENCE_MODEL_FAST",
+        "OPEN_WEIGHT_MODEL_FAST",
+        "LM_STUDIO_MODEL_FAST",
+        default="google/gemma-3-4b",
+    )
+    quality_model = _first_env(
+        values,
+        "INFERENCE_MODEL_QUALITY",
+        "OPEN_WEIGHT_MODEL_QUALITY",
+        "LM_STUDIO_MODEL_QUALITY",
+        default="deepseek-r1-0528-qwen3-8b-mlx",
+    )
+    model = _first_env(
+        values,
+        "INFERENCE_MODEL",
+        "OPEN_WEIGHT_MODEL",
+        *(("CLOUDFLARE_WORKERS_AI_MODEL",) if using_cloudflare else ()),
+        "LM_STUDIO_MODEL",
+        default=fast_model if speed == "fast" else quality_model,
+    )
+    if not model:
+        raise ValueError("inference model name is required")
+
+    allowlist = _split_csv(
+        _first_env(
+            values,
+            "INFERENCE_MODEL_ALLOWLIST",
+            "OPEN_WEIGHT_MODEL_ALLOWLIST",
+            "CLOUDFLARE_WORKERS_AI_MODEL_ALLOWLIST",
+        )
+    )
+    if _is_loopback_base_url(base_url):
+        provider = "local"
+    elif using_cloudflare:
+        provider = "cloudflare_workers_ai"
+    else:
+        provider = "remote_open_weight"
+
+    if provider in {"remote_open_weight", "cloudflare_workers_ai"}:
+        if not allowlist:
+            raise ValueError("remote open-weight inference requires an explicit model allowlist")
+        if model not in allowlist:
+            raise ValueError(f"inference model {model!r} is not in the open-weight allowlist")
+
+    return InferenceConfig(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        provider=provider,
+        model_allowlist=allowlist,
+    )
+
+
+_INFERENCE_CONFIG = resolve_inference_config()
+INFERENCE_BASE_URL = _INFERENCE_CONFIG.base_url
+INFERENCE_API_KEY = _INFERENCE_CONFIG.api_key
+INFERENCE_MODEL = _INFERENCE_CONFIG.model
+INFERENCE_PROVIDER = _INFERENCE_CONFIG.provider
+INFERENCE_MODEL_ALLOWLIST = _INFERENCE_CONFIG.model_allowlist
+
+# Backward-compatible aliases for older scraper modules and local env files.
+LM_STUDIO_BASE_URL = INFERENCE_BASE_URL
+LM_STUDIO_API_KEY = INFERENCE_API_KEY
+LM_STUDIO_MODEL = INFERENCE_MODEL
 _speed = os.getenv("MODEL_SPEED", "fast").lower()
-_fast_model    = os.getenv("LM_STUDIO_MODEL_FAST",    "google/gemma-3-4b")
-_quality_model = os.getenv("LM_STUDIO_MODEL_QUALITY", "deepseek-r1-0528-qwen3-8b-mlx")
-LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL") or (
-    _fast_model if _speed == "fast" else _quality_model
-)
 
 # ── Firecrawl — SDK-based. Set FIRECRAWL_URL=http://localhost:3002 for Docker.
 # Defaults to cloud API (api.firecrawl.dev) if unset or set to the cloud URL.

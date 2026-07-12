@@ -135,6 +135,13 @@ def test_direct_endpoint_routes() -> None:
         "Simon-Kucher & Partners": "cornerstone",
         "Virtusa": "virtusa_firecrawl",
         "Kearney": "yello",
+        "Celonis": "greenhouse",
+        "Glean": "greenhouse",
+        "Boomi": "greenhouse",
+        "Hightouch": "greenhouse",
+        "Hootsuite": "greenhouse",
+        "Deepgram": "ashby",
+        "Zapier": "ashby",
     }
     for company, ats in expected.items():
         portal = _portal(company)

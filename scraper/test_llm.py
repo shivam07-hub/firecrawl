@@ -1,9 +1,10 @@
-"""Isolate LM Studio call — run directly: python3 test_llm.py"""
+"""Isolate inference call — run directly: python3 test_llm.py"""
+import json
 from openai import OpenAI
-from config import LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL
-from enricher import _SYSTEM_PROMPT, _ENRICH_PROMPT
+from config import INFERENCE_BASE_URL, INFERENCE_API_KEY, INFERENCE_MODEL, INFERENCE_PROVIDER
+from enricher import _ENRICH_PROMPT
 
-client = OpenAI(base_url=LM_STUDIO_BASE_URL, api_key=LM_STUDIO_API_KEY)
+client = OpenAI(base_url=INFERENCE_BASE_URL, api_key=INFERENCE_API_KEY)
 
 SAMPLE_JD = """
 We are hiring a Senior Data Engineer to join our Data Platform team in Bengaluru.
@@ -22,22 +23,34 @@ Nice to have:
 This is a full-time hybrid role (3 days onsite in Bengaluru).
 """
 
-prompt = _ENRICH_PROMPT.format(title="Senior Data Engineer", jd=SAMPLE_JD)
+prompt = _ENRICH_PROMPT.format(
+    title="Senior Data Engineer",
+    jd=SAMPLE_JD,
+    explicit_skill_evidence=json.dumps([
+        {"name": "Python (Programming Language)", "required_level": 4, "zone": "mandatory", "evidence": "Strong proficiency in Python and SQL"},
+        {"name": "SQL (Programming Language)", "required_level": 4, "zone": "mandatory", "evidence": "Strong proficiency in Python and SQL"},
+        {"name": "Apache Spark", "required_level": 2, "zone": "mandatory", "evidence": "Experience with Apache Spark and Kafka"},
+        {"name": "Apache Kafka", "required_level": 2, "zone": "mandatory", "evidence": "Experience with Apache Spark and Kafka"},
+    ]),
+    skills_list="Python (Programming Language), SQL (Programming Language), Apache Spark, Apache Kafka, Amazon Web Services, Data Engineering",
+)
 
-print(f"Model:    {LM_STUDIO_MODEL}")
-print(f"Base URL: {LM_STUDIO_BASE_URL}")
+print(f"Provider: {INFERENCE_PROVIDER}")
+print(f"Model:    {INFERENCE_MODEL}")
+print(f"Base URL: {INFERENCE_BASE_URL}")
 print(f"Prompt tokens (est): ~{len(prompt)//4}")
-print("\nCalling LM Studio...")
+print("\nCalling inference endpoint...")
 
 try:
     resp = client.chat.completions.create(
-        model=LM_STUDIO_MODEL,
+        model=INFERENCE_MODEL,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": "You are a precise job data extractor. Start your response with { immediately. No preamble, no markdown."},
             {"role": "user",   "content": prompt},
+            {"role": "assistant", "content": "{"},
         ],
-        temperature=0.05,
-        max_tokens=300,
+        temperature=0.0,
+        max_tokens=1024,
     )
     raw = resp.choices[0].message.content
     print(f"\nRAW RESPONSE:\n{raw}")

@@ -1,233 +1,29 @@
-name: scraper-weekly-run
+name: scraper-daily-forward
 description: |
-  Mirror job scraper pipeline — weekly full global run: test → scrape → enrich → upload.
+  One complete forward-only career cycle. Phase 1 publishes directly to
+  Supabase, then local LM Studio is started and Phase 2 drains the durable
+  enrichment queue. Source publication remains non-blocking, but the daily
+  run is represented by one task and one completion report.
 
-  Cadence: weekly (Archon cron: 0 2 * * 0 )
-  Stages:
-    test-portals   — parse KNOWN_PORTALS.md and verify portals; abort if broken
-    check-docker   — verify Firecrawl Docker is up at localhost:3002 (Phase 1)
-    check-lm       — verify LM Studio is up at localhost:1234 (Phase 2)
-    scrape         — python main.py --skip-enrich --scope global --global-cap 2000   (~40-90 min)
-    enrich         — python main.py --enrich-only           (~20-40 min)
-    upload         — python csv_importer.py                 (< 5 min)
-    summarize      — AI node: concise run report with action items
+  The poll uses direct ATS endpoints first and the repository's existing
+  fallback policy. It records official lifecycle health only after publication.
 
-  Run manually:
-    archon workflow run scraper-weekly-run --no-worktree "Dump $(date +%Y-%m-%d)"
+  Manual run:
+    archon workflow run scraper-daily-forward --no-worktree
 
-  Resume after failure:
-    archon workflow run scraper-weekly-run --no-worktree --resume "Dump $(date +%Y-%m-%d)"
-
-  Phase 1 only (Docker on, LM Studio off):
-    Use --skip-enrich flag via ARGUMENTS override — or just let check-lm fail
-    gracefully; scrape still completes, enrich + upload are skipped.
-
-  KNOWN_PORTALS.md maintenance rules:
-    🔴 = no India jobs / API auth-gated / UUID not found — skip in scraper
-    ⚠️ = broken endpoint but fixable — attempt + fallback
-    🟡 = JS-required — use Firecrawl Docker scrape()
-    ✅ = direct API working, ≥5 jobs with JD confirmed
-
-schedule: "0 2 * * 0"
-
-provider: claude
-model: sonnet
+  Scheduling is owned by the Codex automation and re-anchored after a
+  successful run. This file deliberately has no independent cron schedule.
 
 nodes:
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 0 — Pre-flight checks (all three run in parallel)
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: check-docker
+  - id: validate-portals
     bash: |
-      echo "── Checking Firecrawl Docker at localhost:3002 ──"
-      HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-        http://localhost:3002/v1/scrape \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer test" \
-        -d '{"url":"https://example.com","formats":["markdown"]}' \
-        --max-time 8 2>/dev/null)
-      if [ "$HTTP" = "200" ] || [ "$HTTP" = "401" ] || [ "$HTTP" = "403" ]; then
-        echo "✅ Firecrawl Docker UP (HTTP $HTTP)"
-      else
-        echo "❌ Firecrawl Docker DOWN (HTTP ${HTTP:-no-response})"
-        echo "   Start it with: docker compose up -d"
-        exit 1
-      fi
-    timeout: 15000
+      cd scraper
+      python main.py --dry-run --scope india
+    timeout: 120000
 
-  - id: check-lm
+  - id: poll-publish-and-enrich
+    depends_on: [validate-portals]
     bash: |
-      echo "── Checking LM Studio at localhost:1234 ──"
-      HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-        http://localhost:1234/v1/models --max-time 5 2>/dev/null)
-      if [ "$HTTP" = "200" ]; then
-        echo "✅ LM Studio UP"
-        # List loaded models
-        MODELS=$(curl -s http://localhost:1234/v1/models 2>/dev/null \
-          | python3 -c "import sys,json; d=json.load(sys.stdin); ids=[m['id'] for m in d.get('data',[])]; print('   Loaded models: ' + (', '.join(ids) if ids else '(none)'))" 2>/dev/null)
-        echo "$MODELS"
-      else
-        echo "❌ LM Studio DOWN (HTTP ${HTTP:-no-response})"
-        echo "   Start LM Studio and load a model, then re-run."
-        exit 1
-      fi
-    timeout: 15000
-
-  - id: test-portals
-    bash: |
-      echo "── Parsing KNOWN_PORTALS.md (dry-run) ──"
-      cd scraper && python main.py --dry-run --scope global 2>&1
-      EXIT=$?
-      if [ $EXIT -ne 0 ]; then
-        echo "❌ Portal parse failed — check KNOWN_PORTALS.md for syntax errors"
-        exit $EXIT
-      fi
-      echo "✅ Portal parse OK"
-    timeout: 60000
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 1 — Scrape
-  # Requires: Docker (check-docker) + portal config valid (test-portals)
-  # LM Studio is NOT required — --skip-enrich suppresses all LLM calls
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: scrape
-    bash: |
-      echo "════════════════════════════════════"
-      echo "PHASE 1 — SCRAPE"
-      echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
-      echo "════════════════════════════════════"
-      cd scraper && python main.py --skip-enrich --scope global --global-cap 2000 2>&1
-      EXIT=$?
-      echo "────────────────────────────────────"
-      echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"
-      if [ $EXIT -ne 0 ]; then
-        echo "❌ Scrape phase exited with code $EXIT"
-        exit $EXIT
-      fi
-      echo "✅ Scrape phase complete"
-    depends_on: [check-docker, test-portals]
-    timeout: 7200000   # 2 hours — typical run is 40-90 min
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 2 — Enrich
-  # Requires: scrape complete (scrape) + LM Studio up (check-lm)
-  # Reads all jobs.json files and fills main_skills + side_skills via LM Studio
-  # Only enriches jobs that have job_description but no skills yet
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: enrich
-    bash: |
-      echo "════════════════════════════════════"
-      echo "PHASE 2 — ENRICH  (LM Studio)"
-      echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
-      echo "════════════════════════════════════"
-      cd scraper && python main.py --enrich-only 2>&1
-      EXIT=$?
-      echo "────────────────────────────────────"
-      echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"
-      if [ $EXIT -ne 0 ]; then
-        echo "❌ Enrich phase exited with code $EXIT"
-        exit $EXIT
-      fi
-      echo "✅ Enrich phase complete"
-    depends_on: [scrape, check-lm]
-    timeout: 3600000   # 1 hour — depends on job count and LM Studio speed
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 3 — Upload to Supabase
-  # Requires: enrichment done
-  # Reads latest jobs.json per company, quality-gates, upserts to Supabase
-  # Requires SUPABASE_URL + SUPABASE_SERVICE_KEY in scraper/.env
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: upload
-    bash: |
-      echo "════════════════════════════════════"
-      echo "PHASE 3 — UPLOAD  (Supabase)"
-      echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
-      echo "════════════════════════════════════"
-      python csv_importer.py 2>&1
-      EXIT=$?
-      echo "────────────────────────────────────"
-      echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"
-      if [ $EXIT -ne 0 ]; then
-        echo "❌ Upload phase exited with code $EXIT"
-        echo "   Check SUPABASE_URL and SUPABASE_SERVICE_KEY in scraper/.env"
-        exit $EXIT
-      fi
-      echo "✅ Upload phase complete"
-    depends_on: [enrich]
-    timeout: 300000    # 5 minutes
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 3.5 — Skill definitions (self-healing, threshold-gated)
-  # Requires: upload done (new jobs -> new skills referenced in job_skills)
-  # Fills public.skills.description from Lightcast skill-page <meta> via plain HTTP
-  # (0 Firecrawl credits, no Docker/LM needed). No-op until >= --threshold skills
-  # are missing a description, so this is cheap on most weeks.
-  # One-time prerequisite: run scraper/sql/add_skills_description.sql in Supabase.
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: skill-descriptions
-    bash: |
-      echo "════════════════════════════════════"
-      echo "LAYER 3.5 — SKILL DEFINITIONS"
-      echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
-      echo "════════════════════════════════════"
-      cd scraper && python skill_descriptions.py --write-supabase --threshold 50 2>&1
-      EXIT=$?
-      echo "────────────────────────────────────"
-      echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"
-      # exit 2 = migration not yet applied; warn but do not fail the whole run
-      if [ $EXIT -eq 2 ]; then
-        echo "⚠️  skills.description migration not applied — see add_skills_description.sql"
-      elif [ $EXIT -ne 0 ]; then
-        echo "❌ Skill-definitions step exited with code $EXIT"
-        exit $EXIT
-      fi
-      echo "✅ Skill-definitions step complete"
-    depends_on: [upload]
-    timeout: 600000    # 10 minutes — ~0.25s/skill, no-op most weeks
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # LAYER 4 — Run Summary (AI)
-  # Reads output from all phases, produces a concise report + action items
-  # Uses haiku — fast and cheap for structured summarisation
-  # ────────────────────────────────────────────────────────────────────────────
-
-  - id: summarize
-    prompt: |
-      The weekly Mirror job scraper pipeline has just completed. Summarise the run.
-
-      ── PRE-FLIGHT ──
-      LM Studio check:
-      $check-lm.output
-
-      Portal parse (dry-run):
-      $test-portals.output
-
-      ── PHASE 1: SCRAPE ──
-      $scrape.output
-
-      ── PHASE 2: ENRICH ──
-      $enrich.output
-
-      ── PHASE 3: UPLOAD ──
-      $upload.output
-
-      Write a concise run report (max 35 lines) covering:
-
-      1. **Portals** — how many were attempted, how many skipped (--resume), how many produced jobs
-      2. **Scrape** — total new jobs saved, companies with errors or 0 jobs
-      3. **Enrich** — jobs enriched vs failed; note if LM Studio model looks correct
-      4. **Upload** — jobs upserted, dropped by quality gate, deactivated
-      5. **Action items** — companies or phases needing attention next run (e.g. broken API, 0 JD fetch, LM Studio model mismatch)
-
-      Use a clean markdown format with bold section headers. Be specific — include numbers.
-    depends_on: [upload]
-    model: haiku
-    allowed_tools: []
-    context: fresh
+      cd scraper
+      python daily_cycle.py --scope india --company-cap 2000 --max-messages 10000
+    timeout: 21600000

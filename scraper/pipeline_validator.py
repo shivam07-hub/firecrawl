@@ -16,9 +16,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
+from schema import MIN_JOB_DESCRIPTION_LEN, is_missing_jd_description
+
 Stage = Literal["post_scrape", "pre_enrich", "post_enrich"]
 
-MIN_DESC_LEN = 50  # chars — below this a "description" is metadata noise
+MIN_DESC_LEN = MIN_JOB_DESCRIPTION_LEN  # chars — below this a "description" is metadata noise
 
 
 # ── Placeholder detection ─────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ def _post_scrape_reason(job: dict) -> str | None:
 
 def _pre_enrich_reason(job: dict) -> str | None:
     desc = job.get("job_description") or ""
+    if is_missing_jd_description(desc):
+        return None
     if not desc:
         return "empty_job_description"
     if len(desc) < MIN_DESC_LEN:
@@ -54,6 +58,8 @@ def _pre_enrich_reason(job: dict) -> str | None:
 
 
 def _post_enrich_reason(job: dict) -> str | None:
+    if is_missing_jd_description(job.get("job_description")):
+        return None
     if not job.get("main_skills"):
         return "no_main_skills_after_enrichment"
     return None

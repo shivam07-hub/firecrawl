@@ -5,6 +5,231 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-07-12 — Daily polling, lazy priority enrichment, and live surface-area expansion
+
+**Objective:** Complete the forward-only architecture on live data: daily direct
+career-page polling, immediate trusted Supabase cards, independent/lazy open-weight
+enrichment, personalized-search priority, delisting-safe lifecycle checks, and a
+Click Apply intent-rate north-star.
+
+**Career-ops audit and live source expansion:**
+- Audited `santifer/career-ops` for provider ideas and board discovery. Reused
+  the direct-ATS pattern, not its browser-per-job orchestration or model stack.
+  The comparison and next provider families are recorded in
+  `scraper/CAREER_OPS_AUDIT.md`.
+- Added and live-scraped five Greenhouse boards plus two Ashby boards: Celonis
+  32, Glean 26, Boomi 26, Hightouch 2, Hootsuite 1, Deepgram 2, Zapier 3.
+- Published all 92 jobs with full JDs using `csv_importer.py --source-only`.
+  Official lifecycle audit: seven complete companies, zero unknown locations,
+  zero retirements. Run id: `04cf7f3d-6ca9-4af3-96c7-5a1c85a9e41a`.
+- ElevenLabs remains review-only because India is mainly secondary/multi-location
+  eligibility and should not be promoted without a semantics check.
+
+**Source-first polling and lifecycle:**
+- Added `scraper/daily_poll.py`: Phase 1 → Phase 3 only, with overlap lock,
+  Asia/Kolkata dates, canary mode, structured reports, and no inference dependency.
+- Converted the Archon workflow from weekly linear processing to one manual
+  `scraper-daily-forward` cycle. The Codex automation owns recurring scheduling.
+- Capped lifecycle audit coverage at 1.0 for growing portals, preventing growth
+  from violating the database check constraint while retaining raw diagnostics.
+
+**Lazy Phase 2 and personalized search:**
+- Hardened the queue with atomic claims, stale-processing reclaim, and a
+  service-role-only priority lane backed by the original durable pgmq message.
+- Terminal completion now requires `job_summary` plus a controlled `role_domain`;
+  skill-only model output becomes retryable instead of trusted-complete.
+- A live Deepgram personalized-search request was claimed first and completed
+  through local `google/gemma-3-4b` with a summary, domain, and grounded skills.
+- `ENRICH_FORCE_LLM=1` is the worker deployment contract: deterministic evidence
+  still grounds skills while the model supplies the trust-facing fields.
+- Full live drain: 92/92 complete, zero missing summaries/domains, zero source
+  hash mismatches, zero no-skill rows, and pgmq queue length zero. Two concurrent
+  consumers completed safely; the priority canary's original message archived
+  as `duplicate_complete`.
+
+**Myro product integration / Delta 4:**
+- Pending jobs enter personalized search immediately through a deterministic,
+  explicit-evidence matcher; only selected provisional matches request priority
+  enrichment. The dashboard refreshes while those rows are non-terminal.
+- Added authenticated Apply-intent capture on dashboard, market, and CV export
+  surfaces, plus the `verified_apply_intent_daily` view. The denominator reuses
+  distinct verified user/job/day recommendation exposures; the numerator
+  records trusted Apply clicks idempotently on the same grain. A live audit
+  found 1,902 render events but only 185 distinct daily cards, so using raw
+  renders would have understated the rate by roughly 10x.
+- Cards continue to show day-level `last_verified_live_at`; no hour-level noise.
+
+**Verification:**
+- Scraper test suite: `205 passed`.
+- Myro focused backend tests: `18 passed`; full backend: `662 passed, 1 skipped`,
+  with one unrelated pre-existing frontend/backend CV stylesheet parity failure.
+- Frontend strict TypeScript and lint: passed with no warnings/errors.
+- Archon workflow validation: `scraper-daily-forward` valid.
+- Supabase migrations and live queue/RPC/apply paths verified on project
+  `gipvxuugajkugntwkeiz`.
+
+**Automation update:** consolidated the source poll and enrichment worker into
+one `daily_cycle.py` task. It starts/loads LM Studio only after source publication
+and drains the queue once per cycle. The old 15-minute worker is retired; the
+next daily run is anchored 24 hours after the preceding cycle finishes. Railway
+remains an optional always-on deployment independent of this Mac.
+
+---
+
+## Session 2026-07-11 — Forward-only asynchronous enrichment implemented
+
+**Objective:** Publish newly scraped jobs to Supabase immediately, then enrich
+them lazily when local LM Studio or an approved remote open-weight endpoint is
+available. Historical rows must not be scanned or backfilled, and the existing
+delisting loop remains the lifecycle authority.
+
+**Implementation:**
+- Added `scraper/enrichment_state.py` for deterministic source-content hashes
+  and enrichment state constants.
+- Added the production migration
+  `scraper/sql/create_forward_enrichment_queue.sql`. It adds nullable tracking
+  fields, forward-only trigger behavior, service-role queue RPCs, and a
+  hash-guarded atomic enrichment apply function. Durable pgmq bootstrap is kept
+  in `scraper/sql/enable_forward_enrichment_queue.sql` so it commits separately
+  from `public.jobs` DDL and avoids Realtime lock-order deadlocks.
+- Added `scraper/enrichment_worker.py`. It consumes queue messages only, exits
+  without claiming work when local LM Studio is unavailable, retries temporary
+  inference failures, and archives stale/inactive/legacy messages without
+  spending inference compute.
+- Added `csv_importer.py --source-only --run-date YYYY_MM_DD`. It imports only
+  completed output for the selected run, computes the source hash, and never
+  sends model-owned fields or skill rows.
+- Kept the legacy `main.py --enrich-only` plus full importer path available
+  during cutover.
+- Documented the contract and rollout in `scraper/ASYNC_ENRICHMENT.md`.
+
+**Forward-only guarantees:**
+- The migration contains no historical queue seed or backfill.
+- Pre-cutover jobs remain `NULL`/untracked when their first source hash is
+  established and are not queued or cleared.
+- New post-cutover jobs with usable descriptions are queued; subsequent source
+  changes requeue only rows that were already tracked.
+- Inactive jobs are skipped by the worker; the existing auto-delisting loop is
+  unchanged.
+
+**Verification:**
+- `python3 -m pytest -q scraper/tests` ✅ 200 passed.
+- Ruff passed for all new/modified Python paths; isolated mypy validation of
+  the new worker passed (the wider imported graph retains pre-existing type
+  debt).
+- Pre-deployment source-only dry-run against a completed Stripe output ✅ 36
+  jobs scoped, 0 skill/profile writes; the missing migration was correctly
+  reported before rollout.
+
+**Live rollout (2026-07-11):**
+- Initial combined migration hit a transactional deadlock between
+  `public.jobs` and Supabase Realtime's subscription table; rollback was
+  confirmed with 0 async columns and no pgmq schema. Queue bootstrap was split
+  into its own migration to remove the reciprocal lock order.
+- Applied migrations: `enable_forward_enrichment_queue`,
+  `create_forward_enrichment_queue`, and
+  `grant_forward_enrichment_queue_service_role` (the last adds the exact queue
+  table/sequence privileges required by pgmq 1.5.1 invoker functions).
+- Post-migration invariant: all 52,951 historical jobs remained untracked with
+  NULL source/status/enriched hashes; the queue started empty.
+- Fresh Stripe scrape returned 37 jobs: 35 existing rows were baselined without
+  queuing and 2 new jobs (`8053011`, `8031833`) became pending.
+- LM Studio loaded local open-weight model `google/gemma-3-4b`; the worker
+  completed both jobs, archived both messages after one read, and returned the
+  live queue to zero. Both source/enriched hashes match.
+- Advisors reported no security lint for the new objects. New indexes reported
+  only expected unused-index informational notices immediately after rollout.
+
+**Observed follow-ups:**
+- The existing trusted lifecycle audit rejected growth coverage `37/36 =
+  1.027778` against a `<= 1.0` constraint after the source upsert had committed.
+  No lifecycle/delisting update occurred in that failed step.
+- Stripe job `8031833` completed with skill-only enrichment (`Error Messages`,
+  `Service Discovery`) but no summary/domain; review before broad scheduling.
+- Recurring schedules were not changed. No staging, commit, or push was done.
+
+---
+
+## Session 2026-06-29 — Remote open-weight inference path added
+
+**Objective:** Allow job enrichment to run off the Mac while preserving the no-closed-model policy and the existing OpenAI-compatible architecture.
+
+**Code/config updated:**
+- `scraper/config.py`: added `resolve_inference_config()` plus generic `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `INFERENCE_MODEL`, and `OPEN_WEIGHT_MODEL_ALLOWLIST` support. Local LM Studio remains the default. Remote endpoints are allowed only when the selected model is explicitly allowlisted.
+- `scraper/enricher.py`: switched the enrichment client to the generic inference constants while keeping legacy `LM_STUDIO_*` aliases in config for backward compatibility.
+- `scraper/test_llm.py`: refreshed the smoke script to use `INFERENCE_*` and the current JSON-only prompt shape.
+- `scraper/.env.example`, `scraper/LM_STUDIO_PRESET.md`, `AGENTS.md`, and `CLAUDE.md`: documented local LM Studio as the default and approved remote OpenAI-compatible open-weight endpoints as the Mac-RAM-friendly path.
+
+**Policy now in effect:**
+- Closed/proprietary provider keys such as real OpenAI/Anthropic/Groq/Gemini keys remain disallowed by default.
+- Remote inference is permitted only for approved OpenAI-compatible endpoints serving open-weight models, with `OPEN_WEIGHT_MODEL_ALLOWLIST` or `INFERENCE_MODEL_ALLOWLIST` set.
+
+**Verification:**
+- `python -m pytest scraper/tests/test_inference_config.py` ✅ 5 passed.
+- `python -m pytest scraper/tests/test_inference_config.py scraper/tests/test_enricher_levels.py` ✅ 10 passed.
+- `python -m py_compile scraper/config.py scraper/enricher.py scraper/test_llm.py` ✅
+
+---
+
+## Session 2026-06-29 — GCC portal refresh: AmEx, TI, MSD, Vanguard
+
+**Objective:** Save the supplied GCC careers pages in `KNOWN_PORTALS.md` and scrape current jobs without Firecrawl/cloud AI.
+
+**Docs/config updated:**
+- `KNOWN_PORTALS.md`: refreshed Vanguard and Texas Instruments human URLs to the supplied pages; American Express was already present at the supplied Oracle CE URL.
+- `KNOWN_PORTALS.md`: added MSD under Phenom SSR evidence with the supplied `jobs.msd.com/gb/en/jobs-in-india` page.
+- `scraper/company_industries.json`: added `MSD → Pharma`.
+
+**Validation and scrape:**
+- `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --dry-run --company "<Company>"` ✅ parsed American Express (`oracle`), Texas Instruments (`oracle`), Vanguard Group (`workday`), and MSD (`phenom_api`).
+- American Express: `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "American Express" --skip-enrich --company-cap 1000` ✅ scraped/saved **46** jobs with full JDs.
+- Texas Instruments: `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "Texas Instruments" --skip-enrich --company-cap 1000` ✅ scraped/saved **140** jobs with full JDs.
+- Vanguard Group: `SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "Vanguard" --skip-enrich --company-cap 1000` ✅ output has **45** jobs with full JDs; Workday page-flush saved rows before final summary, so final `saved_new` reported 0 while the dated output file contains 45 rows.
+- MSD: normal parser currently routes the row to `phenom_api`; a full one-off `phenom_ssr` detail run stalled in detail-page HTTP waits. A listing-only Phenom SSR one-off using existing parser helpers saved **52** India jobs from 7 listing pages after skipping 2 test/no-apply rows.
+
+**Outputs:**
+- `All_CSV_Outputs_thru_firecrawl/American_Express/Outputs/2026_06_29/jobs.json`
+- `All_CSV_Outputs_thru_firecrawl/Texas_Instruments/Outputs/2026_06_29/jobs.json`
+- `All_CSV_Outputs_thru_firecrawl/Vanguard_Group/Outputs/2026_06_29/jobs.json`
+- `All_CSV_Outputs_thru_firecrawl/MSD/Outputs/2026_06_29/jobs.json`
+
+**Follow-up needed:**
+- Add an approved `portal_reader.py` parser override for MSD so normal `python main.py --company "MSD"` dispatches to `ats=phenom_ssr` instead of `phenom_api`.
+- Consider a provider-level guard for Phenom SSR test/no-apply rows and slow detail-page timeouts before enabling full MSD detail scraping.
+
+---
+
+## Session 2026-06-27 — Jindal Stainless Darwinbox route captured
+
+**Objective:** Add the Jindal Stainless careers board to the active portal registry and run the existing scraper path for Myro job-feed coverage.
+
+**Route evidence:**
+- Human page: `https://jslhrms.darwinbox.in/ms/candidatev2/main/careers/allJobs`.
+- Browser render verified the board title/open-jobs page and showed **107 open jobs**.
+- Direct API: `POST https://jslhrms.darwinbox.in/ms/candidateapi/job/alljobs?companyId=main` with body `{"companyId":"main","page":N,"sort_option":"new","limit":50}`.
+- This tenant sets a fresh `__cf_bm` cookie but did not expose a `session` cookie during the probe. Direct curl without browser-minted Cloudflare cookie returned 403; browser-minted `__cf_bm` worked with the existing Darwinbox provider when `DARWINBOX_SESSION` was set to a dummy value.
+
+**Docs/config updated:**
+- `KNOWN_PORTALS.md`: added `Jindal Stainless` under Darwinbox companies as `✅ CRACKED 2026-06-27`.
+- `scraper/company_industries.json`: added `Jindal Stainless → Industrial`.
+
+**Validation and scrape:**
+- `python main.py --company "Jindal Stainless" --dry-run` ✅ parsed one active `darwinbox` portal.
+- `DARWINBOX_CF_BM=<fresh browser cookie> DARWINBOX_SESSION=not-required-for-jsl SCRAPE_DIAGNOSTICS_DISABLED=1 python main.py --company "Jindal Stainless" --skip-enrich --company-cap 200` ✅
+- Initial result under the old gate: **107 raw jobs**, **39 canonical jobs saved** after JD quality gates; 68 listings had empty/too-short JD text.
+- Follow-up behavior change: metadata-only jobs are now retained globally with `job_description = "No JD provided on the company page. Matching and skill extraction are unavailable for this role until a job description is published."`; they skip LM Studio enrichment and produce no `job_skills` rows.
+- Rerun result after behavior change: **107 canonical jobs saved** — 39 full-JD/matchable rows + 68 metadata-only/applyable rows.
+- Output: `All_CSV_Outputs_thru_firecrawl/Jindal_Stainless/Outputs/2026_06_27/jobs.json`.
+- `python csv_importer.py --company Jindal --dry-run` ✅ Supabase contract preflight passed; 107 jobs, 229 job_skills rows, 36% enriched, 0 unknown locations.
+
+**Enrichment and Supabase load:**
+- LM Studio launched locally on `localhost:1234`; enrichment used local model `google/gemma-3-4b`.
+- Targeted Jindal enrichment completed: **39/39 full-JD jobs enriched**, **68 metadata-only jobs skipped**, **0 failures**.
+- `python csv_importer.py --company Jindal` ✅ uploaded 107 jobs, 229 job_skills rows, wrote `scrape_diagnostics` and `job_feed_run_audits`, and refreshed the backend analytics snapshot.
+- Supabase read-back verification: 107 active `jobs` rows for Jindal Stainless, 39 rows with `main_skills`, 68 metadata-only rows, 229 matching `job_skills` rows, and 0 skill rows attached to metadata-only jobs.
+
+---
+
 ## Session 2026-06-13 — Scale-out discovery + board harvester (+33 portals)
 
 **Objective:** spend expiring Firecrawl cloud credits on credit-bound discovery; grow company coverage toward 10k via Tier-1/2 college recruiters. (Question-bank handed to Codex.)

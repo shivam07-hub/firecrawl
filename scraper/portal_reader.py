@@ -129,6 +129,8 @@ def _section_portals(header: str, lines: list[str]) -> list[dict]:
         return _smartrecruiters(rows)
     if 'GREENHOUSE' in h:
         return _greenhouse(rows)
+    if 'ASHBY' in h:
+        return _ashby(rows)
     if 'EIGHTFOLD' in h:
         return _eightfold(rows)
     if 'ICIMS' in h:
@@ -279,6 +281,36 @@ def _greenhouse(rows) -> list[Portal]:
         }
         portal.update(greenhouse_overrides.get(company, {}))
         out.append(portal)
+    return out
+
+
+def _ashby(rows) -> list[Portal]:
+    """Parse first-class Ashby boards from the registry.
+
+    Ashby used to require a per-company override in the custom section.  A
+    normal section makes newly discovered boards data-only additions and keeps
+    daily polling on the direct public Posting API.
+    """
+    out = []
+    for r in rows:
+        status = r.get('Status', '')
+        if not _is_active(status):
+            continue
+        token = r.get('Board Token', '').strip()
+        company = r.get('Company', '').strip()
+        if not token or not company:
+            continue
+        out.append({
+            'company': company,
+            'ats': 'ashby',
+            'endpoint': f"https://api.ashbyhq.com/posting-api/job-board/{token}",
+            'board_token': token,
+            'careers_url': r.get('Careers URL', '').strip(),
+            'india_only': True,
+            'js_required': False,
+            'status': status,
+            'industry': _industry(company),
+        })
     return out
 
 

@@ -65,8 +65,14 @@ def parse_ashby_job_board(payload: dict, portal: Portal, max_jobs: int | None = 
             continue
 
         loc = _location_text(item)
-        if portal.get("india_only", True) and not is_india(loc):
+        # Some Ashby boards use a broad region (for example "APAC | Remote")
+        # as the structured location and put the authoritative country in the
+        # role title ("... - India").  Include the title in the India check, but
+        # never infer India from the JD body where incidental mentions are common.
+        if portal.get("india_only", True) and not is_india(f"{loc} {title}"):
             continue
+        if not is_india(loc) and is_india(title):
+            loc = f"{loc} | India" if loc else "India"
 
         jid = str(item.get("id") or job_hash(title, item.get("jobUrl") or item.get("applyUrl") or ""))
         if jid in seen:

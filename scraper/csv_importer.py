@@ -1,5 +1,5 @@
 """
-csv_importer.py — Phase 3: upload enriched local JSON to Supabase.
+csv_importer.py — Phase 3: upload source or enriched local JSON to Supabase.
 
 Reads All_CSV_Outputs/*/Outputs/*/jobs.json and:
   1. Upserts core job fields to the `jobs` table (with lifecycle tracking).
@@ -13,6 +13,9 @@ Usage:
     python csv_importer.py --company "Barclays"   # one company
     python csv_importer.py --all-dates            # all date folders, not just latest
     python csv_importer.py --dry-run              # print counts, no writes
+    python csv_importer.py --source-only --run-date YYYY_MM_DD
+                                                  # publish one completed run;
+                                                  # queue Phase 2 enrichment lazily
     python csv_importer.py --dry-run --deactivate-missing
                                                   # inspect newest output date without writes
     python csv_importer.py --deactivate-missing --run-date 20260510
@@ -23,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -35,6 +39,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from postgrest.exceptions import APIError
 from supabase import create_client, Client
 
 _HERE = Path(__file__).resolve().parent
@@ -49,22 +54,47 @@ logging.basicConfig(
 )
 log = logging.getLogger("csv_importer")
 
-from config import OUTPUT_BASE
+from config import OUTPUT_BASE  # noqa: E402
+from enrichment_state import (  # noqa: E402
+    CORE_ENRICHMENT_VERSION,
+    has_core_enrichment_payload,
+    source_content_hash,
+)
 
-_JOB_FIELDS = [
-    "job_id", "job_title", "job_description", "job_summary",
+_SOURCE_JOB_FIELDS = [
+    "job_id", "job_title", "job_description",
     "industry", "company_name", "location", "apply_url",
-    "role_domain", "main_skills", "side_skills", "batch_date",
+    "source_url", "source_platform", "ingestion_source", "quality_status",
+    "batch_date",
     "location_raw", "location_city", "location_country", "location_mode", "location_quality",
     "locations",
     "date_posted", "seniority_level", "work_mode",
     "min_years_experience", "max_years_experience",
 ]
 
+_ENRICHMENT_JOB_FIELDS = [
+    "job_summary", "role_domain", "main_skills", "side_skills",
+]
+
+_FORWARD_ENRICHMENT_COLUMNS = {
+    "source_content_hash",
+    "enriched_source_hash",
+    "job_content_hash",
+    "enrichment_status",
+    "enrichment_model",
+    "enrichment_version",
+    "enrichment_queued_at",
+    "enrichment_priority_requested_at",
+    "enrichment_started_at",
+    "enriched_at",
+    "enrichment_last_error",
+}
+
 _BATCH_SIZE = 200
 _UNKNOWN_LOCATION_THRESHOLD = 0.10
 _MAX_DEACTIVATION_RATE = 0.75
 _LOCATION_PARSER_VERSION = "v1"
+_DEFAULT_PROFILE_VERSION = "cv_profile_v1"
 
 
 def _parse_batch_date(value: str | int | None) -> int | None:
@@ -255,7 +285,7 @@ def _normalize_location(
     raw = _clean_text(value)
     if raw is None and not raw_locations:
         return NormalizedLocation(
-            location=None,
+            location="Unknown",
             location_raw=None,
             location_city=None,
             location_country=None,
@@ -455,12 +485,141 @@ def _jobs_has_locations_column() -> bool:
     return "locations" in (table.get("properties") or {})
 
 
+def _jobs_has_job_content_hash_column() -> bool:
+    """Return True when live Supabase jobs exposes the optional embedding-change signal."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return False
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return False
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("jobs") or schemas.get("public.jobs") or {}
+    return "job_content_hash" in (table.get("properties") or {})
+
+
+def _jobs_missing_forward_enrichment_columns() -> list[str]:
+    """Return async-enrichment columns absent from the live jobs Data API."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return sorted(_FORWARD_ENRICHMENT_COLUMNS)
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return sorted(_FORWARD_ENRICHMENT_COLUMNS)
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("jobs") or schemas.get("public.jobs") or {}
+    properties = table.get("properties") or {}
+    return sorted(_FORWARD_ENRICHMENT_COLUMNS - set(properties))
+
+
 # Card-data columns added for the job_summary + structured-chip work.
 # _upsert_jobs sends these on every row, so they MUST exist before real writes.
 _CARD_COLUMNS = (
     "job_summary", "date_posted", "seniority_level",
     "work_mode", "min_years_experience", "max_years_experience",
 )
+
+_PROFILE_COLUMNS = (
+    "job_id", "profile_version", "generated_from_hash", "ideal_candidate_summary",
+    "cv_positioning", "proof_points", "gap_risks", "project_suggestions",
+    "resume_keywords", "interview_themes", "model_name",
+)
+
+
+def _candidate_profile_upload_disabled() -> bool:
+    return (os.getenv("SKIP_CANDIDATE_PROFILE_UPLOAD", "").strip().lower()
+            in {"1", "true", "yes"})
+
+
+def _coerce_smallint(value) -> int | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if math.isfinite(value) and value.is_integer():
+            return int(value)
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+        if math.isfinite(parsed) and parsed.is_integer():
+            return int(parsed)
+    return None
+
+
+def _is_statement_timeout(exc: Exception) -> bool:
+    return isinstance(exc, APIError) and getattr(exc, "code", None) == "57014"
+
+
+def _upsert_with_timeout_split(
+    sb: Client,
+    table_name: str,
+    rows: list[dict],
+    *,
+    on_conflict: str,
+    ignore_duplicates: bool = False,
+) -> None:
+    if not rows:
+        return
+    try:
+        sb.table(table_name).upsert(
+            rows,
+            on_conflict=on_conflict,
+            ignore_duplicates=ignore_duplicates,
+        ).execute()
+    except Exception as exc:
+        if not _is_statement_timeout(exc) or len(rows) == 1:
+            raise
+        mid = max(1, len(rows) // 2)
+        log.warning(
+            "%s upsert timed out for %s rows; retrying as %s + %s",
+            table_name,
+            len(rows),
+            mid,
+            len(rows) - mid,
+        )
+        _upsert_with_timeout_split(
+            sb,
+            table_name,
+            rows[:mid],
+            on_conflict=on_conflict,
+            ignore_duplicates=ignore_duplicates,
+        )
+        _upsert_with_timeout_split(
+            sb,
+            table_name,
+            rows[mid:],
+            on_conflict=on_conflict,
+            ignore_duplicates=ignore_duplicates,
+        )
 
 
 def _jobs_missing_card_columns() -> list[str]:
@@ -486,6 +645,31 @@ def _jobs_missing_card_columns() -> list[str]:
     table = schemas.get("jobs") or schemas.get("public.jobs") or {}
     props = table.get("properties") or {}
     return [c for c in _CARD_COLUMNS if c not in props]
+
+
+def _job_candidate_profiles_missing_columns() -> list[str]:
+    """Return profile columns absent from live Supabase (empty list = table ready)."""
+    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return list(_PROFILE_COLUMNS)
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/openapi+json",
+    }
+    try:
+        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
+        response.raise_for_status()
+        spec = response.json()
+    except Exception:
+        return list(_PROFILE_COLUMNS)
+
+    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
+    table = schemas.get("job_candidate_profiles") or schemas.get("public.job_candidate_profiles") or {}
+    props = table.get("properties") or {}
+    return [c for c in _PROFILE_COLUMNS if c not in props]
 
 
 def _job_skill_entries(job: dict) -> list[dict]:
@@ -520,6 +704,57 @@ def _job_skill_entries(job: dict) -> list[dict]:
         {"name": skill, "is_primary": True, "required_level": 2}
         for skill in names if isinstance(skill, str) and skill.strip()
     ]
+
+
+def _profile_array(profile: dict, key: str) -> list[str]:
+    value = profile.get(key) or []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _candidate_profile_rows(jobs: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for job in jobs:
+        job_id = job.get("job_id")
+        profile = job.get("candidate_profile")
+        profile_hash = job.get("candidate_profile_hash")
+        if not job_id or not isinstance(profile, dict) or not profile or not profile_hash:
+            continue
+        summary = str(profile.get("ideal_candidate_summary") or "").strip()
+        if not summary:
+            continue
+        rows.append({
+            "job_id": job_id,
+            "profile_version": job.get("candidate_profile_version") or _DEFAULT_PROFILE_VERSION,
+            "generated_from_hash": profile_hash,
+            "ideal_candidate_summary": summary,
+            "cv_positioning": _profile_array(profile, "cv_positioning"),
+            "proof_points": _profile_array(profile, "proof_points"),
+            "gap_risks": _profile_array(profile, "gap_risks"),
+            "project_suggestions": _profile_array(profile, "project_suggestions"),
+            "resume_keywords": _profile_array(profile, "resume_keywords"),
+            "interview_themes": _profile_array(profile, "interview_themes"),
+            "model_name": job.get("candidate_profile_model") or None,
+        })
+    return rows
+
+
+def _upsert_candidate_profiles(sb: Client, jobs: list[dict], dry_run: bool) -> int:
+    rows = _candidate_profile_rows(jobs)
+    if dry_run or not rows:
+        return len(rows)
+    if _candidate_profile_upload_disabled():
+        return 0
+    for i in range(0, len(rows), _BATCH_SIZE):
+        _upsert_with_timeout_split(
+            sb,
+            "job_candidate_profiles",
+            rows[i:i + _BATCH_SIZE],
+            on_conflict="job_id",
+            ignore_duplicates=False,
+        )
+    return len(rows)
 
 
 # ── Skill ID cache ─────────────────────────────────────────────────────────────
@@ -592,9 +827,15 @@ def _upsert_jobs(
     jobs: list[dict],
     batch_date: int | None,
     location_alias_counter: Counter[str],
+    *,
+    source_only: bool = False,
+    supports_forward_enrichment: bool = False,
 ) -> tuple[int, int]:
     rows = []
     unknown_location_rows = 0
+    supports_job_content_hash = (
+        not source_only and _jobs_has_job_content_hash_column()
+    )
     for job in jobs:
         if not job.get("job_id"):
             continue
@@ -604,11 +845,30 @@ def _upsert_jobs(
         # preserve prior insert behavior (e.g. NOT NULL job_description).
         _INT_FIELDS = {"min_years_experience", "max_years_experience"}
         row = {}
-        for f in _JOB_FIELDS:
+        for f in _SOURCE_JOB_FIELDS:
             v = job.get(f)
-            if v is None or (v == "" and f in _INT_FIELDS):
+            if f in _INT_FIELDS:
+                v = _coerce_smallint(v)
+                if v is None:
+                    continue
+            elif isinstance(v, float) and not math.isfinite(v):
+                continue
+            elif v is None:
                 continue
             row[f] = v
+
+        carries_enrichment = has_core_enrichment_payload(job)
+        if not source_only and carries_enrichment:
+            for field in _ENRICHMENT_JOB_FIELDS:
+                value = job.get(field)
+                if value is not None:
+                    row[field] = value
+        row["job_title"] = job.get("job_title") or ""
+        row["job_description"] = job.get("job_description") or ""
+        row["company_name"] = job.get("company_name") or ""
+        row["industry"] = job.get("industry") or "unknown"
+        row["ingestion_source"] = job.get("ingestion_source") or "scraper"
+        row["quality_status"] = job.get("quality_status") or "auto_extracted"
         normalized_location = _normalize_location(job.get("location"), job.get("locations"))
 
         # Derived fields
@@ -621,6 +881,15 @@ def _upsert_jobs(
         row["location_quality"] = normalized_location.location_quality
         row["locations"] = list(normalized_location.locations)
         row["apply_url"]      = _valid_apply_url(job.get("apply_url"))
+        if supports_forward_enrichment:
+            row["source_content_hash"] = source_content_hash(job)
+            if not source_only and carries_enrichment:
+                row["enriched_source_hash"] = row["source_content_hash"]
+                row["enrichment_status"] = "complete"
+                row["enrichment_version"] = CORE_ENRICHMENT_VERSION
+        if (not source_only and carries_enrichment
+                and supports_job_content_hash and job.get("job_content_hash")):
+            row["job_content_hash"] = job.get("job_content_hash")
         if normalized_location.location_quality == "unknown":
             unknown_location_rows += 1
             if normalized_location.location_raw:
@@ -642,17 +911,19 @@ def _upsert_jobs(
     rows = list(seen_jobs.values())
 
     if not rows:
-        return 0
+        return 0, 0
 
     for i in range(0, len(rows), _BATCH_SIZE):
         batch = rows[i:i + _BATCH_SIZE]
         # On conflict: update everything EXCEPT first_seen and is_active
         # (community owns is_active; first_seen is set once at insert)
-        sb.table("jobs").upsert(
+        _upsert_with_timeout_split(
+            sb,
+            "jobs",
             batch,
             on_conflict="job_id",
             ignore_duplicates=False,
-        ).execute()
+        )
 
     return len(rows), unknown_location_rows
 
@@ -874,6 +1145,9 @@ def import_file(
     dry_run: bool,
     supports_required_level: bool,
     run_id: str = "",
+    *,
+    source_only: bool = False,
+    supports_forward_enrichment: bool = False,
 ) -> dict:
     try:
         jobs = json.loads(json_path.read_text(encoding="utf-8"))
@@ -890,6 +1164,7 @@ def import_file(
             "job_ids": set(),
             "jobs": 0,
             "skill_rows": 0,
+            "profile_rows": 0,
             "drift": 0,
             "enriched": 0,
             "unknown_location_rows": 0,
@@ -898,11 +1173,18 @@ def import_file(
     company    = jobs[0].get("company_name", json_path.parent.parent.parent.name)
     date_str   = json_path.parent.name
     batch_date = _parse_batch_date(date_str) or _parse_batch_date(jobs[0].get("batch_date"))
-    enriched   = sum(1 for j in jobs if j.get("main_skills"))
+    enriched   = 0 if source_only else sum(1 for j in jobs if j.get("main_skills"))
 
     local_unknown = 0
     if not dry_run:
-        jobs_written, local_unknown = _upsert_jobs(sb, jobs, batch_date, unknown_location_counter)
+        jobs_written, local_unknown = _upsert_jobs(
+            sb,
+            jobs,
+            batch_date,
+            unknown_location_counter,
+            source_only=source_only,
+            supports_forward_enrichment=supports_forward_enrichment,
+        )
     else:
         jobs_written = sum(1 for j in jobs if j.get("job_id"))
         for job in jobs:
@@ -912,9 +1194,15 @@ def import_file(
                 if normalized.location_raw:
                     unknown_location_counter[normalized.location_raw.lower()] += 1
 
-    skill_rows_written, drift = _resolve_and_upsert_skills(
-        sb, jobs, skill_id_map, drift_counter, dry_run, supports_required_level
-    )
+    if source_only:
+        skill_rows_written = 0
+        profile_rows_written = 0
+        drift = 0
+    else:
+        skill_rows_written, drift = _resolve_and_upsert_skills(
+            sb, jobs, skill_id_map, drift_counter, dry_run, supports_required_level
+        )
+        profile_rows_written = _upsert_candidate_profiles(sb, jobs, dry_run)
 
     if not dry_run and run_id:
         _write_diagnostic(sb, run_id, company, len(jobs), jobs_written, enriched, drift)
@@ -928,6 +1216,7 @@ def import_file(
         "job_ids": {j.get("job_id") for j in jobs if j.get("job_id")},
         "jobs": jobs_written,
         "skill_rows": skill_rows_written,
+        "profile_rows": profile_rows_written,
         "drift": drift,
         "enriched": enriched,
         "unknown_location_rows": local_unknown,
@@ -971,13 +1260,24 @@ def _refresh_analytics_snapshot() -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 3: upload enriched jobs to Supabase")
+    parser = argparse.ArgumentParser(description="Phase 3: upload source or enriched jobs to Supabase")
     parser.add_argument("--company",   help="Filter by company slug (substring, case-insensitive)")
     parser.add_argument("--all-dates", action="store_true", help="Import all date folders, not just latest")
     parser.add_argument("--dry-run",   action="store_true", help="Count only — no writes to Supabase")
     parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help=(
+            "Publish only source-owned fields and let the forward-only queue handle "
+            "Phase 2 enrichment later"
+        ),
+    )
+    parser.add_argument(
         "--run-date",
-        help="With --deactivate-missing, scope decommissioning to one output date (YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD)",
+        help=(
+            "Scope source-only publication or decommissioning to one output date "
+            "(YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD)"
+        ),
     )
     parser.add_argument(
         "--deactivate-missing",
@@ -991,6 +1291,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.source_only and args.all_dates:
+        log.error("--source-only is forward-only and cannot be combined with --all-dates")
+        raise SystemExit(2)
+    if args.source_only and not args.run_date:
+        log.error("--source-only requires --run-date so stale output folders cannot be republished")
+        raise SystemExit(2)
     if args.deactivate_missing and args.all_dates:
         log.error("--deactivate-missing is only safe with the latest date folder, not --all-dates")
         raise SystemExit(2)
@@ -999,7 +1305,7 @@ def main() -> None:
         raise SystemExit(2)
 
     sb = _supabase()
-    skill_id_map = _build_skill_id_map(sb)
+    skill_id_map = {} if args.source_only else _build_skill_id_map(sb)
 
     json_files = _find_json_files(args.company, args.all_dates)
     if not json_files:
@@ -1007,6 +1313,28 @@ def main() -> None:
         return
 
     deactivation_batch_date = _parse_batch_date(args.run_date)
+    if args.source_only:
+        if deactivation_batch_date is None:
+            log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")
+            raise SystemExit(2)
+        before_count = len(json_files)
+        json_files = [
+            path for path in json_files
+            if _parse_batch_date(path.parent.name) == deactivation_batch_date
+            and path.with_name("jobs.complete").exists()
+        ]
+        log.info(
+            "Source-only publication scoped to complete run date %s: %s/%s files",
+            deactivation_batch_date,
+            len(json_files),
+            before_count,
+        )
+        if not json_files:
+            log.error(
+                "No complete jobs.json files found for source-only run date %s",
+                deactivation_batch_date,
+            )
+            raise SystemExit(2)
     if args.deactivate_missing:
         if args.run_date and deactivation_batch_date is None:
             log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")
@@ -1038,21 +1366,40 @@ def main() -> None:
     log.info(f"Files to import: {len(json_files)}")
     if args.dry_run:
         log.info("DRY RUN — no writes")
+    if args.source_only:
+        log.info("SOURCE-ONLY — jobs publish immediately; Phase 2 runs from the durable queue")
 
     run_label = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_id = str(uuid.uuid4())
     log.info(f"Run ID: {run_id} ({run_label})")
     _assert_location_audit_contract(run_id)
-    supports_required_level = _job_skills_has_required_level()
-    if supports_required_level:
-        log.info("job_skills.required_level contract OK")
-    else:
+    supports_required_level = False if args.source_only else _job_skills_has_required_level()
+    if not args.source_only:
+        if supports_required_level:
+            log.info("job_skills.required_level contract OK")
+        else:
+            log.warning(
+                "job_skills.required_level is missing; dry-run can continue, "
+                "but real enriched uploads require scraper/sql/add_job_skills_required_level.sql"
+            )
+            if not args.dry_run:
+                log.error("Stopping before writes to avoid a partial jobs-only upload.")
+                raise SystemExit(2)
+
+    _missing_forward_cols = _jobs_missing_forward_enrichment_columns()
+    supports_forward_enrichment = not _missing_forward_cols
+    if supports_forward_enrichment:
+        log.info("Forward-only enrichment columns contract OK")
+    elif args.source_only:
         log.warning(
-            "job_skills.required_level is missing; dry-run can continue, "
-            "but real enriched uploads require scraper/sql/add_job_skills_required_level.sql"
+            "Forward-only enrichment columns are missing: %s",
+            ", ".join(_missing_forward_cols),
         )
         if not args.dry_run:
-            log.error("Stopping before writes to avoid a partial jobs-only upload.")
+            log.error(
+                "Stopping before source-only writes. Review and apply "
+                "scraper/sql/create_forward_enrichment_queue.sql first."
+            )
             raise SystemExit(2)
 
     if _jobs_has_locations_column():
@@ -1088,6 +1435,29 @@ def main() -> None:
             )
             raise SystemExit(2)
 
+    if not args.source_only:
+        _missing_profile_cols = _job_candidate_profiles_missing_columns()
+        _skip_profile_upload = _candidate_profile_upload_disabled()
+        if not _missing_profile_cols:
+            if _skip_profile_upload:
+                log.warning("job_candidate_profiles upload disabled by SKIP_CANDIDATE_PROFILE_UPLOAD=1")
+            else:
+                log.info("job_candidate_profiles contract OK")
+        else:
+            log.warning(
+                "job_candidate_profiles is missing columns/table %s; dry-run can continue, "
+                "but real profile uploads require scraper/sql/create_job_candidate_profiles.sql",
+                ", ".join(_missing_profile_cols),
+            )
+            if _skip_profile_upload:
+                log.warning("Skipping job_candidate_profiles upload for this run")
+            elif not args.dry_run:
+                log.error(
+                    "Stopping before writes: enriched candidate profiles would fail to upload. "
+                    "Run scraper/sql/create_job_candidate_profiles.sql in Supabase first."
+                )
+                raise SystemExit(2)
+
     drift_counter: Counter = Counter()
     unknown_location_counter: Counter[str] = Counter()
     imported_company_job_ids: dict[str, set[str]] = {}
@@ -1105,6 +1475,8 @@ def main() -> None:
             args.dry_run,
             supports_required_level,
             run_id,
+            source_only=args.source_only,
+            supports_forward_enrichment=supports_forward_enrichment,
         )
         if "error" in result:
             log.warning(f"  {result['path']}: {result['error']}")

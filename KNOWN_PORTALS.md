@@ -209,6 +209,23 @@ Each entry: Company | Human Careers URL | ATS Platform | Scraping API / Endpoint
 | Meltplan | https://boards.greenhouse.io/meltplan | meltplan | 6 | ✅ HARVESTED 2026-06-13 — Greenhouse API, 6 India jobs; full JDs in `content` |
 | Redpin (Currencies Direct) | https://boards.greenhouse.io/currenciesdirect | currenciesdirect | 4 | ✅ HARVESTED 2026-06-13 — Greenhouse API, board "Redpin", 4 India jobs; full JDs in `content` |
 | Truecaller | https://boards.greenhouse.io/truecaller | truecaller | 2 | ✅ HARVESTED 2026-06-13 — Greenhouse API, 2 India jobs; full JDs in `content` |
+| Celonis | https://www.celonis.com/careers/jobs/ | celonis | 32 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Greenhouse API; India locations and full JDs in `content` |
+| Glean | https://www.glean.com/careers | gleanwork | 26 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Greenhouse API; India locations and full JDs in `content` |
+| Boomi | https://boomi.com/company/careers/ | boomilp | 26 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Greenhouse API; India locations and full JDs in `content` |
+| Hightouch | https://hightouch.com/careers | hightouch | 2 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Greenhouse API; India locations and full JDs in `content` |
+| Hootsuite | https://careers.hootsuite.com/ | hootsuite | 1 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Greenhouse API; India location and full JD in `content` |
+
+---
+
+## ASHBY COMPANIES
+*API pattern: `GET https://api.ashbyhq.com/posting-api/job-board/{board_token}`*
+*Filter: check primary and `secondaryLocations` for India; `descriptionPlain` contains the full JD.*
+
+| Company | Careers URL | Board Token | India Jobs | Status |
+|---------|-------------|-------------|-----------|--------|
+| Deepgram | https://deepgram.com/careers | deepgram | 2 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Ashby Posting API; India roles with full JDs |
+| Zapier | https://zapier.com/jobs | zapier | 3 | ✅ VALIDATED 2026-07-12 via career-ops audit — direct Ashby Posting API; India roles with full JDs |
+| ElevenLabs | https://elevenlabs.io/careers | elevenlabs | 16 | ⚠️ REVIEW — India appears mainly in secondary/multi-location eligibility; do not promote until location semantics are manually confirmed |
 
 ---
 

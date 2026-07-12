@@ -26,6 +26,7 @@ def test_empty_jobs_file_returns_complete_zero_result(tmp_path) -> None:
         "job_ids": set(),
         "jobs": 0,
         "skill_rows": 0,
+        "profile_rows": 0,
         "drift": 0,
         "enriched": 0,
         "unknown_location_rows": 0,

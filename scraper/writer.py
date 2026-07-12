@@ -16,11 +16,12 @@ Completion contract:
 """
 import json
 import csv
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from utils import company_slug
 from config import OUTPUT_BASE
-from schema import CANONICAL_FIELDS, RAW_FIELD_MAP
+from schema import CANONICAL_FIELDS, RAW_FIELD_MAP, MIN_JOB_DESCRIPTION_LEN, MISSING_JD_NOTE
 
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
 SCHEMA = CANONICAL_FIELDS
@@ -53,6 +54,25 @@ def _today() -> int:
     return int(datetime.now().strftime("%Y%m%d"))
 
 
+def job_content_hash(job: dict) -> str:
+    """Stable signal for re-embedding when JD/title/skills materially change."""
+    skills = job.get("main_skills") or []
+    if not isinstance(skills, list):
+        skills = [str(skills)] if skills else []
+    payload = {
+        "job_title": str(job.get("job_title") or "").strip(),
+        "job_description": str(job.get("job_description") or "").strip(),
+        "main_skills": [str(skill).strip() for skill in skills if str(skill or "").strip()],
+    }
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def stamp_job_content_hash(job: dict) -> dict:
+    job["job_content_hash"] = job_content_hash(job)
+    return job
+
+
 def to_canonical(raw: dict, company_name: str) -> dict:
     """Map raw scraper dict to canonical schema using RAW_FIELD_MAP for renames."""
     def _get(raw_key: str, canonical_key: str, default=''):
@@ -60,12 +80,16 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         return raw.get(canonical_key) or raw.get(raw_key) or default
 
     location = _get('location_city', 'location') or raw.get('Location') or raw.get('location_raw') or 'India'
+    job_description = _get('raw_jd_text', 'job_description')
+    metadata_only = len(str(job_description or '').strip()) < MIN_JOB_DESCRIPTION_LEN
+    if metadata_only:
+        job_description = MISSING_JD_NOTE
 
     row = {
         "job_id":           raw.get('job_id') or '',
         "job_title":        _get('title', 'job_title'),
-        "job_description":  _get('raw_jd_text', 'job_description'),
-        "job_summary":      raw.get('job_summary') or '',
+        "job_description":  job_description,
+        "job_summary":      MISSING_JD_NOTE if metadata_only else (raw.get('job_summary') or ''),
         "industry":         raw.get('industry') or '',
         "industry_group":   raw.get('industry_group') or '',
         "company_name":     company_name,
@@ -79,12 +103,21 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         # csv_importer._normalize_location canonicalizes; empty list → derived from scalar.
         "locations":        [l for l in (raw.get('locations') or []) if isinstance(l, str) and l.strip()],
         "apply_url":        _get('job_url', 'apply_url'),
+        "source_url":       raw.get('source_url') or raw.get('source_api_url') or '',
+        "source_platform":  raw.get('source_platform') or raw.get('ats') or '',
+        "ingestion_source": raw.get('ingestion_source') or 'scraper',
+        "quality_status":   raw.get('quality_status') or 'auto_extracted',
         "role_domain":      raw.get('role_domain') or raw.get('business_unit') or '',
         # One flat skill list. `skills` carries model required_level → job_skills;
         # `main_skills` mirrors the names (True_Yodha chips); `side_skills` always [].
         "skills":           raw.get('skills') or [],
         "main_skills":      raw.get('main_skills') or [],
         "side_skills":      [],
+        "candidate_profile":        raw.get('candidate_profile') or {},
+        "candidate_profile_version": raw.get('candidate_profile_version') or '',
+        "candidate_profile_hash":    raw.get('candidate_profile_hash') or '',
+        "candidate_profile_model":   raw.get('candidate_profile_model') or '',
+        "job_content_hash":          raw.get('job_content_hash') or '',
         # Structured card-chip facts (provider-supplied; empty when unavailable).
         "date_posted":            raw.get('date_posted') or raw.get('date_posted_raw') or '',
         "seniority_level":        raw.get('seniority_level') or '',
@@ -93,6 +126,7 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "max_years_experience":   raw.get('max_years_experience') if raw.get('max_years_experience') is not None else '',
         "batch_date":       raw.get('batch_date') or _today(),
     }
+    row["job_content_hash"] = row.get("job_content_hash") or job_content_hash(row)
     return {field: row.get(field, '') for field in CANONICAL_FIELDS}
 
 
@@ -135,7 +169,7 @@ def save_jobs(
 
     existing_ids = {j['job_id'] for j in existing if j.get('job_id')}
     new_jobs     = [j for j in jobs if j.get('job_id') not in existing_ids]
-    all_jobs     = existing + new_jobs
+    all_jobs     = [stamp_job_content_hash(j) for j in (existing + new_jobs)]
 
     # Atomic JSON write: tmp → rename (POSIX atomic)
     tmp_path.write_text(json.dumps(all_jobs, indent=2, ensure_ascii=False), encoding='utf-8')
