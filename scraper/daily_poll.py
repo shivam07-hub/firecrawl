@@ -8,7 +8,7 @@ and the durable enrichment worker runs on its own cadence.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import fcntl
 import json
 import os
@@ -23,6 +23,17 @@ ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
 LOG_DIR = REPO_ROOT / "logs"
 DEFAULT_TIMEZONE = "Asia/Kolkata"
+
+
+def run_dates_spanned(started: date, ended: date) -> list[str]:
+    if ended < started:
+        raise ValueError("poll end date cannot precede start date")
+    dates: list[str] = []
+    current = started
+    while current <= ended:
+        dates.append(current.strftime("%Y_%m_%d"))
+        current += timedelta(days=1)
+    return dates
 
 
 def build_commands(
@@ -91,7 +102,8 @@ def main() -> None:
         parser.error("--company-cap must be positive")
 
     timezone = ZoneInfo(args.timezone)
-    run_date = datetime.now(timezone).strftime("%Y_%m_%d")
+    run_started = datetime.now(timezone)
+    run_date = run_started.strftime("%Y_%m_%d")
     commands = build_commands(
         python=sys.executable,
         run_date=run_date,
@@ -128,15 +140,37 @@ def main() -> None:
             "status": "running",
             "steps": [],
         }
-        for name, command in commands:
-            step = _run_step(name, command, env=env)
-            report["steps"].append(step)
-            if step["returncode"] != 0:
+        scrape_name, scrape_command = commands[0]
+        scrape_step = _run_step(scrape_name, scrape_command, env=env)
+        report["steps"].append(scrape_step)
+        if scrape_step["returncode"] != 0:
+            report["status"] = "failed"
+            report["failed_step"] = scrape_name
+            path = _write_report(report)
+            print(f"Daily poll failed in {scrape_name}; report: {path}", file=sys.stderr)
+            raise SystemExit(scrape_step["returncode"])
+
+        publish_dates = run_dates_spanned(
+            run_started.date(), datetime.now(timezone).date()
+        )
+        report["publish_dates"] = publish_dates
+        for publish_date in publish_dates:
+            publish_name, publish_command = build_commands(
+                python=sys.executable,
+                run_date=publish_date,
+                scope=args.scope,
+                company_cap=args.company_cap,
+                company=args.company,
+            )[1]
+            step_name = f"{publish_name}:{publish_date}"
+            publish_step = _run_step(step_name, publish_command, env=env)
+            report["steps"].append(publish_step)
+            if publish_step["returncode"] != 0:
                 report["status"] = "failed"
-                report["failed_step"] = name
+                report["failed_step"] = step_name
                 path = _write_report(report)
-                print(f"Daily poll failed in {name}; report: {path}", file=sys.stderr)
-                raise SystemExit(step["returncode"])
+                print(f"Daily poll failed in {step_name}; report: {path}", file=sys.stderr)
+                raise SystemExit(publish_step["returncode"])
 
         report["status"] = "complete"
         path = _write_report(report)

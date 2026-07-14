@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from config import resolve_inference_config
+from config import resolve_inference_config, resolve_job_embedding_config
 
 
 def test_legacy_lm_studio_variables_remain_supported() -> None:
@@ -60,3 +60,18 @@ def test_cloudflare_workers_ai_derives_openai_compatible_endpoint() -> None:
     assert config.provider == "cloudflare_workers_ai"
     assert config.base_url == "https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1"
     assert config.api_key == "token"
+
+
+def test_job_embeddings_default_to_local_nomic_768() -> None:
+    config = resolve_job_embedding_config({})
+
+    assert config.base_url == "http://localhost:1234/v1"
+    assert config.model == "text-embedding-nomic-embed-text-v1.5"
+    assert config.dimensions == 768
+
+
+def test_job_embeddings_reject_remote_endpoint() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        resolve_job_embedding_config({
+            "JOB_EMBEDDING_BASE_URL": "https://embedding.example/v1",
+        })

@@ -60,6 +60,7 @@ from enrichment_state import (  # noqa: E402
     has_core_enrichment_payload,
     source_content_hash,
 )
+from utils import company_slug  # noqa: E402
 
 _SOURCE_JOB_FIELDS = [
     "job_id", "job_title", "job_description",
@@ -822,6 +823,56 @@ def _find_json_files(company_filter: str | None, all_dates: bool) -> list[Path]:
 
 # ── Core import logic ──────────────────────────────────────────────────────────
 
+def _collision_safe_job_id(company: str, raw_job_id: str) -> str:
+    return f"{company_slug(company).lower()}::{raw_job_id}"
+
+
+def _existing_job_companies(sb: Client, job_ids: list[str]) -> dict[str, str]:
+    existing: dict[str, str] = {}
+    unique_ids = list(dict.fromkeys(job_ids))
+    for index in range(0, len(unique_ids), 100):
+        batch = unique_ids[index:index + 100]
+        try:
+            rows = (
+                sb.table("jobs")
+                .select("job_id,company_name")
+                .in_("job_id", batch)
+                .execute()
+            ).data or []
+        except (AttributeError, TypeError):
+            # Lightweight unit-test fakes may only implement upsert.
+            return {}
+        for row in rows:
+            if isinstance(row, dict) and row.get("job_id"):
+                existing[str(row["job_id"])] = str(row.get("company_name") or "")
+    return existing
+
+
+def _namespace_cross_company_collisions(sb: Client, jobs: list[dict]) -> int:
+    raw_ids = [str(job.get("job_id")) for job in jobs if job.get("job_id")]
+    owners = _existing_job_companies(sb, raw_ids)
+    changed = 0
+    for job in jobs:
+        raw_job_id = str(job.get("job_id") or "").strip()
+        company = str(job.get("company_name") or "").strip()
+        existing_company = owners.get(raw_job_id, "").strip()
+        if not raw_job_id or not company or not existing_company:
+            continue
+        if existing_company.casefold() == company.casefold():
+            continue
+        safe_id = _collision_safe_job_id(company, raw_job_id)
+        log.warning(
+            "Cross-company job_id collision: %s is owned by %s; using %s for %s",
+            raw_job_id,
+            existing_company,
+            safe_id,
+            company,
+        )
+        job["job_id"] = safe_id
+        changed += 1
+    return changed
+
+
 def _upsert_jobs(
     sb: Client,
     jobs: list[dict],
@@ -831,6 +882,7 @@ def _upsert_jobs(
     source_only: bool = False,
     supports_forward_enrichment: bool = False,
 ) -> tuple[int, int]:
+    _namespace_cross_company_collisions(sb, jobs)
     rows = []
     unknown_location_rows = 0
     supports_job_content_hash = (
@@ -1257,6 +1309,33 @@ def _refresh_analytics_snapshot() -> None:
         log.warning("Intel refresh failed (%s): %s — snapshot may be stale", endpoint, e)
 
 
+def _notify_scrape_landed() -> None:
+    """Tell the Myro backend a fresh jobs batch landed → it re-matches + notifies
+    affected users immediately (Backlog #36 event-driven matching).
+
+    Fire-and-forget: never raises, so a webhook failure cannot fail the import.
+    Skipped silently if either env var is absent. Reuses MYRO_BACKEND_URL (already
+    used by the intel refresh) and sends the shared secret in a header.
+    """
+    backend_url = (os.getenv("MYRO_BACKEND_URL", "") or "").rstrip("/")
+    token = (os.getenv("SCRAPE_WEBHOOK_TOKEN", "") or "").strip()
+    if not backend_url or not token:
+        log.info("Scrape-landed webhook skipped: MYRO_BACKEND_URL / SCRAPE_WEBHOOK_TOKEN not set")
+        return
+
+    endpoint = f"{backend_url}/internal/scrape/landed"
+    try:
+        resp = requests.post(endpoint, json={}, headers={"X-Scrape-Token": token}, timeout=15)
+        if resp.status_code == 200:
+            log.info("Scrape-landed webhook: Myro sweep triggered (%s)", resp.json())
+        else:
+            log.warning(
+                "Scrape-landed webhook: backend returned %s (%s)", resp.status_code, endpoint
+            )
+    except requests.RequestException as e:
+        log.warning("Scrape-landed webhook failed (%s): %s", endpoint, e)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1598,6 +1677,10 @@ def main() -> None:
     # Clean, real load only — tell the Myro intel page to refresh its snapshot.
     if not args.dry_run:
         _refresh_analytics_snapshot()
+        # Event-driven matching (#36): a genuine new-jobs batch → sweep + notify
+        # affected users now. Only when jobs actually landed (the event itself).
+        if total_jobs > 0:
+            _notify_scrape_landed()
 
 
 if __name__ == "__main__":

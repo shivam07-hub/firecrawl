@@ -181,7 +181,7 @@ def test_skill_only_output_is_retried_instead_of_marked_complete() -> None:
     outcome = process_message(_message(), store=store, queue=queue, enrich=skill_only)
 
     assert outcome.action == "retryable"
-    assert outcome.pause is True
+    assert outcome.pause is False
     assert store.applied == []
     assert queue.archived == []
     assert queue.retried

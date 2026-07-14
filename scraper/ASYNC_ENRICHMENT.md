@@ -101,13 +101,17 @@ allowlisted open-weight model through the existing inference configuration.
 
 `.archon/workflows/scraper-weekly-run.yaml` defines the manual
 `scraper-daily-forward` workflow without an independent cron schedule. It calls
-`daily_cycle.py`, which publishes first, starts/loads LM Studio second, and then
-drains the durable queue. An inference failure cannot roll back published jobs.
+`daily_cycle.py`, which publishes first, starts/loads the local embedding model,
+drains new job embeddings, then starts/loads the generative model and drains
+the durable enrichment queue. `daily_poll.py` publishes every local calendar date
+spanned by a long scrape, so crossing midnight cannot omit late companies. An
+inference failure cannot roll back published jobs.
 
-Codex automation `Daily trusted career poll` owns the recurring run. It is
-re-anchored for 24 hours after the preceding cycle finishes. The old 15-minute
-`Lazy job enrichment worker` automation is retired, preventing duplicate tasks
-and avoiding repeated model starts. Local automation requires this Mac to be on.
+Codex automation `Daily trusted career poll` owns the recurring source run. It
+is re-anchored for 24 hours after poll-and-publish finishes and never creates
+consumers when enrichment workers are already active. The old 15-minute `Lazy
+job enrichment worker` automation is deleted, preventing duplicate tasks and
+repeated model starts. Local automation requires this Mac to be on.
 
 For an always-on worker independent of this Mac, authenticate Railway, link the
 intended project, and run the same worker command with the scraper environment

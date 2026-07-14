@@ -138,6 +138,8 @@ The scraper reads `KNOWN_PORTALS.md`, routes each portal through `scraper/provid
 | `enricher.py` | Open-weight enrichment: `enrich_job()` fills `job_summary`, `role_domain`, and structured skills |
 | `enrichment_state.py` | Forward-only source hash + core enrichment version contract |
 | `enrichment_worker.py` | Lazy Supabase queue worker for post-cutover jobs only |
+| `job_embedding_state.py` | Stable source-document and query prefix/hash contract for semantic retrieval |
+| `job_embedding_worker.py` | Local LM Studio Nomic embedding worker and semantic-search diagnostic |
 | `writer.py` | `to_canonical()` → canonical schema; `save_jobs()` → deduplicated JSON + CSV |
 | `main.py` | Orchestrator: `--company`, `--ats`, `--dry-run`, `--skip-enrich`, `--resume`, `--enrich-only` |
 | `csv_importer.py` | Source-only immediate publish or legacy full upsert; lifecycle + diagnostics |
@@ -169,6 +171,7 @@ python main.py --ats smartrecruiters     # test one ATS type
 python main.py --skip-enrich --scope global --global-cap 2000  # full scrape, no LLM
 python main.py --resume --skip-enrich    # resume an interrupted run only
 python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"  # publish this completed run only
+python job_embedding_worker.py --batch-size 32 --max-jobs 1000  # source-first semantic retrieval lane
 python enrichment_worker.py --max-messages 100  # lazy Phase 2 when inference is available
 python main.py --enrich-only             # legacy local-file enrichment during cutover only
 ```
@@ -688,7 +691,7 @@ for inference, and historical rows are never backfilled.
 
 ```bash
 cd scraper
-python daily_cycle.py --scope india --company-cap 2000 --max-messages 10000
+python daily_cycle.py --scope india --company-cap 2000 --max-messages 100000
 ```
 
 **How to run through Archon:**

@@ -35,7 +35,7 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 
 ---
 
-## CURRENT STATE (as of 2026-07-12)
+## CURRENT STATE (as of 2026-07-13)
 
 - **Data:** 53,046 jobs in Supabase (`jobs`, project `gipvxuugajkugntwkeiz`), 46,206 currently active, and 413,836 `job_skills` rows (read-only snapshot 2026-07-12; active count moves as the delisting loop runs).
 - **Portals:** `KNOWN_PORTALS.md` is the source of truth — current parser count **316 active rows**. The 2026-07-12 `career-ops` audit added five Greenhouse boards and first-class Ashby parsing for Deepgram/Zapier; ElevenLabs remains parked for location-semantic review. Per-crack history lives there + in git, not here.
@@ -45,7 +45,8 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 - **Pagination:** shared `providers/_paginate.py` seam owns the stop decision; zwayam/hm_wp/eightfold migrated, the rest adopt on-touch.
 - **Layout:** tests in `scraper/tests/` (+ conftest); narrative docs + handoffs in `docs/`; root keeps CLAUDE/AGENTS/README/KNOWN_PORTALS/RUN_HISTORY/HANDOVER.
 - **Health tracking:** official per-company counts only after a real `csv_importer.py` load; scrape-only counts are provisional and stay local.
-- **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation runs `daily_cycle.py`: poll → publish → start/load LM Studio → drain enrichment. The next run is re-anchored 24 hours after the preceding run finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
+- **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation owns the poll-and-publish schedule and never duplicates active consumers; local enrichment continues independently across poll boundaries. Polls that cross midnight publish every calendar date they span. The next poll is re-anchored 24 hours after publication finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
+- **Source-first semantic job retrieval is deployed:** active jobs with a parseable source posting date in the latest 14 calendar dates were enrolled once; unknown-date and older history is deliberately excluded. New jobs and material source changes are enrolled automatically. `job_embedding_worker.py` uses local LM Studio Nomic 768-dimensional embeddings, stores vectors in service-role-only `private.job_embeddings`, and exposes a trust-filtered nearest-neighbor RPC with no similarity/skill sieve. See `scraper/JOB_EMBEDDINGS.md`.
 - **Upskilling question-bank pilot is implemented:** isolated `scraper/question_bank/` pipeline for Machine Learning, Product Strategy, Management Consulting, and Financial Accounting. Live schema/taxonomy preflight passes; `skill_questions` remains empty until source JSONL is supplied, local LM Studio is loaded, and an explicit `--publish` run succeeds. Unlike job enrichment, question-bank config still intentionally refuses non-loopback LLM URLs.
 
 ### Output folder location
@@ -83,6 +84,10 @@ python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"
 # Lazy Phase 2/3B — enrich queued forward-only jobs when inference is available
 ENRICH_FORCE_LLM=1 python enrichment_worker.py --batch-size 10 --max-messages 100
 
+# Semantic retrieval lane — local LM Studio Nomic embeddings
+python job_embedding_worker.py --preflight-only
+python job_embedding_worker.py --batch-size 32 --max-jobs 1000
+
 # Legacy linear path (kept until async cutover verification)
 python main.py --enrich-only
 python csv_importer.py --dry-run    # verify counts, no writes
@@ -104,13 +109,12 @@ KNOWN_PORTALS.md → main.py/providers → raw JSON
                        csv_importer.py --source-only
                                       ↓
                      Supabase job visible immediately
-                                      ↓
-                  durable forward-only enrichment queue
-                                      ↓
-               enrichment_worker.py (LM Studio / approved
-                       remote open-weight endpoint)
-                                       ↓
-                    hash-guarded enrichment patch + job_skills
+                         ↙                         ↘
+        private embedding queue/trigger       enrichment queue
+                     ↓                              ↓
+       job_embedding_worker.py (local)       enrichment_worker.py
+                     ↓                              ↓
+         semantic retrieval RPC        enrichment patch + job_skills
 ```
 
 ## COMPANY RUN HEALTH TRACKING
@@ -143,6 +147,9 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `enrichment_state.py` | Forward-only source hash and enrichment-version contract |
 | `enrichment_worker.py` | Lazy Supabase queue consumer; retries inference outages and rejects stale/inactive work |
 | `ASYNC_ENRICHMENT.md` | Cutover contract, commands, and rollout verification |
+| `job_embedding_state.py` | Stable source-document/query prefix and content-hash contract for semantic retrieval |
+| `job_embedding_worker.py` | Local LM Studio batch worker plus live semantic-query diagnostic |
+| `JOB_EMBEDDINGS.md` | 14-day rollout boundary, private-vector design, operations, and Myro RPC contract |
 | `CAREER_OPS_AUDIT.md` | Upstream provider audit, adopted boards, trust comparison, and direct-ATS expansion backlog |
 | `diagnose.py` | Phase 4 self-healing diagnostic — classify a run's 0/low companies into buckets, `--probe` re-tests routes |
 | `heal/` | Self-healing package: `baseline.py` (ledger), `classifier.py` (failure buckets), `probe.py` (live re-test seam) |

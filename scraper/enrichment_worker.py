@@ -302,7 +302,6 @@ def process_message(
             queue=queue,
             error="enrichment returned no terminal core output",
             max_attempts=max_attempts,
-            pause=True,
         )
 
     if not store.apply(enriched, message.source_hash):
@@ -494,6 +493,8 @@ def main() -> None:
         max_attempts=args.max_attempts,
     )
     log.info("Enrichment worker complete: %s", counts or {"queue_empty": 1})
+    if counts.get("inference_unavailable") or counts.get("quota_retry"):
+        raise SystemExit(4)
 
 
 if __name__ == "__main__":

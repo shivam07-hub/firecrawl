@@ -5,6 +5,60 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-07-13 — Source-first semantic job embeddings
+
+**Objective:** Unblock Myro's "brain is boss, no sieve" retrieval direction by
+embedding only recent jobs, keeping vectors private, and making source-published
+jobs searchable before slower generative enrichment completes.
+
+**Implementation:**
+- Added `scraper/job_embedding_state.py`: stable `search_document:` /
+  `search_query:` prefixes, source-only document construction, versioning, and
+  exact input hashes.
+- Added `scraper/job_embedding_worker.py`: local-only LM Studio preflight,
+  validated 768-dimensional batch embeddings, durable claim tokens,
+  apply/retry handling, graceful interrupt recovery, and a live semantic-query
+  diagnostic. Bounded rollout workers may use exact-weight runtime aliases while
+  rows retain one canonical model identity.
+- Added service-role-only `private.job_embeddings`, a partial HNSW cosine index,
+  forward insert/source-change enrollment, claim/apply/retry/metrics RPCs, and
+  `match_jobs_semantic`. Retrieval filters only inactive/closed jobs and explicit
+  request scope; it has no similarity threshold or skill-term prefilter.
+- Integrated the embedding lane into `daily_cycle.py` between immediate source
+  publication and generative enrichment. The cycle starts/loads the embedding
+  model independently, so it cannot claim work against a disconnected runtime.
+- Documented the stable contract and Myro handoff in
+  `scraper/JOB_EMBEDDINGS.md`.
+
+**14-day boundary correction:**
+- The first live seed used `first_seen`, which incorrectly treated old jobs from
+  a recent bulk import as recent and enrolled 31,888 rows. The transaction was
+  narrowed before broad completion to the source `date_posted` value.
+- Supported ISO, Workday relative, English abbreviated-month, and `M/D/YY`
+  formats are parsed against the Asia/Kolkata calendar. Unknown dates are
+  excluded rather than guessed recent.
+- Final bounded enrollment is 12,442 active postings from 2026-06-30 through
+  2026-07-13. Older/unknown ingestion-date rows and any provisional vectors were
+  removed transactionally. New jobs and material source changes remain
+  forward-enrolled.
+
+**Live rollout notes:**
+- Initial DDL correctly rolled back when the empty function search path could
+  not resolve pgvector's cosine operator. Qualifying it as
+  `OPERATOR(public.<=>)` fixed the root cause; the full migration then applied.
+- An advisor-driven follow-up removed an unused input-hash index and aligned
+  claim order with the durable queue index. RLS plus explicit grants leave
+  `anon` and `authenticated` without vector-table access; `service_role` alone
+  can claim or search.
+
+**Verification:**
+- Local scraper suite: `217 passed`; Ruff and Python bytecode checks passed.
+- Production canaries applied without rejection and the HNSW index served the
+  semantic query. Final drain and post-rollout counts are recorded below once
+  terminal coverage is reached.
+
+---
+
 ## Session 2026-07-12 — Daily polling, lazy priority enrichment, and live surface-area expansion
 
 **Objective:** Complete the forward-only architecture on live data: daily direct
@@ -68,11 +122,41 @@ Click Apply intent-rate north-star.
 - Supabase migrations and live queue/RPC/apply paths verified on project
   `gipvxuugajkugntwkeiz`.
 
-**Automation update:** consolidated the source poll and enrichment worker into
-one `daily_cycle.py` task. It starts/loads LM Studio only after source publication
-and drains the queue once per cycle. The old 15-minute worker is retired; the
-next daily run is anchored 24 hours after the preceding cycle finishes. Railway
-remains an optional always-on deployment independent of this Mac.
+**Automation update:** one `Daily trusted career poll` automation owns recurring
+source publication and does not duplicate already-running consumers. Local
+enrichment workers continue independently across poll boundaries. The old
+15-minute worker is deleted; the next source run is anchored 24 hours after the
+preceding poll-and-publish finishes. Railway remains an optional always-on
+deployment independent of this Mac.
+
+**2026-07-13 full-cycle recovery:** the first consolidated live run processed
+266/314 portals and safely skipped 48 pipeline/config failures. It crossed
+midnight, exposing that `daily_poll.py` had captured only its start date for
+publication: 18,979 July 12 rows reached Supabase while 75 completed July 13
+company files were omitted. The existing importer recovered the omitted 75
+files (11,312 source rows; one unknown location, 0.01%). `daily_poll.py` now
+publishes every local date spanned by a scrape, with regression coverage.
+
+LM Studio's `/models` endpoint was also found to list downloaded rather than
+loaded models. `daily_cycle.py` now checks `lms ps --json` and explicitly loads
+Gemma when needed. A real Data Scientist canary initially failed because Gemma
+emitted a trailing comma before `]`; the parser now repairs only trailing commas
+outside strings before schema/taxonomy validation. The same canary then reached
+terminal `complete`. Non-terminal per-job model output now retries that job and
+continues the queue; only endpoint/quota failures pause a consumer. Full scraper
+tests: 201 passed. Two atomic consumers were started for the initial forward-only
+queue and protected with macOS awake guards.
+
+The recovery import also exposed two native ATS IDs reused by different
+companies: `29401` (Nokia/WESCO) and `32568` (Adani Thermal Power/WESCO). Because
+`public.jobs.job_id` is a global primary key, the later WESCO import had replaced
+the earlier cards. `csv_importer.py` now checks the live owner before each batch
+upsert and namespaces only an incoming cross-company collision as
+`company_slug::native_id`; it does not rewrite existing IDs or backfill history.
+The July 13 source-only republish restored `nokia::29401` and
+`adani_thermal_power::32568` while preserving both WESCO rows. Live verification
+confirmed exactly 11,312 July 13 cards, both restored rows pending enrichment,
+two active consumers, and no failed or retryable rows.
 
 ---
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from daily_poll import build_commands
+from datetime import date
+
+from daily_poll import build_commands, run_dates_spanned
 
 
 def test_daily_poll_publishes_source_without_linear_enrichment() -> None:
@@ -28,3 +30,9 @@ def test_company_canary_scopes_both_steps() -> None:
 
     assert commands[0][1][-2:] == ["--company", "Stripe"]
     assert commands[1][1][-2:] == ["--company", "Stripe"]
+
+
+def test_run_dates_spanned_includes_midnight_boundary() -> None:
+    assert run_dates_spanned(
+        date(2026, 7, 12), date(2026, 7, 13)
+    ) == ["2026_07_12", "2026_07_13"]

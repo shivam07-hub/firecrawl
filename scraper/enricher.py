@@ -503,14 +503,47 @@ def _parse_llm_json_text(text: str, finish_reason: str | None = None):
     if parsed is not None:
         return parsed
 
-    # Cloudflare's fast small models can occasionally omit only the final
+    # Small open-weight models can emit a trailing comma before a closing
+    # object/array delimiter. Remove only commas outside strings whose next
+    # non-whitespace character is `]` or `}`.
+    repaired = _remove_trailing_json_commas(text)
+
+    # Cloudflare/local fast models can occasionally omit only the final
     # top-level closing brace while still reporting finish_reason=stop.
     # Repair only balanced-prefix JSON; do not guess through open strings.
     if finish_reason == "stop":
-        repaired = _append_missing_json_closers(text)
-        if repaired != text:
-            return parse_json_response(repaired)
+        repaired = _append_missing_json_closers(repaired)
+    if repaired != text:
+        return parse_json_response(repaired)
     return None
+
+
+def _remove_trailing_json_commas(text: str) -> str:
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for index, ch in enumerate(text):
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            continue
+        if ch == ",":
+            cursor = index + 1
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor < len(text) and text[cursor] in "]}":
+                continue
+        out.append(ch)
+    return "".join(out)
 
 
 def _append_missing_json_closers(text: str) -> str:

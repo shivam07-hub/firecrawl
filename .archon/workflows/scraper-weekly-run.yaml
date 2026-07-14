@@ -25,5 +25,5 @@ nodes:
     depends_on: [validate-portals]
     bash: |
       cd scraper
-      python daily_cycle.py --scope india --company-cap 2000 --max-messages 10000
+      python daily_cycle.py --scope india --company-cap 2000 --max-embeddings 100000 --max-messages 100000
     timeout: 21600000

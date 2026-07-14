@@ -22,6 +22,14 @@ class InferenceConfig:
     model_allowlist: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class JobEmbeddingConfig:
+    base_url: str
+    api_key: str
+    model: str
+    dimensions: int
+
+
 def _first_env(values: Mapping[str, str], *names: str, default: str = "") -> str:
     for name in names:
         value = (values.get(name) or "").strip()
@@ -128,12 +136,65 @@ def resolve_inference_config(env: Mapping[str, str] | None = None) -> InferenceC
     )
 
 
+def resolve_job_embedding_config(
+    env: Mapping[str, str] | None = None,
+) -> JobEmbeddingConfig:
+    """Resolve the local-only model used by semantic job retrieval.
+
+    Embeddings are an independent, source-first lane.  They never inherit a
+    remote generation endpoint: both job documents and Myro queries must use
+    the exact same locally hosted model and dimensionality.
+    """
+    values = os.environ if env is None else env
+    base_url = _first_env(
+        values,
+        "JOB_EMBEDDING_BASE_URL",
+        "LM_STUDIO_BASE_URL",
+        default=_LOCAL_INFERENCE_BASE_URL,
+    ).rstrip("/")
+    if not _is_loopback_base_url(base_url):
+        raise ValueError("job embeddings must use a loopback LM Studio endpoint")
+
+    model = _first_env(
+        values,
+        "JOB_EMBEDDING_MODEL",
+        default="text-embedding-nomic-embed-text-v1.5",
+    )
+    if not model:
+        raise ValueError("job embedding model name is required")
+    raw_dimensions = _first_env(values, "JOB_EMBEDDING_DIMENSIONS", default="768")
+    try:
+        dimensions = int(raw_dimensions)
+    except ValueError as exc:
+        raise ValueError("JOB_EMBEDDING_DIMENSIONS must be an integer") from exc
+    if dimensions < 1:
+        raise ValueError("JOB_EMBEDDING_DIMENSIONS must be positive")
+
+    return JobEmbeddingConfig(
+        base_url=base_url,
+        api_key=_first_env(
+            values,
+            "JOB_EMBEDDING_API_KEY",
+            "LM_STUDIO_API_KEY",
+            default="lm-studio",
+        ),
+        model=model,
+        dimensions=dimensions,
+    )
+
+
 _INFERENCE_CONFIG = resolve_inference_config()
 INFERENCE_BASE_URL = _INFERENCE_CONFIG.base_url
 INFERENCE_API_KEY = _INFERENCE_CONFIG.api_key
 INFERENCE_MODEL = _INFERENCE_CONFIG.model
 INFERENCE_PROVIDER = _INFERENCE_CONFIG.provider
 INFERENCE_MODEL_ALLOWLIST = _INFERENCE_CONFIG.model_allowlist
+
+_JOB_EMBEDDING_CONFIG = resolve_job_embedding_config()
+JOB_EMBEDDING_BASE_URL = _JOB_EMBEDDING_CONFIG.base_url
+JOB_EMBEDDING_API_KEY = _JOB_EMBEDDING_CONFIG.api_key
+JOB_EMBEDDING_MODEL = _JOB_EMBEDDING_CONFIG.model
+JOB_EMBEDDING_DIMENSIONS = _JOB_EMBEDDING_CONFIG.dimensions
 
 # Backward-compatible aliases for older scraper modules and local env files.
 LM_STUDIO_BASE_URL = INFERENCE_BASE_URL
