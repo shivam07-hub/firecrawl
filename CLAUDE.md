@@ -47,6 +47,7 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 - **Health tracking:** official per-company counts only after a real `csv_importer.py` load; scrape-only counts are provisional and stay local.
 - **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation owns the poll-and-publish schedule and never duplicates active consumers; local enrichment continues independently across poll boundaries. Polls that cross midnight publish every calendar date they span. The next poll is re-anchored 24 hours after publication finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
 - **Source seniority normalization is forward-only:** `writer.to_canonical()` calls `job_seniority.py` before a future source publication. It combines provider metadata, explicit title signals, and source-JD experience requirements into Myro's canonical ladder (`intern`, `entry`, `mid`, `senior`, `lead`, `executive`); it is deterministic, uses no model or enrichment queue, and never rewrites historical Supabase rows.
+- **Source Career Band normalization is forward-only:** `writer.to_canonical()` calls `job_career_band.py` before a future source publication. It maps explicit title signals and the controlled role domain into one of Myro's four role families; it is deterministic, uses no model or enrichment queue, and never rewrites historical Supabase rows.
 - **Source-first semantic job retrieval is deployed:** active jobs with a parseable source posting date in the latest 14 calendar dates were enrolled once; unknown-date and older history is deliberately excluded. New jobs and material source changes are enrolled automatically. `job_embedding_worker.py` uses local LM Studio Nomic 768-dimensional embeddings, stores vectors in service-role-only `private.job_embeddings`, and exposes a trust-filtered nearest-neighbor RPC with no similarity/skill sieve. See `scraper/JOB_EMBEDDINGS.md`.
 - **Upskilling question-bank pilot is implemented:** isolated `scraper/question_bank/` pipeline for Machine Learning, Product Strategy, Management Consulting, and Financial Accounting. Live schema/taxonomy preflight passes; `skill_questions` remains empty until source JSONL is supplied, local LM Studio is loaded, and an explicit `--publish` run succeeds. Unlike job enrichment, question-bank config still intentionally refuses non-loopback LLM URLs.
 
@@ -143,6 +144,7 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `rag_skills.py` | IDF index over 35,108 Lightcast L3 skills — vocab for LLM |
 | `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → structured `skills` + back-compat arrays |
 | `writer.py` | `to_canonical()` → deduped JSON+CSV saved to output folder |
+| `job_career_band.py` | Deterministic source-level normalizer for Myro's four role families; no historical rewrite |
 | `job_seniority.py` | Deterministic source-level normalizer for seniority and experience bounds; no historical rewrite |
 | `main.py` | Orchestrator — all CLI flags; auto-runs self-diagnosis at run end |
 | `csv_importer.py` | Phase 3A source-only publish or legacy full upsert; source-only mode preserves model-owned columns |
@@ -194,6 +196,7 @@ python diagnose.py --json                   # machine-readable verdicts
 | `job_id` | ATS native ID | dedup key |
 | `job_title` | ATS / page title | no LLM |
 | `job_description` | ATS JD endpoint or Firecrawl | full text |
+| `career_band` | `job_career_band.py` at source write | deterministic role family: engineering/data, business/product/operations, research/people/public impact, or design/creative; forward-only |
 | `seniority_level` | `job_seniority.py` at source write | deterministic canonical ladder from provider metadata, title, and source JD; forward-only |
 | `min_years_experience` / `max_years_experience` | `job_seniority.py` at source write | parsed source bounds where explicit; no model inference |
 | `company_name` | KNOWN_PORTALS.md | |

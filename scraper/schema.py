@@ -101,6 +101,7 @@ CANONICAL_FIELDS: list[str] = [
     "ingestion_source",
     "quality_status",
     "role_domain",
+    "career_band",
     # Skills: ONE flat list. `skills` carries the structured {name, required_level}
     # objects consumed by csv_importer to write job_skills (the FK source of truth).
     # `main_skills` mirrors the same skill names (back-compat column True_Yodha reads

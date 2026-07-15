@@ -66,6 +66,7 @@ _SOURCE_JOB_FIELDS = [
     "job_id", "job_title", "job_description",
     "industry", "company_name", "location", "apply_url",
     "source_url", "source_platform", "ingestion_source", "quality_status",
+    "career_band",
     "batch_date",
     "location_raw", "location_city", "location_country", "location_mode", "location_quality",
     "locations",
