@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from utils import company_slug
 from config import OUTPUT_BASE
+from job_seniority import normalize_job_seniority
 from schema import CANONICAL_FIELDS, RAW_FIELD_MAP, MIN_JOB_DESCRIPTION_LEN, MISSING_JD_NOTE
 
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
@@ -80,10 +81,18 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         return raw.get(canonical_key) or raw.get(raw_key) or default
 
     location = _get('location_city', 'location') or raw.get('Location') or raw.get('location_raw') or 'India'
-    job_description = _get('raw_jd_text', 'job_description')
-    metadata_only = len(str(job_description or '').strip()) < MIN_JOB_DESCRIPTION_LEN
+    source_job_description = _get('raw_jd_text', 'job_description')
+    job_description = source_job_description
+    metadata_only = len(str(source_job_description or '').strip()) < MIN_JOB_DESCRIPTION_LEN
     if metadata_only:
         job_description = MISSING_JD_NOTE
+    normalized_seniority = normalize_job_seniority({
+        **raw,
+        "job_title": _get('title', 'job_title'),
+        # The card may hide a short JD, but its source text can still contain
+        # a deterministic experience requirement such as "12+ years".
+        "job_description": source_job_description,
+    })
 
     row = {
         "job_id":           raw.get('job_id') or '',
@@ -118,12 +127,13 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "candidate_profile_hash":    raw.get('candidate_profile_hash') or '',
         "candidate_profile_model":   raw.get('candidate_profile_model') or '',
         "job_content_hash":          raw.get('job_content_hash') or '',
-        # Structured card-chip facts (provider-supplied; empty when unavailable).
+        # Structured source facts. Seniority is normalized deterministically from
+        # provider metadata, title, and JD during the forward scrape; no LLM pass.
         "date_posted":            raw.get('date_posted') or raw.get('date_posted_raw') or '',
-        "seniority_level":        raw.get('seniority_level') or '',
+        "seniority_level":        normalized_seniority.seniority_level,
         "work_mode":              raw.get('work_mode') or '',
-        "min_years_experience":   raw.get('min_years_experience') if raw.get('min_years_experience') is not None else '',
-        "max_years_experience":   raw.get('max_years_experience') if raw.get('max_years_experience') is not None else '',
+        "min_years_experience":   normalized_seniority.min_years_experience if normalized_seniority.min_years_experience is not None else '',
+        "max_years_experience":   normalized_seniority.max_years_experience if normalized_seniority.max_years_experience is not None else '',
         "batch_date":       raw.get('batch_date') or _today(),
     }
     row["job_content_hash"] = row.get("job_content_hash") or job_content_hash(row)

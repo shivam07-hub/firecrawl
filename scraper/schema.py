@@ -119,7 +119,7 @@ CANONICAL_FIELDS: list[str] = [
     "job_content_hash",        # scraper-owned change signal for True_Yodha job embeddings; not the vector
     # Structured facts surfaced as card chips (kept OUT of the JD blob).
     "date_posted",             # original posting date string from the ATS
-    "seniority_level",         # e.g. Entry / Mid / Senior (provider-supplied)
+    "seniority_level",         # canonical ladder from source metadata, title, and JD
     "work_mode",               # provider's own onsite/hybrid/remote signal
     "min_years_experience",    # int or '' — "2–4 yrs" chip
     "max_years_experience",    # int or ''
