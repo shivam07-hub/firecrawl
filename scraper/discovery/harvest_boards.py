@@ -47,6 +47,32 @@ OUT_CSV = HERE / "harvested_boards.csv"
 REPORT = HERE / "harvest_report.md"
 PROMOTE = HERE / "harvest_promote.md"
 
+# 2b quality gate — Myro indexes EMPLOYERS, not listings. A board earns auto-promotion
+# only if it maps to ONE identifiable hiring company. Recruitment agencies / aggregators /
+# microtask boards hire for undisclosed clients, so they break the "explain what THIS
+# company wants" promise and must never auto-promote. They are routed to status='review'
+# (a human confirms single-employer) instead of the ready-to-paste net-new bucket.
+# The tests below are cheap proxies for the true single-employer question:
+#   1. name/slug carries an agency/staffing word, OR
+#   2. very large board with a low India ratio (classic multi-client dump:
+#      Squircle 1784, Capital Aim 474, Welocalize 543 — huge totals, sprawling clients).
+POLLUTION_RE = re.compile(
+    r"consult|staffing|\bstaff\b|advisory|recruit|manpower|outsourc|placement|marketplace",
+    re.IGNORECASE,
+)
+HIGH_TOTAL = 400      # boards larger than this are almost always agency/aggregator directories
+LOW_INDIA_RATIO = 0.20  # …and if <20% of that volume is India, it is not a single India employer
+
+
+def looks_like_pollution(h: dict) -> bool:
+    """True if a hit is likely a staffing/aggregator board (route to review, never auto-promote)."""
+    if POLLUTION_RE.search(f"{h['slug']} {h.get('board_name') or ''}"):
+        return True
+    total = h.get("total") or 0
+    if total > HIGH_TOTAL and (h.get("india") or 0) < LOW_INDIA_RATIO * total:
+        return True
+    return False
+
 
 def existing_tokens() -> dict[str, set[str]]:
     """Tokens already in KNOWN_PORTALS, per ATS — the dedup guard."""
@@ -127,7 +153,12 @@ def main() -> int:
             done += 1
             for h in fut.result():
                 tracked = h["slug"].lower() in have.get(h["ats"], set())
-                h["status"] = "tracked" if tracked else ("india" if h["india"] > 0 else "no-india")
+                if tracked:
+                    h["status"] = "tracked"
+                elif h["india"] > 0:
+                    h["status"] = "review" if looks_like_pollution(h) else "india"
+                else:
+                    h["status"] = "no-india"
                 all_hits.append(h)
             if done % 100 == 0 or done == len(tokens):
                 print(f"  {done}/{len(tokens)}  hits={len(all_hits)}")
@@ -140,26 +171,29 @@ def main() -> int:
             w.writerow([h["ats"], h["slug"], h["total"], h["india"], h["board_name"], h["status"], h["sample"][:60]])
 
     net_new = [h for h in all_hits if h["status"] == "india"]
+    review = [h for h in all_hits if h["status"] == "review"]
 
     # report
     by_ats: dict[str, dict] = {}
     for h in all_hits:
-        d = by_ats.setdefault(h["ats"], {"hits": 0, "india": 0, "net_new": 0})
+        d = by_ats.setdefault(h["ats"], {"hits": 0, "india": 0, "net_new": 0, "review": 0})
         d["hits"] += 1
         d["india"] += 1 if h["india"] > 0 else 0
         d["net_new"] += 1 if h["status"] == "india" else 0
+        d["review"] += 1 if h["status"] == "review" else 0
     lines = [
         f"# Board harvest — {datetime.now():%Y-%m-%d %H:%M}",
         "",
         f"- Candidate tokens probed: **{len(tokens)}**",
         f"- Total board hits: **{len(all_hits)}**",
         f"- Net-new India-bearing boards: **{len(net_new)}**",
+        f"- Flagged for review (likely agency/aggregator — held back): **{len(review)}**",
         "",
-        "| ATS | Hits | with India | net-new India |",
-        "|---|---|---|---|",
+        "| ATS | Hits | with India | net-new India | review |",
+        "|---|---|---|---|---|",
     ]
     for ats, d in sorted(by_ats.items(), key=lambda kv: -kv[1]["net_new"]):
-        lines.append(f"| {ats} | {d['hits']} | {d['india']} | {d['net_new']} |")
+        lines.append(f"| {ats} | {d['hits']} | {d['india']} | {d['net_new']} | {d['review']} |")
     REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # promote stubs (KNOWN_PORTALS column formats per ATS)
@@ -182,6 +216,23 @@ def main() -> int:
         if ats == "ashby":
             plines.append("> Ashby also needs `ats_overrides`+`endpoint_overrides` entries in portal_reader.py.")
             plines.append("")
+
+    # Held-back boards: likely recruitment agency / aggregator / microtask (multi-client).
+    # Myro indexes single employers only — a human must confirm each is ONE real hiring
+    # company before promoting. No paste-ready stub is emitted on purpose.
+    if review:
+        plines.append("---")
+        plines.append("")
+        plines.append(f"## REVIEW — {len(review)} held back (confirm SINGLE real employer before promoting)")
+        plines.append("")
+        plines.append("| ats | slug | total | india | board_name | sample |")
+        plines.append("|---|---|---|---|---|---|")
+        for h in sorted(review, key=lambda x: (-x["total"], -x["india"])):
+            plines.append(
+                f"| {h['ats']} | {h['slug']} | {h['total']} | {h['india']} | "
+                f"{h['board_name'] or ''} | {h['sample'][:50]} |"
+            )
+        plines.append("")
     PROMOTE.write_text("\n".join(plines), encoding="utf-8")
 
     print(f"\n[harvest] DONE — {len(all_hits)} hits, {len(net_new)} net-new India boards")

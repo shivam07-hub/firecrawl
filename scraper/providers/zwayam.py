@@ -11,6 +11,7 @@ Apply URL: https://{domain}/job/{jobUrl}
 
 import json
 import logging
+from base64 import b64decode
 from urllib.parse import urlparse
 
 import requests
@@ -23,6 +24,7 @@ from utils import is_india, strip_html
 
 _log = logging.getLogger("mirror")
 _DEFAULT_API_URL = "https://apic2.zwayam.com/jobs/search"
+_DETAIL_JD_MIN_CHARS = 1200
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -44,6 +46,55 @@ class ZwayamProvider:
         if jobs is None:
             return ProviderResult.error(ScrapeReason.API_BLOCKED)
         return ProviderResult.success(jobs)
+
+
+def _decode_company_id(company_id: str) -> str:
+    try:
+        return b64decode(company_id).decode("utf-8")
+    except Exception:
+        return company_id
+
+
+def _detail_endpoint(api_url: str) -> str:
+    parsed = urlparse(api_url)
+    return f"{parsed.scheme}://{parsed.netloc}/jobs-service/v1/jobs/careersite"
+
+
+def _fetch_detail_jd(
+    *,
+    api_url: str,
+    headers: dict,
+    company_id: str,
+    job_url: str,
+    job_id: str,
+) -> str:
+    """Fetch Zwayam's public job-view payload when search returns a card teaser."""
+    payload = {
+        "jobUrl": job_url,
+        "externalSource": "CAREERSITE",
+        "campusUrl": "empty",
+        "companyId": _decode_company_id(company_id),
+        "jobId": job_id,
+    }
+    try:
+        response = requests.post(
+            _detail_endpoint(api_url),
+            headers={**headers, "Content-Type": "application/json"},
+            json=payload,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        _log.debug("    [Zwayam] detail unavailable for %s: %s", job_id, exc)
+        return ""
+
+    parts: list[str] = []
+    for field in ("longDescription", "mediumDescriptionWithoutHtml", "shortDescription"):
+        value = strip_html(data.get(field) or "") if isinstance(data, dict) else ""
+        if value and value not in parts:
+            parts.append(value)
+    return "\n\n".join(parts)
 
 
 def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
@@ -108,11 +159,25 @@ def _scrape_zwayam(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
 
             jid = str(src.get("id") or "")
             slug = src.get("jobUrl") or jid
-            apply_url = f"{parsed.scheme}://{domain}/job/{slug}" if slug else careers_url
+            careers_path = parsed.path.rstrip("/")
+            careers_base = f"{parsed.scheme}://{domain}{careers_path}"
+            apply_url = f"{careers_base}/job/{slug}" if slug else careers_url
+            if jid and slug:
+                apply_url = f"{apply_url}?id={jid}"
 
             raw_jd = strip_html(
                 src.get("shortDescription") or src.get("responsibility") or src.get("additionalDetails") or ""
             )
+            if len(raw_jd) < _DETAIL_JD_MIN_CHARS and jid and slug:
+                detail_jd = _fetch_detail_jd(
+                    api_url=api_url,
+                    headers=headers,
+                    company_id=company_id,
+                    job_url=slug,
+                    job_id=jid,
+                )
+                if len(detail_jd) > len(raw_jd):
+                    raw_jd = detail_jd
 
             jobs.append({
                 "job_id":          jid,

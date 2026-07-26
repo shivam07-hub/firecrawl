@@ -224,5 +224,10 @@ OUTPUT_BASE = os.getenv(
 ENRICH_WORKERS         = int(os.getenv("ENRICH_WORKERS",         "4"))
 WORKDAY_PAGE_SIZE      = int(os.getenv("WORKDAY_PAGE_SIZE",      "20"))
 REQUEST_TIMEOUT        = int(os.getenv("REQUEST_TIMEOUT",        "30"))
-WORKDAY_MAX_JOBS       = int(os.getenv("WORKDAY_MAX_JOBS",       "500"))
+# Listing-pagination ceiling per Workday tenant. Raised 500→5000 so large service
+# integrators (Accenture ~3k India) are fully LISTED (metadata only — cheap) before the
+# quality-aware cap ranks and selects. Small tenants break naturally well below this.
+WORKDAY_MAX_JOBS       = int(os.getenv("WORKDAY_MAX_JOBS",       "5000"))
+# Default JD-fetch cap for the standard path; the quality-cap path passes an explicit
+# limit == the company cap so JDs are fetched for exactly the selected set.
 WORKDAY_JD_FETCH_LIMIT = int(os.getenv("WORKDAY_JD_FETCH_LIMIT", "500"))

@@ -7,6 +7,7 @@ import logging
 import re
 import requests
 from pathlib import Path
+from urllib.parse import urlencode
 
 from config import REQUEST_TIMEOUT
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
@@ -154,7 +155,7 @@ def _scrape_oracle_nested(portal: Portal, headers: dict, max_jobs: int | None = 
             return jobs if jobs else None
 
         total = total or _oracle_total_count(data)
-        page_jobs = _parse_json_response(data, portal, page_url, max_jobs=None)
+        page_jobs = _parse_json_response(data, portal, page_url, max_jobs=None, headers=headers)
         for job in page_jobs:
             jid = job.get('job_id') or job_hash(job.get('title', ''), job.get('job_url', ''))
             if jid in seen_ids:
@@ -214,6 +215,8 @@ _ORACLE_HTML_HEADERS = {
     "Accept": "text/html",
 }
 
+_DETAIL_JD_MIN_CHARS = 1200
+
 
 def _fetch_oracle_html_jd(host: str, site_num: str, jid: str) -> str:
     """Fetch Oracle CandidateExperience job page; extract og:description when API JD is empty."""
@@ -226,6 +229,42 @@ def _fetch_oracle_html_jd(host: str, site_num: str, jid: str) -> str:
         return m.group(1) if m else ""
     except Exception:
         return ""
+
+
+def _fetch_oracle_detail_jd(host: str, site_num: str, jid: str, headers: dict) -> str:
+    """Read the full public Oracle HCM requisition payload, not its list teaser."""
+    finder = f'ById;siteNumber={site_num},Id="{jid}"'
+    query = urlencode({"expand": "all", "onlyData": "true", "finder": finder})
+    url = (
+        f"https://{host}/hcmRestApi/resources/latest/"
+        f"recruitingCEJobRequisitionDetails?{query}"
+    )
+    r = _fetch_response(url, headers)
+    if r is None or not _is_json_response(r):
+        return ""
+    try:
+        data = r.json()
+    except Exception:
+        return ""
+
+    # Oracle tenants return the requisition at the root today; retain the
+    # collection form for older CandidateExperience deployments.
+    detail = data
+    if isinstance(data, dict) and isinstance(data.get("items"), list) and data["items"]:
+        detail = data["items"][0]
+    if not isinstance(detail, dict):
+        return ""
+
+    parts: list[str] = []
+    for field in (
+        "ExternalDescriptionStr",
+        "ExternalResponsibilitiesStr",
+        "ExternalQualificationsStr",
+    ):
+        value = strip_html(detail.get(field) or "")
+        if value and value not in parts:
+            parts.append(value)
+    return "\n\n".join(parts)
 
 
 def _extract_oracle_nested(data: dict) -> list[dict]:
@@ -255,7 +294,13 @@ def _parse_oracle_job(p: dict, host: str, site_num: str = "careers") -> dict:
     }
 
 
-def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | None = None) -> list[dict]:
+def _parse_json_response(
+    data,
+    portal: Portal,
+    source_url: str,
+    max_jobs: int | None = None,
+    headers: dict | None = None,
+) -> list[dict]:
     """Walk common JSON structures to extract job listings.
     Checks generic_registry.json first — skips discovery for known companies.
     Persists successful key-path after first discovery so next run is instant.
@@ -280,6 +325,15 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
             if india_only and not is_india(mapped['_loc']):
                 continue
             jd = mapped['_jd']
+            if len(jd) < _DETAIL_JD_MIN_CHARS and site_num and mapped['_jid']:
+                detail_jd = _fetch_oracle_detail_jd(
+                    host,
+                    site_num,
+                    mapped['_jid'],
+                    headers or _HEADERS,
+                )
+                if len(detail_jd) > len(jd):
+                    jd = detail_jd
             if not jd and site_num and mapped['_jid']:
                 jd = _fetch_oracle_html_jd(host, site_num, mapped['_jid'])
             jobs.append({
@@ -370,11 +424,28 @@ def _parse_json_response(data, portal: Portal, source_url: str, max_jobs: int | 
         if india_only and not is_india(loc):
             continue
 
-        raw_jd = strip_html(
-            p.get('description') or p.get('jobDescription') or
-            p.get('content') or p.get('summary') or
-            p.get('postingDescription') or ''
-        )
+        if company == "Infosys":
+            # The Infosys listing response is already the detail source, but
+            # its substantive responsibilities are not stored in the generic
+            # description keys.  Prefer those fields over a card summary.
+            infosys_parts = []
+            for field in (
+                "postingDescription",
+                "rolesResponsibilities",
+                "technicalRequirement",
+                "additionalResponsibility",
+                "educationalRequirement",
+            ):
+                value = strip_html(p.get(field) or "")
+                if value and value not in infosys_parts:
+                    infosys_parts.append(value)
+            raw_jd = "\n\n".join(infosys_parts)
+        else:
+            raw_jd = strip_html(
+                p.get('description') or p.get('jobDescription') or
+                p.get('content') or p.get('summary') or
+                p.get('postingDescription') or ''
+            )
         if not raw_jd:
             # Atlassian / similar portals split JD across multiple sections.
             jd_parts = []

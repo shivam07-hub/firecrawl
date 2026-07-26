@@ -4,7 +4,7 @@ the provider must walk every page, not stop after the first sub-50 page."""
 
 from __future__ import annotations
 
-import json
+import json as jsonlib
 
 import providers.zwayam as z
 
@@ -25,8 +25,10 @@ def _make_api(total, page_size):
     jobs = [{"_source": {"jobTitle": f"Engineer {i}", "location": "Pune, India", "id": 1000 + i}}
             for i in range(total)]
 
-    def _post(url, headers=None, files=None, timeout=None):
-        start = json.loads(files["filterCri"][1])["paginationStartNo"]
+    def _post(url, headers=None, files=None, json=None, timeout=None):
+        if json is not None:
+            return _Resp({"longDescription": "A full role description " * 100})
+        start = jsonlib.loads(files["filterCri"][1])["paginationStartNo"]
         window = jobs[start:start + page_size]
         return _Resp({"data": {
             "data": window,
@@ -60,3 +62,32 @@ def test_large_page_deployment_still_works(monkeypatch):
               "zwayam_company_id": "X", "zwayam_api_url": "https://public.zwayam.com/jobs/search"}
     jobs = z._scrape_zwayam(portal)
     assert len(jobs) == 120
+
+
+def test_short_listing_uses_public_detail_and_preserves_careers_path(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers=None, files=None, json=None, timeout=None):
+        calls.append((url, json))
+        if json is not None:
+            return _Resp({"longDescription": "<p>Full responsibilities and qualifications.</p>"})
+        return _Resp({"data": {"data": [{"_source": {
+            "jobTitle": "Executive",
+            "location": "Mumbai, India",
+            "id": 956078,
+            "jobUrl": "executive-mumbai",
+            "shortDescription": "Brief teaser",
+        }}], "totalCount": 1, "hasMoreData": False}})
+
+    monkeypatch.setattr(z.requests, "post", fake_post)
+    jobs = z._scrape_zwayam({
+        "company": "CRISIL",
+        "careers_url": "https://career.crisil.com/crisil/",
+        "zwayam_company_id": "MTU0Mzg=",
+        "zwayam_api_url": "https://public.zwayam.com/jobs/search",
+    })
+
+    assert jobs[0]["raw_jd_text"] == "Full responsibilities and qualifications."
+    assert jobs[0]["job_url"] == "https://career.crisil.com/crisil/job/executive-mumbai?id=956078"
+    assert calls[1][0] == "https://public.zwayam.com/jobs-service/v1/jobs/careersite"
+    assert calls[1][1]["companyId"] == "15438"

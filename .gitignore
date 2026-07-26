@@ -78,3 +78,4 @@ apps/api/src/lib/scrape-interact/*.md
 /graphify-out/
 *.pdf
 *.xlsx
+/outputs

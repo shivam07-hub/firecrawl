@@ -398,7 +398,7 @@ def test_oracle_nested_scraper_paginates_offsets() -> None:
                 "Id": 26000000 + idx,
                 "Title": f"Oracle Job {idx}",
                 "PrimaryLocation": "Bengaluru, KA, India",
-                "ExternalDescriptionStr": f"<p>Role {idx}</p>",
+                "ExternalDescriptionStr": f"<p>Role {idx} {'x' * 1300}</p>",
             })
         return _FakeJSONResponse({"items": [{"TotalJobsCount": total, "requisitionList": page}]})
 
@@ -423,7 +423,7 @@ def test_oracle_nested_scraper_paginates_offsets() -> None:
         jobs = generic_json.scrape_get(portal, max_jobs=140)
         check("oracle pagination job count", len(jobs) == 140)
         check("oracle pagination second page fetched", len(calls) == 2 and "offset=100" in calls[1])
-        check("oracle pagination jd parsed", jobs[0]["raw_jd_text"] == "Role 0")
+        check("oracle pagination jd parsed", jobs[0]["raw_jd_text"].startswith("Role 0"))
     finally:
         generic_json.requests.get = original_get
 

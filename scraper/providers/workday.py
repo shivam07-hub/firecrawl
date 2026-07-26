@@ -12,6 +12,7 @@ import firecrawl_client as fc
 from config import REQUEST_TIMEOUT, WORKDAY_PAGE_SIZE, WORKDAY_MAX_JOBS, WORKDAY_JD_FETCH_LIMIT
 from providers.base import FALLBACK_FIRECRAWL_EXTRACT, ProviderResult, ScrapeReason
 from utils import is_india, job_hash, strip_html, workday_req_id
+from scrape_select import select_for_cap
 
 _REGISTRY_PATH = Path(__file__).parent.parent / "workday_registry.json"
 _registry_lock = threading.Lock()
@@ -51,7 +52,8 @@ class WorkdayProvider:
                 portal=fallback_portal,
             )
 
-        jobs, reason = scrape_workday(portal, max_jobs=max_jobs, on_page_complete=on_page_complete)
+        jobs, reason = scrape_workday(portal, max_jobs=max_jobs, validate_mode=validate_mode,
+                                      on_page_complete=on_page_complete)
 
         # Global mode returned 0 or blocked → retry with India UUID before giving up
         if not portal.get('india_only', True):
@@ -62,7 +64,8 @@ class WorkdayProvider:
             if should_retry:
                 _log.info(f"    [RETRY] Global 0/422 — retrying {portal.get('company','')} with India UUID")
                 india_portal = {**portal, 'india_only': True}
-                jobs2, reason2 = scrape_workday(india_portal, max_jobs=max_jobs, on_page_complete=on_page_complete)
+                jobs2, reason2 = scrape_workday(india_portal, max_jobs=max_jobs, validate_mode=validate_mode,
+                                                on_page_complete=on_page_complete)
                 if jobs2 is not None and (len(jobs2) > 0 or jobs is None):
                     return ProviderResult(jobs=jobs2, reason=reason2)
                 # India UUID also failed → fall through to Firecrawl
@@ -94,6 +97,7 @@ class WorkdayProvider:
 def scrape_workday(
     portal: Portal,
     max_jobs: int | None = None,
+    validate_mode: bool = False,
     on_page_complete=None,  # Callable[[list[dict], int], None] | None
 ) -> tuple[list[dict] | None, ScrapeReason]:
     """
@@ -101,6 +105,14 @@ def scrape_workday(
       ([...], SUCCESS/NO_JOBS)  — normal result
       (None,  API_BLOCKED)      — Cloudflare / HTTP redirect → try Firecrawl
       (None,  CONFIG_ERROR)     — no India UUID found for tenant → skip, no fallback
+
+    Cap behavior (Phase B):
+      - validate_mode or streaming (per-page JD via on_page_complete): the cap is an
+        early pagination stop (cheap, order-agnostic) — unchanged legacy behavior.
+      - standard capped run: page the FULL India listing (metadata only), then
+        quality-select the top `max_jobs` on title/career_band, fetch JDs for exactly
+        that set, and drop any that still have no JD. This is what stops a big Workday
+        integrator (Accenture) from losing its technical tail to pagination order.
     """
     endpoint = portal['endpoint']
     india_only = portal.get('india_only', True)
@@ -165,7 +177,6 @@ def scrape_workday(
             break
 
         postings = data.get('jobPostings', [])
-        page_jobs: list[dict] = []
         new_on_page = 0
         for p in postings:
             ext = p.get('externalPath', '')
@@ -199,31 +210,58 @@ def scrape_workday(
                 'industry':        portal.get('industry', ''),
                 '_ext':            ext,
             }
-            page_jobs.append(job)
             jobs.append(job)
 
-        # Per-page JD fetch + flush when callback is wired (durability mode)
-        if on_page_complete and page_jobs:
-            _fetch_workday_jds(page_jobs, portal)
-            on_page_complete(page_jobs, page_num)
-
+        # Listing pagination is metadata-only now; JDs are fetched after selection
+        # (Phase B) so a big tenant does not fetch JDs for roles the cap will drop.
         page_num += 1
 
         if new_on_page == 0 or len(postings) < WORKDAY_PAGE_SIZE:
             break
-        if max_jobs and len(jobs) >= max_jobs:
+        # Only validate mode early-stops at the cap. A real run pages the full India
+        # listing so the quality selector can rank the whole pool before JD fetch.
+        if max_jobs and validate_mode and len(jobs) >= max_jobs:
             _log.info(f"    [WORKDAY] Validate cap reached ({max_jobs} jobs) — stopping pagination")
             break
         if len(jobs) >= WORKDAY_MAX_JOBS:
-            _log.info(f"    [WORKDAY] Cap reached ({WORKDAY_MAX_JOBS} jobs) — stopping pagination")
+            _log.info(f"    [WORKDAY] Listing ceiling reached ({WORKDAY_MAX_JOBS}) — stopping pagination")
             break
         offset += WORKDAY_PAGE_SIZE
 
-    if max_jobs:
-        jobs = jobs[:max_jobs]
+    # ── Cap + JD fetch (Phase B) ──────────────────────────────────────────────
+    # The loop above listed metadata only. Choose the roles to keep, then fetch JDs
+    # for exactly that set, flushing in chunks (durability during the slow JD phase).
+    # A quality-capped company (over the cap) ranks technical/JD-first and drops any
+    # selected role that still has no JD — a role we cannot explain is not indexed.
+    quality_cap = bool(max_jobs) and not validate_mode and len(jobs) > max_jobs
+    if quality_cap:
+        before = len(jobs)
+        selected = select_for_cap(jobs, max_jobs)
+        _log.info(f"    [WORKDAY] Quality cap: {before} listed → {len(selected)} selected (technical/JD-first)")
+    elif max_jobs:
+        selected = jobs[:max_jobs]
+    else:
+        selected = jobs
 
-    # Bulk JD fetch for jobs still missing JDs (no-callback path, or jobs added before callback era)
-    _fetch_workday_jds(jobs, portal)
+    budget = max_jobs if max_jobs else WORKDAY_JD_FETCH_LIMIT  # total JD-fetch cap
+    kept: list[dict] = []
+    fetched = 0
+    for ci, i in enumerate(range(0, len(selected), WORKDAY_PAGE_SIZE)):
+        chunk = selected[i:i + WORKDAY_PAGE_SIZE]
+        remaining = budget - fetched
+        if remaining > 0:
+            need = min(sum(1 for j in chunk if not j.get('raw_jd_text') and j.get('_ext')), remaining)
+            _fetch_workday_jds(chunk, portal, limit=need)
+            fetched += need
+        if quality_cap:
+            chunk = [j for j in chunk if (j.get('raw_jd_text') or '').strip()]
+        kept.extend(chunk)
+        if on_page_complete and chunk:
+            on_page_complete(chunk, ci)
+    jobs = kept
+    if quality_cap:
+        _log.info(f"    [WORKDAY] Quality cap: {len(jobs)} kept with JD")
+
     reason = ScrapeReason.SUCCESS if jobs else ScrapeReason.NO_JOBS
     return jobs, reason
 
@@ -294,13 +332,14 @@ def _find_india_id(obj, _parent_facet_param: str = 'locationCountry') -> tuple[s
     return None
 
 
-def _fetch_workday_jds(jobs: list[dict], portal: Portal) -> None:
+def _fetch_workday_jds(jobs: list[dict], portal: Portal, limit: int | None = None) -> None:
     """
     Fill raw_jd_text for Workday jobs.
     Strategy 1 — Workday CXS individual-job JSON API (fast, no credits).
     Strategy 2 — Firecrawl Docker batch_scrape on human-facing job_url (fallback when CXS is
                   Cloudflare-blocked; uses Docker so no credit cost).
-    Mutates jobs in-place. Capped at WORKDAY_JD_FETCH_LIMIT.
+    Mutates jobs in-place. Fetches at most `limit` missing JDs (default WORKDAY_JD_FETCH_LIMIT);
+    the quality-cap path passes limit == the company cap so the whole selected set gets JDs.
     """
     tenant   = portal.get('tenant', '')
     instance = portal.get('instance', '')
@@ -308,7 +347,7 @@ def _fetch_workday_jds(jobs: list[dict], portal: Portal) -> None:
         return
 
     to_fetch = [j for j in jobs if not j.get('raw_jd_text') and j.get('_ext')]
-    to_fetch = to_fetch[:WORKDAY_JD_FETCH_LIMIT]
+    to_fetch = to_fetch[:(limit or WORKDAY_JD_FETCH_LIMIT)]
     if not to_fetch:
         return
 

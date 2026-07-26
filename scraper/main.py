@@ -42,11 +42,16 @@ from config import OUTPUT_BASE
 from validation import LOW_COUNT_THRESHOLD
 from pipeline_validator import run_gate
 from schema import is_missing_jd_description
+from scrape_select import select_for_cap
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
 _GLOBAL_SCOPE_DEFAULT_CAP = 2000
-_DEFAULT_COMPANY_CAP = 1000
+# Quality-aware cap (see docs/DESIGN_quality_aware_company_cap.md). Companies at or under
+# this keep every role; over it, the quality selector keeps technical/JD-bearing roles.
+# 2500 lets large service integrators (Accenture) capture their technical tail; small
+# companies are unaffected (they sit under the cap → keep-all).
+_DEFAULT_COMPANY_CAP = 2500
 
 _INTER_COMPANY_DELAY = 2   # seconds between companies
 
@@ -217,10 +222,15 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             summary["skipped"] += 1
             continue
 
-        # Safety truncation for validate mode (scrapers cap internally where efficient,
-        # this catches anything that slipped through — e.g. Greenhouse, Phenom)
+        # Cap enforcement. Validate mode keeps the blunt truncation (schema-coverage
+        # safety, order-agnostic). Real runs use the quality-aware selector: companies
+        # over the cap keep technical / JD-bearing roles instead of an arbitrary tail
+        # (Phase A — see docs/DESIGN_quality_aware_company_cap.md).
         if max_jobs:
-            raw_jobs = raw_jobs[:max_jobs]
+            if validate_mode:
+                raw_jobs = raw_jobs[:max_jobs]
+            else:
+                raw_jobs = select_for_cap(raw_jobs, max_jobs)
 
         log.info(f"  {len(raw_jobs)} raw jobs scraped")
 

@@ -239,6 +239,7 @@ Do not seed or scan historical missing enrichment. Existing rows use NULL enrich
 
 ### Known issues
 
+- **Quality-aware per-company cap (shipped 2026-07-26) — affects `daily_cycle`.** `--company-cap` default is now **2500** (was 1000). Companies at/under the cap keep all roles; over it, `scrape_select.select_for_cap()` keeps technical (`career_band=engineering_data`) + JD-bearing roles and drops the arbitrary tail (title stoplist + `CAP_MIN_JD_CHARS=300`). Deterministic, no LLM, forward-only. **Workday contract change (Phase B):** the provider now pages listing **metadata only**, selects, then fetches JDs for **only the selected set** in `WORKDAY_PAGE_SIZE` chunks. Page-flush granularity moved from *per listing page* → *per JD-fetched chunk* — durability semantics (incremental writes, end marker, checkpoint updates) preserved and `test_daily_cycle` is green, but Codex owns `daily_cycle` so verify the durable-queue/checkpoint flow on the next real run. `WORKDAY_MAX_JOBS` raised 500→5000 (listing ceiling; the real prior bottleneck — every tenant was silently cut to 500 listings). Full detail: `docs/DESIGN_quality_aware_company_cap.md`; guards `tests/test_scrape_select.py`, `tests/test_workday_quality_cap.py`.
 - Workday India UUID response structure varies per tenant — if 0 jobs returned, run with `--company` and add debug prints
 - Eightfold API 404 as of 2026-04-10 — Firecrawl path may or may not extract clean listings
 - Goldman Sachs (TAL.NET) requires browser JS — Firecrawl handles it but markdown quality varies
