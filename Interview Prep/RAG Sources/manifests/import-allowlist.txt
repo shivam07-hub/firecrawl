@@ -1,0 +1,5 @@
+# Paths are relative to /Users/incognito/firecrawl_Supabase/Interview Prep/
+Disha Consulting/Casebooks/IIM Lucknow Casebook 2022.pdf
+Disha PM/IIM Lucknow's ProdMan and Analytics Guide 2022.pdf
+One Drive Files/Study Material/2nd Term/MANAC/Pre Mid/11-10-20222-Session-3-Material Cost Control/IndAS2_2019.pdf
+One Drive Files/Study Material/2nd Term/QAM2/PostMid/Multiple Regression.pdf

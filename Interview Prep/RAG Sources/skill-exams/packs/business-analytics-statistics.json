@@ -1,0 +1,177 @@
+{
+  "skill_id": "business-analytics-statistics",
+  "skill_name": "Business Analytics and Statistics",
+  "status": "draft_pending_review",
+  "source_status": "approved_private_sources",
+  "generation_attribution": {
+    "generated_by": "Codex (GPT-5)",
+    "generated_at": "2026-06-25",
+    "reviewed_by": null,
+    "review_status": "draft_pending_review"
+  },
+  "source_ids": [
+    "machine-learning-multiple-regression-course-notes"
+  ],
+  "reference_ids": [],
+  "target_users": [
+    "MBA candidates",
+    "Business analyst candidates",
+    "Product and consulting candidates using data in interviews"
+  ],
+  "core_topics": [
+    "Descriptive statistics",
+    "Correlation",
+    "Regression interpretation",
+    "Hypothesis testing",
+    "Forecasting",
+    "Decision analysis"
+  ],
+  "exam_levels": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "description": "Checks statistical vocabulary and basic interpretation.",
+      "outcomes": [
+        "Distinguish descriptive statistics from inference",
+        "Explain correlation and regression terms"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "business-analytics-statistics-l1-q001",
+          "type": "mcq",
+          "prompt": "What does a positive correlation between advertising spend and sales mean?",
+          "choices": [
+            "Higher advertising spend tends to be associated with higher sales in the observed data",
+            "Advertising spend always causes sales to increase",
+            "Sales cannot change unless advertising changes",
+            "The two variables are measured in the same units"
+          ],
+          "answer": "Higher advertising spend tends to be associated with higher sales in the observed data",
+          "explanation": "Correlation describes association, not automatic causation.",
+          "source_refs": [
+            "machine-learning-multiple-regression-course-notes"
+          ]
+        },
+        {
+          "id": "business-analytics-statistics-l1-q002",
+          "type": "short_answer",
+          "prompt": "In business terms, what is a regression coefficient?",
+          "answer": "A regression coefficient estimates how the predicted outcome changes when one input changes by one unit, holding the other included inputs constant.",
+          "explanation": "The answer should mention predicted change and the hold-other-variables-constant interpretation.",
+          "source_refs": [
+            "machine-learning-multiple-regression-course-notes"
+          ]
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "description": "Applies statistics to business questions and model interpretation.",
+      "outcomes": [
+        "Interpret regression output for decisions",
+        "Identify basic modeling risks"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "scenario": 1
+      },
+      "questions": [
+        {
+          "id": "business-analytics-statistics-l2-q001",
+          "type": "mcq",
+          "prompt": "A regression model has a high R-squared on training data but performs poorly on new data. What is the most likely concern?",
+          "choices": [
+            "The model may be overfit or may not generalize to new observations",
+            "The model is guaranteed to be unbiased",
+            "The dependent variable has no business meaning",
+            "The data must have no missing values"
+          ],
+          "answer": "The model may be overfit or may not generalize to new observations",
+          "explanation": "Fit on historical data does not guarantee predictive performance on future or unseen data.",
+          "source_refs": [
+            "machine-learning-multiple-regression-course-notes"
+          ]
+        },
+        {
+          "id": "business-analytics-statistics-l2-q002",
+          "type": "scenario",
+          "prompt": "A sales manager asks whether discount rate affects units sold. What variables and checks would you include in the analysis?",
+          "answer": "Use units sold as the outcome, discount rate as a key predictor, and controls such as product, season, channel, baseline demand, stock availability, and campaign period. Check outliers, missing data, and whether discounts were targeted to products that were already expected to sell differently.",
+          "explanation": "The answer should consider confounding and practical business context.",
+          "source_refs": [
+            "machine-learning-multiple-regression-course-notes"
+          ]
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "description": "Uses data-driven business case questions.",
+      "outcomes": [
+        "Select an analytical approach for ambiguous business problems",
+        "Communicate caveats to non-technical stakeholders"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "business-analytics-statistics-l3-q001",
+          "type": "scenario",
+          "prompt": "A subscription company wants to forecast next quarter churn. Outline a practical modeling and validation approach.",
+          "answer": "Define churn consistently, build features from customer tenure, usage, support contacts, billing issues, plan type, and prior engagement, split data by time to avoid leakage, compare a simple baseline against candidate models, and report accuracy with business-facing segments and intervention recommendations.",
+          "explanation": "This tests model framing, validation, and decision usefulness.",
+          "source_refs": []
+        },
+        {
+          "id": "business-analytics-statistics-l3-q002",
+          "type": "short_answer",
+          "prompt": "Why should an analyst explain confidence or uncertainty when presenting a forecast?",
+          "answer": "Forecasts are estimates, so uncertainty helps stakeholders understand risk, avoid false precision, and plan ranges of action instead of relying on a single fragile number.",
+          "explanation": "The answer should connect uncertainty to decision quality.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "description": "Tests senior judgment in modeling tradeoffs and analytical governance.",
+      "outcomes": [
+        "Critique analytical designs",
+        "Balance statistical rigor with business actionability"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "business-analytics-statistics-l4-q001",
+          "type": "scenario",
+          "prompt": "Two models predict demand: one is slightly more accurate but hard to explain, and one is less accurate but transparent. How would you choose?",
+          "answer": "Choose based on decision context. For high-stakes or stakeholder-facing decisions, transparency, stability, and auditability may outweigh small accuracy gains. For automated low-risk decisions, the more accurate model may be acceptable if monitored. Compare business impact, error cost, fairness, maintainability, and monitoring needs.",
+          "explanation": "The answer should frame accuracy as one criterion rather than the only goal.",
+          "source_refs": []
+        },
+        {
+          "id": "business-analytics-statistics-l4-q002",
+          "type": "short_answer",
+          "prompt": "What is one danger of adding too many variables to a regression model?",
+          "answer": "Too many variables can increase overfitting, make coefficients harder to interpret, introduce multicollinearity, and reduce the model's usefulness for business explanation.",
+          "explanation": "This checks statistical and communication tradeoffs.",
+          "source_refs": [
+            "machine-learning-multiple-regression-course-notes"
+          ]
+        }
+      ]
+    }
+  ]
+}

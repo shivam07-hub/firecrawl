@@ -1,0 +1,165 @@
+{
+  "skill_id": "data-analytics-sql",
+  "skill_name": "Data Analytics and SQL",
+  "status": "draft_pending_review",
+  "source_status": "source_intake_required",
+  "generation_attribution": {
+    "generated_by": "Codex (GPT-5)",
+    "generated_at": "2026-06-25",
+    "reviewed_by": null,
+    "review_status": "draft_pending_review"
+  },
+  "source_ids": [],
+  "reference_ids": [],
+  "target_users": [
+    "Data analyst candidates",
+    "Product manager candidates",
+    "Consulting candidates who need analytics fluency"
+  ],
+  "core_topics": [
+    "SQL selection and filtering",
+    "Joins and aggregations",
+    "Metric definitions",
+    "Funnels and cohorts",
+    "Dashboard interpretation",
+    "A/B testing basics"
+  ],
+  "exam_levels": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "description": "Checks core SQL syntax and basic metric vocabulary.",
+      "outcomes": [
+        "Read simple SQL queries",
+        "Define basic business metrics"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "data-analytics-sql-l1-q001",
+          "type": "mcq",
+          "prompt": "Which SQL clause is evaluated to group rows before aggregate functions such as COUNT or SUM are calculated?",
+          "choices": [
+            "GROUP BY",
+            "ORDER BY",
+            "LIMIT",
+            "SELECT DISTINCT"
+          ],
+          "answer": "GROUP BY",
+          "explanation": "GROUP BY defines the groups over which aggregate functions are computed.",
+          "source_refs": []
+        },
+        {
+          "id": "data-analytics-sql-l1-q002",
+          "type": "short_answer",
+          "prompt": "Define conversion rate for a signup funnel.",
+          "answer": "Conversion rate is the number of users who complete the target action divided by the number of eligible users who entered the funnel.",
+          "explanation": "A good definition identifies numerator, denominator, and the target action.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "description": "Applies joins, filters, aggregations, and metric logic to practical tasks.",
+      "outcomes": [
+        "Write query logic for common analytics requests",
+        "Avoid denominator and join mistakes"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "data-analytics-sql-l2-q001",
+          "type": "mcq",
+          "prompt": "You need all customers, including customers with no orders. Which join should you start with if customers is the left table?",
+          "choices": [
+            "LEFT JOIN orders ON customers.id = orders.customer_id",
+            "INNER JOIN orders ON customers.id = orders.customer_id",
+            "CROSS JOIN orders",
+            "RIGHT JOIN customers ON customers.id = orders.customer_id"
+          ],
+          "answer": "LEFT JOIN orders ON customers.id = orders.customer_id",
+          "explanation": "A LEFT JOIN preserves every row from the left table and fills missing order columns with nulls.",
+          "source_refs": []
+        },
+        {
+          "id": "data-analytics-sql-l2-q002",
+          "type": "short_answer",
+          "prompt": "A daily active users metric suddenly doubled. List three checks before declaring product growth.",
+          "answer": "Check instrumentation changes, duplicate user events, bot or test traffic, timezone boundaries, and whether the denominator or active-user definition changed.",
+          "explanation": "The answer should show metric hygiene before business interpretation.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "description": "Uses analytics case prompts and dashboard interpretation.",
+      "outcomes": [
+        "Translate business questions into analysis plans",
+        "Interpret metric movement with caveats"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "data-analytics-sql-l3-q001",
+          "type": "scenario",
+          "prompt": "A food-delivery app sees checkout conversion fall by 8 percent week over week. Outline the analysis you would run.",
+          "answer": "Segment by platform, app version, city, payment method, restaurant availability, cart value, new versus returning users, and funnel step. Check tracking changes and incidents first, then compare drop-off rates and sample sizes against the prior period.",
+          "explanation": "The answer should combine data quality checks, segmentation, and funnel diagnosis.",
+          "source_refs": []
+        },
+        {
+          "id": "data-analytics-sql-l3-q002",
+          "type": "short_answer",
+          "prompt": "Why can average order value be misleading during a promotion?",
+          "answer": "A promotion can change customer mix, order frequency, discount depth, and basket composition, so the average may hide margin loss or segment-level declines.",
+          "explanation": "A good answer names mix effects and connects revenue metrics to profitability.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "description": "Tests experiment design, metric governance, and ambiguous analytics judgment.",
+      "outcomes": [
+        "Design reliable analytical decision frameworks",
+        "Recognize experiment and measurement risks"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "data-analytics-sql-l4-q001",
+          "type": "scenario",
+          "prompt": "Design an A/B test for a new onboarding flow. Include primary metric, guardrails, population, and decision rule.",
+          "answer": "Use eligible new users as the population, randomize at user level, set activation or first key action as the primary metric, use guardrails such as retention, error rate, support contacts, and revenue, predefine minimum sample size and duration, and decide based on statistically and practically meaningful lift.",
+          "explanation": "This tests whether the candidate can move beyond a single metric to a decision-ready experiment.",
+          "source_refs": []
+        },
+        {
+          "id": "data-analytics-sql-l4-q002",
+          "type": "short_answer",
+          "prompt": "What is one risk of optimizing a dashboard around too many metrics?",
+          "answer": "Too many metrics can create conflicting incentives, slow decisions, and increase false positives because teams overreact to noisy movement instead of the few measures that reflect the goal.",
+          "explanation": "A strong answer connects metric design to decision quality.",
+          "source_refs": []
+        }
+      ]
+    }
+  ]
+}

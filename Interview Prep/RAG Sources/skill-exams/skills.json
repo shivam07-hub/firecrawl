@@ -1,0 +1,111 @@
+{
+  "version": "v1",
+  "generated_by": "Codex (GPT-5)",
+  "generated_at": "2026-06-25",
+  "review_status": "draft_pending_review",
+  "level_model": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "exam_type": "Concepts, definitions, and basic MCQs"
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "exam_type": "Problem-solving questions and small tasks"
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "exam_type": "Case, scenario, and judgment questions"
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "exam_type": "Tradeoffs, debugging, design, and capstone tasks"
+    },
+    {
+      "level": 5,
+      "name": "Legend",
+      "exam_type": "Senior-level governance, strategy, and failure-mode judgment"
+    }
+  ],
+  "build_order": [
+    "frontend-engineering",
+    "data-analytics-sql",
+    "python-programming",
+    "business-analytics-statistics",
+    "backend-api-system-design"
+  ],
+  "skills": [
+    {
+      "skill_id": "frontend-engineering",
+      "skill_name": "Frontend Engineering",
+      "pack_path": "skill-exams/packs/frontend-engineering.json",
+      "source_status": "public_references_curated",
+      "core_topics": [
+        "JavaScript",
+        "React",
+        "TypeScript",
+        "Frontend system design",
+        "Performance",
+        "Microfrontends"
+      ]
+    },
+    {
+      "skill_id": "data-analytics-sql",
+      "skill_name": "Data Analytics and SQL",
+      "pack_path": "skill-exams/packs/data-analytics-sql.json",
+      "source_status": "source_intake_required",
+      "core_topics": [
+        "SQL queries",
+        "Joins",
+        "Aggregations",
+        "Metrics",
+        "Dashboards",
+        "A/B testing basics"
+      ]
+    },
+    {
+      "skill_id": "python-programming",
+      "skill_name": "Python Programming",
+      "pack_path": "skill-exams/packs/python-programming.json",
+      "source_status": "source_intake_required",
+      "core_topics": [
+        "Syntax",
+        "Data structures",
+        "Functions",
+        "Debugging",
+        "Files",
+        "Small algorithms"
+      ]
+    },
+    {
+      "skill_id": "business-analytics-statistics",
+      "skill_name": "Business Analytics and Statistics",
+      "pack_path": "skill-exams/packs/business-analytics-statistics.json",
+      "source_status": "approved_private_sources",
+      "core_topics": [
+        "Probability",
+        "Hypothesis testing",
+        "Regression interpretation",
+        "Forecasting",
+        "Decision analysis"
+      ]
+    },
+    {
+      "skill_id": "backend-api-system-design",
+      "skill_name": "Backend and API System Design",
+      "pack_path": "skill-exams/packs/backend-api-system-design.json",
+      "source_status": "source_intake_required",
+      "core_topics": [
+        "REST APIs",
+        "Databases",
+        "Authentication",
+        "Caching",
+        "Queues",
+        "Reliability"
+      ]
+    }
+  ]
+}

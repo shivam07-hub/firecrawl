@@ -1,0 +1,165 @@
+{
+  "skill_id": "python-programming",
+  "skill_name": "Python Programming",
+  "status": "draft_pending_review",
+  "source_status": "source_intake_required",
+  "generation_attribution": {
+    "generated_by": "Codex (GPT-5)",
+    "generated_at": "2026-06-25",
+    "reviewed_by": null,
+    "review_status": "draft_pending_review"
+  },
+  "source_ids": [],
+  "reference_ids": [],
+  "target_users": [
+    "Beginner software candidates",
+    "Analysts learning automation",
+    "Interview candidates who need coding fundamentals"
+  ],
+  "core_topics": [
+    "Syntax and control flow",
+    "Lists and dictionaries",
+    "Functions",
+    "Error handling",
+    "Files and APIs",
+    "Debugging small programs"
+  ],
+  "exam_levels": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "description": "Checks Python syntax, data structures, and basic execution.",
+      "outcomes": [
+        "Read simple Python code",
+        "Choose appropriate built-in data structures"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "python-programming-l1-q001",
+          "type": "mcq",
+          "prompt": "Which data structure is most appropriate for counting how many times each word appears in a list?",
+          "choices": [
+            "A dictionary mapping each word to its count",
+            "A tuple containing every word twice",
+            "A string with all words joined together",
+            "A boolean flag for each sentence"
+          ],
+          "answer": "A dictionary mapping each word to its count",
+          "explanation": "A dictionary gives direct lookup and update by word.",
+          "source_refs": []
+        },
+        {
+          "id": "python-programming-l1-q002",
+          "type": "short_answer",
+          "prompt": "What is the difference between a list and a tuple in Python?",
+          "answer": "A list is mutable and can be changed after creation, while a tuple is immutable and is commonly used for fixed groups of values.",
+          "explanation": "The key distinction is mutability, with practical implications for updates and hashability.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "description": "Applies Python to small scripts, transformations, and errors.",
+      "outcomes": [
+        "Write clear functions for small tasks",
+        "Handle common edge cases"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "python-programming-l2-q001",
+          "type": "mcq",
+          "prompt": "A function should return an empty list when given no rows instead of crashing. What should the implementation include?",
+          "choices": [
+            "An explicit check or flow that handles an empty input collection",
+            "A forced division by the number of rows",
+            "A broad exception that silently returns None",
+            "A global variable that stores the previous result"
+          ],
+          "answer": "An explicit check or flow that handles an empty input collection",
+          "explanation": "Empty inputs are normal edge cases and should be handled intentionally.",
+          "source_refs": []
+        },
+        {
+          "id": "python-programming-l2-q002",
+          "type": "short_answer",
+          "prompt": "Write the logic, in words, for removing duplicate emails while preserving their first-seen order.",
+          "answer": "Iterate through the emails, keep a set of seen addresses, append an email to the result only if it is not in seen, then add it to seen.",
+          "explanation": "This checks whether the candidate can combine list order with set membership.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "description": "Uses debugging and small design prompts similar to coding interviews.",
+      "outcomes": [
+        "Debug common Python mistakes",
+        "Design small reusable functions"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "python-programming-l3-q001",
+          "type": "scenario",
+          "prompt": "A script reads a CSV and sometimes fails with KeyError: 'email'. How would you debug and harden it?",
+          "answer": "Inspect the CSV headers, normalize header whitespace and casing if appropriate, validate required columns before processing, produce a clear error message with the missing column, and add a test fixture for the malformed file.",
+          "explanation": "The answer should combine diagnosis, validation, user-facing errors, and regression coverage.",
+          "source_refs": []
+        },
+        {
+          "id": "python-programming-l3-q002",
+          "type": "short_answer",
+          "prompt": "Why is returning structured data usually better than printing inside a utility function?",
+          "answer": "Returning structured data lets callers test, reuse, transform, or display the result in different contexts, while printing tightly couples the function to one output side effect.",
+          "explanation": "This tests API design and testability at a small scale.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "description": "Tests maintainability, performance awareness, and program design judgment.",
+      "outcomes": [
+        "Design maintainable command-line utilities",
+        "Choose efficient approaches for realistic data sizes"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "python-programming-l4-q001",
+          "type": "scenario",
+          "prompt": "Design a command-line script that reads a large JSONL file, filters records, and writes a summary report. Mention memory and error handling.",
+          "answer": "Stream the file line by line, parse each JSON object with line-numbered error reporting, filter records without loading the full file into memory, aggregate only required summary values, write the report atomically, and return non-zero exit codes for invalid inputs.",
+          "explanation": "The answer should show scalable processing and operational care.",
+          "source_refs": []
+        },
+        {
+          "id": "python-programming-l4-q002",
+          "type": "short_answer",
+          "prompt": "When would you introduce a class instead of keeping several standalone functions?",
+          "answer": "Introduce a class when the behavior has shared state or a stable domain concept that benefits from encapsulation; keep standalone functions when the logic is stateless and simpler to compose.",
+          "explanation": "The best answer avoids class-heavy design and bases the choice on state and cohesion.",
+          "source_refs": []
+        }
+      ]
+    }
+  ]
+}

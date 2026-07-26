@@ -1,0 +1,165 @@
+{
+  "skill_id": "backend-api-system-design",
+  "skill_name": "Backend and API System Design",
+  "status": "draft_pending_review",
+  "source_status": "source_intake_required",
+  "generation_attribution": {
+    "generated_by": "Codex (GPT-5)",
+    "generated_at": "2026-06-25",
+    "reviewed_by": null,
+    "review_status": "draft_pending_review"
+  },
+  "source_ids": [],
+  "reference_ids": [],
+  "target_users": [
+    "Backend engineer candidates",
+    "Full-stack engineers preparing for system design",
+    "Senior candidates practicing API tradeoffs"
+  ],
+  "core_topics": [
+    "REST API design",
+    "Database modeling",
+    "Authentication and authorization",
+    "Caching",
+    "Queues and async work",
+    "Reliability and observability"
+  ],
+  "exam_levels": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "description": "Checks basic backend, API, and database concepts.",
+      "outcomes": [
+        "Explain common HTTP and API concepts",
+        "Identify basic database and auth responsibilities"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "backend-api-system-design-l1-q001",
+          "type": "mcq",
+          "prompt": "Which HTTP status code best represents a successful resource creation request?",
+          "choices": [
+            "201 Created",
+            "400 Bad Request",
+            "401 Unauthorized",
+            "500 Internal Server Error"
+          ],
+          "answer": "201 Created",
+          "explanation": "201 Created indicates that the request succeeded and a new resource was created.",
+          "source_refs": []
+        },
+        {
+          "id": "backend-api-system-design-l1-q002",
+          "type": "short_answer",
+          "prompt": "What is the difference between authentication and authorization?",
+          "answer": "Authentication verifies who the user is, while authorization decides what that verified user is allowed to access or do.",
+          "explanation": "The answer should separate identity from permission.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "description": "Applies API and data-modeling decisions to common product flows.",
+      "outcomes": [
+        "Design practical endpoint behavior",
+        "Choose simple reliability and data consistency tactics"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "scenario": 1
+      },
+      "questions": [
+        {
+          "id": "backend-api-system-design-l2-q001",
+          "type": "mcq",
+          "prompt": "A payment create request may be retried by the client after a timeout. What backend feature helps avoid duplicate charges?",
+          "choices": [
+            "An idempotency key stored with the request result",
+            "A larger JSON response body",
+            "A shorter database table name",
+            "A random delay before every request"
+          ],
+          "answer": "An idempotency key stored with the request result",
+          "explanation": "Idempotency keys let the server recognize retries and return the original result instead of performing the action again.",
+          "source_refs": []
+        },
+        {
+          "id": "backend-api-system-design-l2-q002",
+          "type": "scenario",
+          "prompt": "Design endpoints for creating, listing, and updating tasks in a todo app. Mention validation and errors.",
+          "answer": "Use POST /tasks to create with validated title and optional due date, GET /tasks with pagination and filters, PATCH /tasks/{id} for partial updates, return 400 for invalid input, 404 for missing tasks, and enforce ownership before reads or writes.",
+          "explanation": "This checks resource modeling, validation, status handling, and authorization.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "description": "Uses system-design prompts for scalable backend workflows.",
+      "outcomes": [
+        "Decompose backend systems into services and data flows",
+        "Reason about asynchronous processing and failure modes"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "backend-api-system-design-l3-q001",
+          "type": "scenario",
+          "prompt": "Design a notification API that supports email and in-app notifications. Cover storage, delivery, retries, and user preferences.",
+          "answer": "Store notification records with recipient, channel, status, and payload metadata; enqueue delivery jobs per channel; apply user preferences before sending; retry transient failures with backoff; mark final failures; expose in-app notifications with pagination and unread state; log delivery events for audit and debugging.",
+          "explanation": "The answer should include data model, queueing, retries, preferences, and observability.",
+          "source_refs": []
+        },
+        {
+          "id": "backend-api-system-design-l3-q002",
+          "type": "short_answer",
+          "prompt": "Why might a backend use a queue instead of doing all work inside the request cycle?",
+          "answer": "A queue can move slow or unreliable work out of the user request, improve latency, absorb traffic spikes, support retries, and isolate downstream failures.",
+          "explanation": "A good answer connects async work to latency and reliability.",
+          "source_refs": []
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "description": "Tests senior tradeoffs around scale, consistency, and operational maturity.",
+      "outcomes": [
+        "Design resilient APIs under load",
+        "Evaluate consistency, caching, and observability tradeoffs"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "backend-api-system-design-l4-q001",
+          "type": "scenario",
+          "prompt": "A read-heavy product catalog API is slowing down during sale traffic. Propose a remediation plan.",
+          "answer": "Measure slow endpoints and database queries, add indexes where query plans justify them, cache stable catalog responses with clear invalidation, paginate large responses, protect dependencies with timeouts and rate limits, precompute expensive derived fields, and add dashboards for latency, error rate, cache hit rate, and database load.",
+          "explanation": "The answer should move from measurement to targeted performance and reliability controls.",
+          "source_refs": []
+        },
+        {
+          "id": "backend-api-system-design-l4-q002",
+          "type": "short_answer",
+          "prompt": "What is one tradeoff of using caching for API responses?",
+          "answer": "Caching can reduce latency and database load, but it introduces invalidation complexity and the risk of serving stale or unauthorized data if cache keys and permissions are handled poorly.",
+          "explanation": "The best answer names both performance benefit and correctness risk.",
+          "source_refs": []
+        }
+      ]
+    }
+  ]
+}

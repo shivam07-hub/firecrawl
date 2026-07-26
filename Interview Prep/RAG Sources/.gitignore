@@ -1,0 +1,8 @@
+derived/extracted-text/
+derived/chunks/
+derived/indexes/
+tmp/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

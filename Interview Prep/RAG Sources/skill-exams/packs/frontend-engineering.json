@@ -1,0 +1,199 @@
+{
+  "skill_id": "frontend-engineering",
+  "skill_name": "Frontend Engineering",
+  "status": "draft_pending_review",
+  "source_status": "public_references_curated",
+  "generation_attribution": {
+    "generated_by": "Codex (GPT-5)",
+    "generated_at": "2026-06-25",
+    "reviewed_by": null,
+    "review_status": "draft_pending_review"
+  },
+  "source_ids": [],
+  "reference_ids": [
+    "fe-awesome-frontend-system-design",
+    "fe-frontend-system-design-guide",
+    "fe-javascript-questions",
+    "fe-react-interview-questions",
+    "fe-react-typescript-cheatsheets",
+    "fe-awesome-microfrontends",
+    "fe-module-federation-examples",
+    "fe-css-pro-tips",
+    "fe-awesome-frontend-performance"
+  ],
+  "target_users": [
+    "Frontend engineer candidates",
+    "Full-stack engineers preparing for UI-heavy interviews",
+    "Product engineers moving into React or TypeScript roles"
+  ],
+  "core_topics": [
+    "JavaScript runtime behavior",
+    "React state and rendering",
+    "TypeScript component typing",
+    "Frontend system design",
+    "Web performance",
+    "Microfrontend architecture"
+  ],
+  "exam_levels": [
+    {
+      "level": 1,
+      "name": "Foundation",
+      "description": "Checks JavaScript, DOM, React, and TypeScript fundamentals.",
+      "outcomes": [
+        "Explain basic JavaScript execution behavior",
+        "Identify safe component typing and rendering patterns"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "frontend-engineering-l1-q001",
+          "type": "mcq",
+          "prompt": "A button click handler updates React state twice using the current state value. Which approach is safest when the next value depends on the previous value?",
+          "choices": [
+            "Use a functional state update so each update receives the latest previous value",
+            "Mutate the existing state object before calling the setter",
+            "Read the value from the DOM after calling the setter",
+            "Store the value in a global variable and reuse it"
+          ],
+          "answer": "Use a functional state update so each update receives the latest previous value",
+          "explanation": "Functional updates avoid stale closures when the next state depends on the previous state.",
+          "source_refs": [
+            "fe-react-interview-questions"
+          ]
+        },
+        {
+          "id": "frontend-engineering-l1-q002",
+          "type": "short_answer",
+          "prompt": "Name two advantages of typing React component props with TypeScript.",
+          "answer": "Typed props document the component contract and catch invalid prop shapes before runtime.",
+          "explanation": "A good answer should connect TypeScript props to maintainability, editor feedback, and safer refactors.",
+          "source_refs": [
+            "fe-react-typescript-cheatsheets"
+          ]
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Applied",
+      "description": "Applies frontend concepts to common implementation and performance tasks.",
+      "outcomes": [
+        "Choose practical rendering and performance fixes",
+        "Reason about component data flow"
+      ],
+      "question_mix": {
+        "mcq": 1,
+        "scenario": 1
+      },
+      "questions": [
+        {
+          "id": "frontend-engineering-l2-q001",
+          "type": "mcq",
+          "prompt": "A list page re-renders every row whenever the search box changes, even rows whose props did not change. Which first fix is most appropriate?",
+          "choices": [
+            "Measure the render cost, then memoize stable row components and callbacks where the measurement supports it",
+            "Move all row data into localStorage",
+            "Disable search updates until the user refreshes",
+            "Convert the whole page to a single uncontrolled form"
+          ],
+          "answer": "Measure the render cost, then memoize stable row components and callbacks where the measurement supports it",
+          "explanation": "Performance work should start with measurement, then use memoization only where it reduces real render cost.",
+          "source_refs": [
+            "fe-awesome-frontend-performance"
+          ]
+        },
+        {
+          "id": "frontend-engineering-l2-q002",
+          "type": "scenario",
+          "prompt": "A checkout page needs client-side validation, server-confirmed prices, and a clear loading state. Describe the data flow from user input to final submit.",
+          "answer": "Keep form input in component state or a form library, run client validation before submit, send the cart to the server for authoritative pricing, disable duplicate submits while loading, then render success or field-level errors from the server response.",
+          "explanation": "The best answer separates fast client feedback from server authority and names loading and error states.",
+          "source_refs": [
+            "fe-frontend-system-design-guide"
+          ]
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "name": "Interview",
+      "description": "Uses system-design and architecture prompts similar to frontend interviews.",
+      "outcomes": [
+        "Decompose UI systems into data, rendering, and interaction concerns",
+        "Compare architecture options using tradeoffs"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "mcq": 1
+      },
+      "questions": [
+        {
+          "id": "frontend-engineering-l3-q001",
+          "type": "scenario",
+          "prompt": "Design a notification center for a web app. Cover data fetching, unread counts, pagination, real-time updates, and empty/error states.",
+          "answer": "A strong design defines notification entities, fetches the first page with cursor pagination, derives unread count from server data, subscribes to real-time updates or polls with backoff, handles mark-as-read optimistically with rollback, and includes loading, empty, offline, and error states.",
+          "explanation": "This tests frontend system design beyond component syntax.",
+          "source_refs": [
+            "fe-awesome-frontend-system-design"
+          ]
+        },
+        {
+          "id": "frontend-engineering-l3-q002",
+          "type": "mcq",
+          "prompt": "When is a microfrontend approach most defensible?",
+          "choices": [
+            "Independent teams need separately deployable frontend areas with clear ownership boundaries",
+            "A single small team wants to avoid creating shared components",
+            "The app has one page and no shared state",
+            "The team wants every component to use a different styling approach"
+          ],
+          "answer": "Independent teams need separately deployable frontend areas with clear ownership boundaries",
+          "explanation": "Microfrontends add complexity, so they fit organizational scaling and deployment-boundary problems best.",
+          "source_refs": [
+            "fe-awesome-microfrontends"
+          ]
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "name": "Advanced",
+      "description": "Tests senior-level judgment around architecture, migration, and performance.",
+      "outcomes": [
+        "Plan safe frontend migrations",
+        "Prioritize performance and reliability tradeoffs"
+      ],
+      "question_mix": {
+        "scenario": 1,
+        "short_answer": 1
+      },
+      "questions": [
+        {
+          "id": "frontend-engineering-l4-q001",
+          "type": "scenario",
+          "prompt": "A legacy Angular storefront is moving to React while revenue pages must stay stable. Propose a migration plan.",
+          "answer": "Use a strangler migration by routing low-risk pages or isolated widgets to React first, preserve shared design tokens and analytics contracts, add visual and interaction regression checks, keep rollback paths per route, and migrate revenue-critical flows only after measured parity.",
+          "explanation": "The answer should reduce business risk while creating a path to incremental replacement.",
+          "source_refs": [
+            "fe-awesome-microfrontends",
+            "fe-module-federation-examples"
+          ]
+        },
+        {
+          "id": "frontend-engineering-l4-q002",
+          "type": "short_answer",
+          "prompt": "Give one tradeoff between server-side rendering and client-side rendering for an authenticated dashboard.",
+          "answer": "Server-side rendering can improve first contentful paint and initial data delivery, but it can increase server complexity and may provide less benefit when most content is personalized and hidden behind authentication.",
+          "explanation": "A good answer names both user-perceived performance and operational complexity.",
+          "source_refs": [
+            "fe-frontend-system-design-guide",
+            "fe-awesome-frontend-performance"
+          ]
+        }
+      ]
+    }
+  ]
+}
