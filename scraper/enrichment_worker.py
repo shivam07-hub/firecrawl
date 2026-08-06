@@ -305,10 +305,15 @@ def process_message(
         )
 
     if not store.apply(enriched, message.source_hash):
-        # A source change or lifecycle transition won the race.  The database
-        # rejected the stale result, so this old message is safe to archive.
+        # Either a source change or lifecycle transition won the race and the
+        # database rejected a stale result, or the enrichment produced no
+        # taxonomy skill for this job.  `apply_job_enrichment` now refuses to
+        # call the second case `complete` -- it stamps `not_applicable` with a
+        # reason instead, because a job with no skills reaches no user, and 1,088
+        # rows sat in exactly that state reporting success.  Both causes are
+        # terminal for THIS message, so archiving is still correct.
         _archive(queue, message)
-        return ProcessOutcome("apply_rejected")
+        return ProcessOutcome("apply_incomplete")
 
     _archive(queue, message)
     return ProcessOutcome("complete")

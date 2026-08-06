@@ -159,13 +159,17 @@ def test_inference_unavailable_leaves_message_for_retry() -> None:
     assert queue.archived == []
 
 
-def test_apply_race_rejection_archives_stale_result() -> None:
+def test_apply_that_did_not_complete_archives_instead_of_retrying() -> None:
+    # apply_job_enrichment returns FALSE for two terminal cases: a stale result
+    # that lost the race, and an enrichment that produced no taxonomy skill (the
+    # RPC stamps `not_applicable` with a reason rather than calling it complete).
+    # Neither is worth replaying this message for.
     queue = FakeQueue()
     store = FakeStore(_job(), apply_result=False)
 
     outcome = process_message(_message(), store=store, queue=queue, enrich=_successful_enrich)
 
-    assert outcome.action == "apply_rejected"
+    assert outcome.action == "apply_incomplete"
     assert queue.archived == [9]
 
 
