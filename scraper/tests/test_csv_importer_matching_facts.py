@@ -4,7 +4,9 @@ import json
 
 import pytest
 
+import csv_importer
 from csv_importer import (
+    _find_json_files,
     _source_matching_facts_are_publishable,
     _validate_source_matching_facts,
 )
@@ -13,6 +15,24 @@ from enrichment_state import source_content_hash
 
 def _write_jobs(path, jobs) -> None:
     path.write_text(json.dumps(jobs), encoding="utf-8")
+
+
+def test_targeted_run_date_is_found_even_when_a_newer_folder_exists(
+    tmp_path, monkeypatch
+) -> None:
+    target = tmp_path / "Example_Co" / "Outputs" / "2026_08_07"
+    newer = tmp_path / "Example_Co" / "Outputs" / "2026_08_08"
+    target.mkdir(parents=True)
+    newer.mkdir(parents=True)
+    _write_jobs(target / "jobs.json", [])
+    _write_jobs(newer / "jobs.json", [])
+    monkeypatch.setattr(csv_importer, "OUTPUT_BASE", str(tmp_path))
+
+    assert _find_json_files(
+        company_filter=None,
+        all_dates=False,
+        batch_date=20260807,
+    ) == [target / "jobs.json"]
 
 
 def test_matching_fact_preflight_accepts_valid_band_and_unknown_seniority(tmp_path) -> None:

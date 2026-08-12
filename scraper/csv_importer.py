@@ -892,7 +892,11 @@ def _build_skill_id_map(sb: Client) -> dict[str, int]:
 
 # ── Job file discovery ─────────────────────────────────────────────────────────
 
-def _find_json_files(company_filter: str | None, all_dates: bool) -> list[Path]:
+def _find_json_files(
+    company_filter: str | None,
+    all_dates: bool,
+    batch_date: int | None = None,
+) -> list[Path]:
     base = Path(OUTPUT_BASE)
     if not base.exists():
         log.error(f"OUTPUT_BASE not found: {base}")
@@ -914,7 +918,14 @@ def _find_json_files(company_filter: str | None, all_dates: bool) -> list[Path]:
             reverse=True,
         )
 
-        if all_dates:
+        if batch_date is not None:
+            for d in date_dirs:
+                if _parse_batch_date(d.name) != batch_date:
+                    continue
+                p = d / "jobs.json"
+                if p.exists():
+                    result.append(p)
+        elif all_dates:
             for d in date_dirs:
                 p = d / "jobs.json"
                 if p.exists():
@@ -1509,15 +1520,23 @@ def main() -> None:
         log.error("Real deactivation writes require --run-date YYYYMMDD/YYYY-MM-DD/YYYY_MM_DD")
         raise SystemExit(2)
 
+    deactivation_batch_date = _parse_batch_date(args.run_date)
+    if args.run_date and deactivation_batch_date is None:
+        log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")
+        raise SystemExit(2)
+
     sb = _supabase()
     skill_id_map = {} if args.source_only else _build_skill_id_map(sb)
 
-    json_files = _find_json_files(args.company, args.all_dates)
+    json_files = _find_json_files(
+        args.company,
+        args.all_dates,
+        batch_date=deactivation_batch_date,
+    )
     if not json_files:
         log.warning("No jobs.json files found. Did you run main.py first?")
         return
 
-    deactivation_batch_date = _parse_batch_date(args.run_date)
     if args.source_only:
         if deactivation_batch_date is None:
             log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")

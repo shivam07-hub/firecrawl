@@ -28,7 +28,7 @@ Two repos are involved. `FC` = `firecrawl_Supabase`, `TY` = `True_Yodha`.
 
 ## P0 — the pipeline cannot run unattended
 
-### 1. `daily_cycle` fails whenever a run crosses midnight
+### 1. ✅ DONE — `daily_cycle` survives a run crossing midnight
 **Evidence.** The 2026-08-07 run scraped 23:28 → 08:26 and exited 2 at the publish
 step: `No complete jobs.json files found for source-only run date 20260807`.
 
@@ -45,7 +45,12 @@ and no folder from it is left unpublished. Decide explicitly whether a
 markerless partial folder should ever publish (current contract says no — that is
 defensible, but then the scrape must not split a company across two folders).
 
-**Workaround until fixed.** Start long runs after midnight.
+**Resolution (2026-08-13).** `daily_poll` now pins one logical run date into the
+scrape command. Page flushes, the final completion marker, source-fact resolution,
+and publication all use that date. `csv_importer` also selects an explicitly
+requested date rather than first discarding everything except each company's
+newest folder. Markerless partial folders remain unpublished. Focused regression
+coverage and the full `scraper/tests` suite pass.
 
 ---
 

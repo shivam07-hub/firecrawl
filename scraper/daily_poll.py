@@ -8,7 +8,7 @@ and the durable enrichment worker runs on its own cadence.
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timedelta
+from datetime import datetime
 import fcntl
 import json
 import os
@@ -27,17 +27,6 @@ LOG_DIR = REPO_ROOT / "logs"
 DEFAULT_TIMEZONE = "Asia/Kolkata"
 
 
-def run_dates_spanned(started: date, ended: date) -> list[str]:
-    if ended < started:
-        raise ValueError("poll end date cannot precede start date")
-    dates: list[str] = []
-    current = started
-    while current <= ended:
-        dates.append(current.strftime("%Y_%m_%d"))
-        current += timedelta(days=1)
-    return dates
-
-
 def build_commands(
     *,
     python: str,
@@ -54,6 +43,8 @@ def build_commands(
         scope,
         "--company-cap",
         str(company_cap),
+        "--run-date",
+        run_date,
     ]
     # Career band is a source-level matching fact, and `csv_importer` refuses to
     # publish a row whose band has no current provenance.  `writer.to_canonical`
@@ -171,10 +162,10 @@ def main() -> None:
             print(f"Daily poll failed in {scrape_name}; report: {path}", file=sys.stderr)
             raise SystemExit(scrape_step["returncode"])
 
-        publish_dates = run_dates_spanned(
-            run_started.date(), datetime.now(timezone).date()
-        )
-        report["publish_dates"] = publish_dates
+        # One logical scrape owns one immutable output date. The writer keeps
+        # every page flush and its final completion marker in this folder even
+        # when wall-clock midnight passes during the scrape.
+        report["publish_dates"] = [run_date]
 
         # The resolver classifies leftover jobs with the local generative model,
         # so the model has to be up before it runs — but only now, after the
@@ -193,24 +184,16 @@ def main() -> None:
             print(f"Daily poll could not start inference; report: {path}", file=sys.stderr)
             raise SystemExit(4) from exc
 
-        for publish_date in publish_dates:
-            dated = build_commands(
-                python=sys.executable,
-                run_date=publish_date,
-                scope=args.scope,
-                company_cap=args.company_cap,
-                company=args.company,
-            )
-            for step_label, command in dated[1:]:
-                step_name = f"{step_label}:{publish_date}"
-                step = _run_step(step_name, command, env=env)
-                report["steps"].append(step)
-                if step["returncode"] != 0:
-                    report["status"] = "failed"
-                    report["failed_step"] = step_name
-                    path = _write_report(report)
-                    print(f"Daily poll failed in {step_name}; report: {path}", file=sys.stderr)
-                    raise SystemExit(step["returncode"])
+        for step_label, command in commands[1:]:
+            step_name = f"{step_label}:{run_date}"
+            step = _run_step(step_name, command, env=env)
+            report["steps"].append(step)
+            if step["returncode"] != 0:
+                report["status"] = "failed"
+                report["failed_step"] = step_name
+                path = _write_report(report)
+                print(f"Daily poll failed in {step_name}; report: {path}", file=sys.stderr)
+                raise SystemExit(step["returncode"])
 
         report["status"] = "complete"
         path = _write_report(report)

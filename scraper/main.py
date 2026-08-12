@@ -34,7 +34,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
 from providers import dispatch_scrape
 from enricher import InferenceQuotaExceeded, enrich_job, has_terminal_core_enrichment
-from writer import to_canonical, save_jobs, SCHEMA, COMPLETE_MARKER_NAME, write_complete_marker, _skills_to_csv, stamp_job_content_hash
+from writer import (
+    COMPLETE_MARKER_NAME,
+    SCHEMA,
+    _skills_to_csv,
+    normalize_run_date,
+    save_jobs,
+    stamp_job_content_hash,
+    to_canonical,
+    write_complete_marker,
+)
 from run_checkpoint import RunCheckpoint
 from typing import Callable
 from utils import company_slug
@@ -124,6 +133,7 @@ def _make_page_callback(
     output_base: str,
     checkpoint: RunCheckpoint | None,
     log: logging.Logger,
+    run_date: str | None,
 ) -> Callable[[list[dict], int], None]:
     """Return a callback that normalises + saves a raw page chunk to disk.
 
@@ -141,8 +151,13 @@ def _make_page_callback(
         if not canonical_chunk:
             return
         try:
-            _, new_count = save_jobs(company, canonical_chunk,
-                                     output_base=output_base, write_marker=False)
+            _, new_count = save_jobs(
+                company,
+                canonical_chunk,
+                output_base=output_base,
+                write_marker=False,
+                run_date=run_date,
+            )
             pages_flushed[0] += 1
             total_so_far = pages_flushed[0] * len(canonical_chunk)
             if checkpoint:
@@ -160,7 +175,8 @@ def _make_page_callback(
 def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         max_jobs: int | None = None, output_base: str = OUTPUT_BASE,
         validate_mode: bool = False, scope: str = "india",
-        checkpoint: RunCheckpoint | None = None) -> dict:
+        checkpoint: RunCheckpoint | None = None,
+        run_date: str | None = None) -> dict:
     summary = {
         "scope": scope,
         "run_id": checkpoint.run_id if checkpoint else datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
@@ -183,7 +199,9 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             checkpoint.start(company, ats)
 
         # ── Scrape ────────────────────────────────────────────────────────────
-        page_cb = _make_page_callback(company, output_base, checkpoint, log)
+        page_cb = _make_page_callback(
+            company, output_base, checkpoint, log, run_date
+        )
         try:
             raw_jobs = scrape_portal(portal, log, max_jobs=max_jobs, validate_mode=validate_mode,
                                      on_page_complete=page_cb)
@@ -261,7 +279,7 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         # ── Enrich (structured skills + back-compat arrays from JD) ──────────
         if skip_enrich:
             enriched = canonical
-            log.info(f"  LLM enrichment skipped (--skip-enrich)")
+            log.info("  LLM enrichment skipped (--skip-enrich)")
         else:
             enriched = []
             ok = fail = 0
@@ -278,7 +296,13 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
         # ── Save ──────────────────────────────────────────────────────────────
         _run_id = checkpoint.run_id if checkpoint else ""
         try:
-            path, new_count = save_jobs(company, enriched, output_base=output_base, run_id=_run_id)
+            path, new_count = save_jobs(
+                company,
+                enriched,
+                output_base=output_base,
+                run_id=_run_id,
+                run_date=run_date,
+            )
             log.info(f"  Saved {new_count} new jobs → {path}")
             if checkpoint:
                 checkpoint.mark_complete(company, job_count=len(enriched))
@@ -538,14 +562,24 @@ def main():
     parser.add_argument("--company-cap", type=int, default=_DEFAULT_COMPANY_CAP,
                         help=f"Max jobs per company for all runs (default: {_DEFAULT_COMPANY_CAP}). Set 0 for no cap.")
     parser.add_argument("--global-cap", type=int, default=None,
-                        help=f"Alias for --company-cap (kept for backward compat).")
+                        help="Alias for --company-cap (kept for backward compat).")
     parser.add_argument("--resume-run", metavar="RUN_ID",
                         help="Resume a specific interrupted run by its run_id "
                              "(e.g. 20260430_141922). Skips companies marked complete in that run.")
+    parser.add_argument(
+        "--run-date",
+        help="Pin all output from this logical run to YYYY_MM_DD, even across midnight",
+    )
     parser.add_argument("--validate",              action="store_true",
                         help=f"Validation run: scrape {_VALIDATE_MAX_JOBS} jobs/company, no enrichment, "
                              f"write to validation_outputs/ — use to verify column coverage across all portals")
     args = parser.parse_args()
+
+    if args.run_date:
+        try:
+            args.run_date = normalize_run_date(args.run_date)[0]
+        except ValueError as exc:
+            parser.error(str(exc))
 
     log = setup_logging()
 
@@ -632,10 +666,10 @@ def main():
     summary = run(portals, skip_enrich=args.skip_enrich or validate_mode, log=log,
                   max_jobs=max_jobs, output_base=output_base,
                   validate_mode=validate_mode, scope=args.scope,
-                  checkpoint=checkpoint)
+                  checkpoint=checkpoint, run_date=args.run_date)
 
     log.info("─" * 60)
-    log.info(f"RUN COMPLETE")
+    log.info("RUN COMPLETE")
     log.info(f"  Run ID              : {checkpoint.run_id}")
     log.info(f"  Companies processed : {summary['processed']}")
     log.info(f"  Companies skipped   : {summary['skipped']}")

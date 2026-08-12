@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from schema import CANONICAL_FIELDS, MISSING_JD_NOTE
 from pipeline_validator import run_gate
-from writer import job_content_hash, to_canonical
+from writer import job_content_hash, save_jobs, to_canonical
 
 
 def check(label: str, condition: bool) -> None:
@@ -90,6 +92,48 @@ def test_too_short_descriptions_are_marked_metadata_only() -> None:
 
     check("too-short JD note applied", row["job_description"] == MISSING_JD_NOTE)
     check("too-short row passes pre-enrich gate", run_gate([row], "pre_enrich").drop_count == 0)
+
+
+def test_save_jobs_keeps_a_midnight_spanning_run_in_its_start_date(tmp_path) -> None:
+    first_job = to_canonical(
+        {
+            "job_id": "req-1",
+            "title": "Software Engineer",
+            "raw_jd_text": "Build reliable software systems for production users.",
+        },
+        "Example Co",
+    )
+    second_job = to_canonical(
+        {
+            "job_id": "req-2",
+            "title": "Data Engineer",
+            "raw_jd_text": "Build reliable data systems for production users.",
+        },
+        "Example Co",
+    )
+
+    save_jobs(
+        "Example Co",
+        [first_job],
+        output_base=str(tmp_path),
+        write_marker=False,
+        run_date="2026_08_07",
+    )
+    path = tmp_path / "Example_Co" / "Outputs" / "2026_08_07"
+    assert not (path / "jobs.complete").exists()
+
+    json_path, _ = save_jobs(
+        "Example Co",
+        [first_job, second_job],
+        output_base=str(tmp_path),
+        run_date="2026_08_07",
+    )
+
+    assert json_path == str(path / "jobs.json")
+    assert (path / "jobs.complete").exists()
+    jobs = json.loads((path / "jobs.json").read_text(encoding="utf-8"))
+    assert len(jobs) == 2
+    assert {job["batch_date"] for job in jobs} == {20260807}
 
 
 def main() -> None:

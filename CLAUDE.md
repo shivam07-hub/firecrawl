@@ -47,7 +47,7 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 - **Quality-aware per-company cap (shipped 2026-07-26):** companies at/under `--company-cap` (default now **2500**) keep every role; over it, `scrape_select.select_for_cap()` keeps technical (`career_band=engineering_data`) + JD-bearing roles over an arbitrary tail (title stoplist drops guard/facilities/clerical; `CAP_MIN_JD_CHARS=300`). Forward-only, deterministic, no LLM. Phase B decoupled Workday listing from JD fetch: the loop pages metadata only (ceiling `WORKDAY_MAX_JOBS` 500→**5000** — the real prior bottleneck was every Workday tenant silently cut to 500 listings), then selects, then fetches JDs for **only the selected set** in chunks (flush granularity moved page→chunk; durability preserved). Design + guard tests: `docs/DESIGN_quality_aware_company_cap.md`, `tests/test_scrape_select.py`, `tests/test_workday_quality_cap.py`. **Myro lens:** index technical roles we can explain, not the PMO/security-guard no-JD tail.
 - **Layout:** tests in `scraper/tests/` (+ conftest); narrative docs + handoffs in `docs/`; root keeps CLAUDE/AGENTS/README/KNOWN_PORTALS/RUN_HISTORY/HANDOVER.
 - **Health tracking:** official per-company counts only after a real `csv_importer.py` load; scrape-only counts are provisional and stay local.
-- **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation owns the poll-and-publish schedule and never duplicates active consumers; local enrichment continues independently across poll boundaries. Polls that cross midnight publish every calendar date they span. The next poll is re-anchored 24 hours after publication finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
+- **Forward-only async enrichment is deployed, automated, and live-data verified:** `csv_importer.py --source-only` publishes source fields without erasing enrichment; `enrichment_worker.py` drains a durable queue after publication. Historical rows remain untracked and are never backfilled. Personalized search can request priority enrichment. One local Codex automation owns the poll-and-publish schedule and never duplicates active consumers; local enrichment continues independently across poll boundaries. Polls pin one immutable run date, so a scrape that crosses midnight still resolves and publishes one complete folder. The next poll is re-anchored 24 hours after publication finishes. Railway remains an optional always-on upgrade. See `scraper/ASYNC_ENRICHMENT.md`.
 - **Source seniority normalization is forward-only:** `writer.to_canonical()` calls `job_seniority.py` before a future source publication. It combines provider metadata, explicit title signals, and source-JD experience requirements into Myro's canonical ladder (`intern`, `entry`, `mid`, `senior`, `lead`, `executive`); it is deterministic, uses no model or enrichment queue, and never rewrites historical Supabase rows.
 - **Source Career Band normalization is forward-only:** `writer.to_canonical()` calls `job_career_band.py` before a future source publication. It maps explicit title signals and the controlled role domain into one of Myro's four role families; it is deterministic, uses no model or enrichment queue, and never rewrites historical Supabase rows.
 - **Source-first semantic job retrieval is deployed:** active jobs with a parseable source posting date in the latest 14 calendar dates were enrolled once; unknown-date and older history is deliberately excluded. New jobs and material source changes are enrolled automatically. `job_embedding_worker.py` uses local LM Studio Nomic 768-dimensional embeddings, stores vectors in service-role-only `private.job_embeddings`, and exposes a trust-filtered nearest-neighbor RPC with no similarity/skill sieve. See `scraper/JOB_EMBEDDINGS.md`.
@@ -161,15 +161,13 @@ the real cause. Three guards now hold this:
   paying that once is what stops every message paying it as a retry. Give the
   model a TTL longer than the drain (`lms load … --ttl 86400`).
 
-**Midnight-spanning runs (latent, unfixed).** `daily_poll` publishes every date a
-run spanned, but `csv_importer._find_json_files` only considers each company's
-**newest** date folder. A company that scrapes *across* midnight leaves an
-earlier-date folder that can never be selected, so that date's publish exits 2
-(`No complete jobs.json files found`) and fails the whole cycle — this killed the
-2026-08-07 run at the publish step. Its pre-midnight partial folder also has no
-`jobs.complete` marker, so those rows are stranded until the next scrape (1,380
-Accenture jobs on 2026-08-08). Start long runs after midnight, or fix the
-date-selection contract.
+**Midnight-spanning runs — fixed 2026-08-13.** `daily_poll` passes its start date
+through `main.py` to every page flush and final `save_jobs`; the writer stamps
+that same folder and `batch_date` even after wall-clock midnight. Resolve and
+publish use the same date, and targeted importer discovery selects that exact
+folder even if a newer folder exists. Markerless partial folders remain
+quarantined. Regression coverage simulates partial + final saves across the
+boundary and guards the scrape → resolve → publish command contract.
 
 **Withheld rows.** `--resolved-only` publishes only rows with valid provenance
 and withholds the rest rather than guessing a band; the importer logs the count.

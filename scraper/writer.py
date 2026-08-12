@@ -23,7 +23,7 @@ from utils import company_slug
 from config import OUTPUT_BASE
 from job_career_band import normalize_job_career_band
 from job_seniority import normalize_job_seniority
-from schema import CANONICAL_FIELDS, RAW_FIELD_MAP, MIN_JOB_DESCRIPTION_LEN, MISSING_JD_NOTE
+from schema import CANONICAL_FIELDS, MIN_JOB_DESCRIPTION_LEN, MISSING_JD_NOTE
 
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
 SCHEMA = CANONICAL_FIELDS
@@ -54,6 +54,24 @@ def write_complete_marker(folder: Path, job_count: int, new_count: int, run_id: 
 
 def _today() -> int:
     return int(datetime.now().strftime("%Y%m%d"))
+
+
+def normalize_run_date(run_date: str | None) -> tuple[str, int]:
+    """Return output-folder and batch-date forms for one logical scrape run."""
+    if run_date is None:
+        now = datetime.now()
+        return now.strftime("%Y_%m_%d"), int(now.strftime("%Y%m%d"))
+
+    normalized = run_date.replace("-", "_")
+    if len(normalized) == 8 and normalized.isdigit():
+        normalized = f"{normalized[:4]}_{normalized[4:6]}_{normalized[6:]}"
+    try:
+        parsed = datetime.strptime(normalized, "%Y_%m_%d")
+    except ValueError as exc:
+        raise ValueError(
+            "run_date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD"
+        ) from exc
+    return parsed.strftime("%Y_%m_%d"), int(parsed.strftime("%Y%m%d"))
 
 
 def job_content_hash(job: dict) -> str:
@@ -117,7 +135,7 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "location_quality": raw.get('location_quality') or '',
         # per-city raw strings for multi-location postings (firecrawl #6).
         # csv_importer._normalize_location canonicalizes; empty list → derived from scalar.
-        "locations":        [l for l in (raw.get('locations') or []) if isinstance(l, str) and l.strip()],
+        "locations":        [location for location in (raw.get('locations') or []) if isinstance(location, str) and location.strip()],
         "apply_url":        _get('job_url', 'apply_url'),
         "source_url":       raw.get('source_url') or raw.get('source_api_url') or '',
         "source_platform":  raw.get('source_platform') or raw.get('ats') or '',
@@ -155,6 +173,7 @@ def save_jobs(
     output_base: str = OUTPUT_BASE,
     write_marker: bool = True,
     run_id: str = "",
+    run_date: str | None = None,
 ) -> tuple[str, int]:
     """
     Write jobs to All_CSV_Outputs/{Company}/Outputs/YYYY_MM_DD/jobs.json (+ CSV).
@@ -163,11 +182,12 @@ def save_jobs(
     write_marker=False: intermediate/page-level save — no marker (run still in progress).
     Returns (json_path, new_jobs_count).
     """
+    folder_date, default_batch_date = normalize_run_date(run_date)
     folder = (
         Path(output_base)
         / company_slug(company_name)
         / "Outputs"
-        / datetime.now().strftime("%Y_%m_%d")
+        / folder_date
     )
     folder.mkdir(parents=True, exist_ok=True)
     json_path      = folder / "jobs.json"
@@ -187,7 +207,14 @@ def save_jobs(
 
     existing_ids = {j['job_id'] for j in existing if j.get('job_id')}
     new_jobs     = [j for j in jobs if j.get('job_id') not in existing_ids]
-    all_jobs     = [stamp_job_content_hash(j) for j in (existing + new_jobs)]
+    all_jobs = []
+    for job in existing + new_jobs:
+        batch_date = (
+            default_batch_date
+            if run_date is not None
+            else job.get("batch_date") or default_batch_date
+        )
+        all_jobs.append(stamp_job_content_hash({**job, "batch_date": batch_date}))
 
     # Atomic JSON write: tmp → rename (POSIX atomic)
     tmp_path.write_text(json.dumps(all_jobs, indent=2, ensure_ascii=False), encoding='utf-8')
