@@ -35,6 +35,38 @@ def test_normalize_job_seniority_uses_experience_when_title_is_ambiguous() -> No
     assert normalized.min_years_experience == 5
 
 
+def test_normalize_job_seniority_reads_requirements_years_without_experience_word() -> None:
+    normalized = normalize_job_seniority({
+        "job_title": "Gold Loan Officer",
+        "job_description": "Requirements: 2 to 6 years of handling Gold Loan Operations.",
+    })
+
+    assert normalized.seniority_level == "mid"
+    assert normalized.min_years_experience == 2
+    assert normalized.max_years_experience == 6
+
+
+def test_normalize_job_seniority_reads_experience_before_year_range() -> None:
+    normalized = normalize_job_seniority({
+        "job_title": "Business Management Support",
+        "job_description": "Preferable expert experience of 8-10 years in a similar role.",
+    })
+
+    assert normalized.seniority_level == "lead"
+    assert normalized.min_years_experience == 8
+    assert normalized.max_years_experience == 10
+
+
+def test_normalize_job_seniority_ignores_age_and_benefit_years() -> None:
+    normalized = normalize_job_seniority({
+        "job_title": "Specialist",
+        "job_description": "Complementary health screening for 35 yrs and above.",
+    })
+
+    assert normalized.seniority_level == ""
+    assert normalized.min_years_experience is None
+
+
 def test_normalize_job_seniority_canonicalizes_provider_level() -> None:
     normalized = normalize_job_seniority({
         "job_title": "People Operations Specialist",

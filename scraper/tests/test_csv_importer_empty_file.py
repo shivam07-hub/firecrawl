@@ -15,7 +15,6 @@ def test_empty_jobs_file_returns_complete_zero_result(tmp_path) -> None:
         drift_counter={},
         unknown_location_counter={},
         dry_run=True,
-        supports_required_level=True,
     )
 
     assert result == {
@@ -25,7 +24,7 @@ def test_empty_jobs_file_returns_complete_zero_result(tmp_path) -> None:
         "batch_date": 20260604,
         "job_ids": set(),
         "jobs": 0,
-        "skill_rows": 0,
+        "withheld": 0,
         "profile_rows": 0,
         "drift": 0,
         "enriched": 0,

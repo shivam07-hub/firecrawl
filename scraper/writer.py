@@ -94,9 +94,11 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         # a deterministic experience requirement such as "12+ years".
         "job_description": source_job_description,
     })
+    source_role_domain = raw.get('role_domain') or raw.get('business_unit') or ''
     normalized_career_band = normalize_job_career_band({
         **raw,
         "job_title": _get('title', 'job_title'),
+        "role_domain": source_role_domain,
     })
 
     row = {
@@ -121,7 +123,7 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "source_platform":  raw.get('source_platform') or raw.get('ats') or '',
         "ingestion_source": raw.get('ingestion_source') or 'scraper',
         "quality_status":   raw.get('quality_status') or 'auto_extracted',
-        "role_domain":      raw.get('role_domain') or raw.get('business_unit') or '',
+        "role_domain":      source_role_domain,
         "career_band":      normalized_career_band,
         # One flat skill list. `skills` carries model required_level → job_skills;
         # `main_skills` mirrors the names (True_Yodha chips); `side_skills` always [].

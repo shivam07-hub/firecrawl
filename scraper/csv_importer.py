@@ -4,9 +4,12 @@ csv_importer.py — Phase 3: upload source or enriched local JSON to Supabase.
 Reads All_CSV_Outputs/*/Outputs/*/jobs.json and:
   1. Upserts core job fields to the `jobs` table (with lifecycle tracking).
   2. Resolves the flat `skills` list (or legacy main_skills fallback) → skill_ids.
-  3. Upserts rows to `job_skills (job_id, skill_id, is_primary, required_level)`.
-     One bucket: is_primary is always True; importance lives in required_level (1-4).
-  4. Logs skills that don't resolve (taxonomy drift signal).
+  3. Logs skills that don't resolve (taxonomy drift signal).
+
+`job_skills` is NOT written here any more. It belongs to True_Yodha's skill
+engine — Stage A reads where in the JD a skill is named, Stage B judges how deep
+— and a write from this side overwrote that read with a constant `is_primary`
+and locked Stage A out of the job. See `_count_skill_drift`.
 
 Usage:
     python csv_importer.py                        # all companies, latest date folder
@@ -61,6 +64,11 @@ from enrichment_state import (  # noqa: E402
     source_content_hash,
 )
 from utils import company_slug  # noqa: E402
+from job_career_band import VALID_CAREER_BANDS  # noqa: E402
+
+_VALID_SENIORITY_LEVELS = frozenset({
+    "intern", "entry", "mid", "senior", "lead", "executive",
+})
 
 _SOURCE_JOB_FIELDS = [
     "job_id", "job_title", "job_description",
@@ -97,6 +105,129 @@ _UNKNOWN_LOCATION_THRESHOLD = 0.10
 _MAX_DEACTIVATION_RATE = 0.75
 _LOCATION_PARSER_VERSION = "v1"
 _DEFAULT_PROFILE_VERSION = "cv_profile_v1"
+
+
+def _source_matching_facts_are_publishable(job: dict) -> bool:
+    if not str(job.get("job_id") or "").strip():
+        return False
+    band = str(job.get("career_band") or "").strip()
+    seniority = str(job.get("seniority_level") or "").strip()
+    if band not in VALID_CAREER_BANDS:
+        return False
+    if seniority and seniority not in _VALID_SENIORITY_LEVELS:
+        return False
+    source = str(job.get("career_band_source") or "").strip()
+    source_hash = str(job.get("career_band_source_hash") or "").strip()
+    if (
+        source not in {
+            "deterministic_title_or_role_domain",
+            "model_grounded",
+        }
+        or source_hash != source_content_hash(job)
+    ):
+        return False
+    if source == "model_grounded":
+        return all(
+            str(job.get(field) or "").strip()
+            for field in (
+                "career_band_evidence",
+                "career_band_model",
+                "career_band_provider",
+            )
+        )
+    return True
+
+
+def _validate_source_matching_facts(
+    json_files: list[Path],
+    *,
+    allow_withheld: bool = False,
+) -> tuple[int, int, int]:
+    """Reject an entire publication before writes if matching facts are invalid."""
+    invalid_bands: list[tuple[Path, str, str]] = []
+    invalid_provenance: list[tuple[Path, str, str]] = []
+    invalid_seniority: list[tuple[Path, str, str]] = []
+    missing_job_ids: list[tuple[Path, str, str]] = []
+    total_jobs = 0
+    publishable_rows = 0
+    publishable_keys: set[tuple[str, str]] = set()
+
+    for json_path in json_files:
+        try:
+            jobs = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Could not read {json_path}: {exc}") from exc
+        if not isinstance(jobs, list):
+            raise ValueError(f"Expected a JSON job list in {json_path}")
+
+        for job in jobs:
+            if not isinstance(job, dict):
+                raise ValueError(f"Expected job objects in {json_path}")
+            total_jobs += 1
+            title = str(job.get("job_title") or "<missing title>")
+            if not str(job.get("job_id") or "").strip():
+                missing_job_ids.append((json_path, title, ""))
+            band = str(job.get("career_band") or "").strip()
+            seniority = str(job.get("seniority_level") or "").strip()
+            if band not in VALID_CAREER_BANDS:
+                invalid_bands.append((json_path, title, band))
+            else:
+                source = str(job.get("career_band_source") or "").strip()
+                source_hash = str(job.get("career_band_source_hash") or "").strip()
+                provenance_valid = (
+                    source in {
+                        "deterministic_title_or_role_domain",
+                        "model_grounded",
+                    }
+                    and source_hash == source_content_hash(job)
+                )
+                if source == "model_grounded":
+                    provenance_valid = provenance_valid and all(
+                        str(job.get(field) or "").strip()
+                        for field in (
+                            "career_band_evidence",
+                            "career_band_model",
+                            "career_band_provider",
+                        )
+                    )
+                if not provenance_valid:
+                    invalid_provenance.append((json_path, title, source))
+            if seniority and seniority not in _VALID_SENIORITY_LEVELS:
+                invalid_seniority.append((json_path, title, seniority))
+            if _source_matching_facts_are_publishable(job):
+                publishable_rows += 1
+                publishable_keys.add((
+                    str(job.get("company_name") or ""),
+                    str(job.get("job_id") or ""),
+                ))
+
+    if not allow_withheld and (
+        invalid_bands
+        or invalid_provenance
+        or invalid_seniority
+        or missing_job_ids
+    ):
+        details = []
+        for label, rows in (
+            ("job_id", missing_job_ids),
+            ("career_band", invalid_bands),
+            ("career_band_source", invalid_provenance),
+            ("seniority_level", invalid_seniority),
+        ):
+            for path, title, value in rows[:5]:
+                details.append(
+                    f"{label}={value!r} title={title!r} file={path}"
+                )
+        raise ValueError(
+            "Source matching-fact preflight failed before Supabase writes: "
+            f"{len(missing_job_ids)} missing job IDs; "
+            f"{len(invalid_bands)} invalid/unresolved career bands; "
+            f"{len(invalid_provenance)} invalid/stale career-band provenance; "
+            f"{len(invalid_seniority)} invalid seniority levels. "
+            + " | ".join(details)
+        )
+    duplicate_rows = publishable_rows - len(publishable_keys)
+    return total_jobs, len(publishable_keys), duplicate_rows
 
 
 def _parse_batch_date(value: str | int | None) -> int | None:
@@ -433,30 +564,6 @@ def _assert_location_audit_contract(run_id: str) -> None:
             log.error("job_feed_run_audits.run_id expects uuid; generated run_id is invalid: %s", run_id)
             raise SystemExit(2) from exc
     log.info("Supabase audit contract preflight OK")
-
-
-def _job_skills_has_required_level() -> bool:
-    """Return True when live Supabase job_skills exposes required_level."""
-    url = (os.getenv("SUPABASE_URL", "") or "").rstrip("/")
-    key = os.getenv("SUPABASE_SERVICE_KEY", "")
-    if not url or not key:
-        return False
-
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Accept": "application/openapi+json",
-    }
-    try:
-        response = requests.get(f"{url}/rest/v1/", headers=headers, timeout=30)
-        response.raise_for_status()
-        spec = response.json()
-    except Exception:
-        return False
-
-    schemas = spec.get("definitions") or spec.get("components", {}).get("schemas") or {}
-    table = schemas.get("job_skills") or schemas.get("public.job_skills") or {}
-    return "required_level" in (table.get("properties") or {})
 
 
 def _jobs_has_locations_column() -> bool:
@@ -981,66 +1088,40 @@ def _upsert_jobs(
     return len(rows), unknown_location_rows
 
 
-def _resolve_and_upsert_skills(
-    sb: Client,
+def _count_skill_drift(
     jobs: list[dict],
     skill_id_map: dict[str, int],
     drift_counter: Counter,
-    dry_run: bool,
-    supports_required_level: bool,
-) -> tuple[int, int]:
-    skill_rows: list[dict] = []
+) -> int:
+    """Count skill names that do not resolve against the Lightcast taxonomy.
+
+    This path does NOT write `job_skills`, and must not be made to. It used to
+    upsert every row with `is_primary=True`, which is how 94.2% of 361,165 prod
+    rows came to carry a constant where an importance signal belongs — read
+    through company demand, every skill of every company looked like a 100%
+    must-have.
+
+    `job_skills` is owned by True_Yodha's skill engine: Stage A reads WHERE in
+    the JD each skill is named (must-have / preferred / mentioned) and Stage B
+    judges how deep. A write from here deletes their read, because
+    `has_skill_floor` flips true on the row and Stage A never revisits the job.
+
+    Drift counting stays: an unresolvable skill name is still the scrape's own
+    signal about its enrichment vocabulary, and costs nothing to keep.
+    """
     local_drift = 0
 
     for job in jobs:
-        job_id = job.get("job_id")
-        if not job_id:
+        if not job.get("job_id"):
             continue
 
         for skill_entry in _job_skill_entries(job):
             skill = skill_entry["name"]
-            skill_id = skill_id_map.get(skill)
-            if skill_id:
-                row = {
-                    "job_id": job_id,
-                    "skill_id": skill_id,
-                    "is_primary": skill_entry["is_primary"],
-                    "required_level": skill_entry["required_level"],
-                }
-                skill_rows.append(row)
-            else:
+            if not skill_id_map.get(skill):
                 drift_counter[skill] += 1
                 local_drift += 1
 
-    # Deduplicate by (job_id, skill_id) — keep the strongest required_level.
-    # (is_primary is uniformly True; the primary/side split was removed.)
-    seen: dict[tuple[str, int], dict] = {}
-    for r in skill_rows:
-        key = (r["job_id"], r["skill_id"])
-        existing = seen.get(key)
-        if not existing:
-            seen[key] = r
-            continue
-        existing["required_level"] = max(existing["required_level"], r["required_level"])
-    skill_rows = list(seen.values())
-
-    if dry_run or not skill_rows:
-        return len(skill_rows), local_drift
-
-    if not supports_required_level:
-        log.error(
-            "job_skills.required_level is missing in Supabase. "
-            "Run scraper/sql/add_job_skills_required_level.sql before uploading enriched skills."
-        )
-        raise SystemExit(2)
-
-    for i in range(0, len(skill_rows), _BATCH_SIZE):
-        batch = skill_rows[i:i + _BATCH_SIZE]
-        sb.table("job_skills").upsert(
-            batch, on_conflict="job_id,skill_id"
-        ).execute()
-
-    return len(skill_rows), local_drift
+    return local_drift
 
 
 def _write_diagnostic(
@@ -1196,11 +1277,11 @@ def import_file(
     drift_counter: Counter,
     unknown_location_counter: Counter[str],
     dry_run: bool,
-    supports_required_level: bool,
     run_id: str = "",
     *,
     source_only: bool = False,
     supports_forward_enrichment: bool = False,
+    resolved_only: bool = False,
 ) -> dict:
     try:
         jobs = json.loads(json_path.read_text(encoding="utf-8"))
@@ -1216,7 +1297,7 @@ def import_file(
             "batch_date": _parse_batch_date(date_str),
             "job_ids": set(),
             "jobs": 0,
-            "skill_rows": 0,
+            "withheld": 0,
             "profile_rows": 0,
             "drift": 0,
             "enriched": 0,
@@ -1226,6 +1307,37 @@ def import_file(
     company    = jobs[0].get("company_name", json_path.parent.parent.parent.name)
     date_str   = json_path.parent.name
     batch_date = _parse_batch_date(date_str) or _parse_batch_date(jobs[0].get("batch_date"))
+    # Scraped row count, kept before any withholding: this — not the published
+    # count — is what company health and the baseline ledger mean by "raw jobs".
+    source_rows = len(jobs)
+    if resolved_only:
+        jobs = [job for job in jobs if _source_matching_facts_are_publishable(job)]
+        # Preserve the last source occurrence, matching an upsert's terminal state.
+        jobs = list({
+            str(job["job_id"]): job
+            for job in jobs
+        }.values())
+    withheld = source_rows - len(jobs)
+    if not jobs:
+        if withheld:
+            log.warning(
+                "  %s: all %d rows withheld — no resolved career band",
+                company,
+                withheld,
+            )
+        return {
+            "path": str(json_path),
+            "company": company,
+            "date": date_str,
+            "batch_date": batch_date,
+            "job_ids": set(),
+            "jobs": 0,
+            "withheld": withheld,
+            "profile_rows": 0,
+            "drift": 0,
+            "enriched": 0,
+            "unknown_location_rows": 0,
+        }
     enriched   = 0 if source_only else sum(1 for j in jobs if j.get("main_skills"))
 
     local_unknown = 0
@@ -1248,18 +1360,17 @@ def import_file(
                     unknown_location_counter[normalized.location_raw.lower()] += 1
 
     if source_only:
-        skill_rows_written = 0
         profile_rows_written = 0
         drift = 0
     else:
-        skill_rows_written, drift = _resolve_and_upsert_skills(
-            sb, jobs, skill_id_map, drift_counter, dry_run, supports_required_level
-        )
+        drift = _count_skill_drift(jobs, skill_id_map, drift_counter)
         profile_rows_written = _upsert_candidate_profiles(sb, jobs, dry_run)
 
     if not dry_run and run_id:
-        _write_diagnostic(sb, run_id, company, len(jobs), jobs_written, enriched, drift)
-        _sync_baseline_ledger(company, jobs, len(jobs), run_id)
+        # source_rows, not len(jobs): withholding a row is a resolver gap, not a
+        # hiring-volume drop, and the baseline ledger reads this as the scrape count.
+        _write_diagnostic(sb, run_id, company, source_rows, jobs_written, enriched, drift)
+        _sync_baseline_ledger(company, jobs, source_rows, run_id)
 
     return {
         "path": str(json_path),
@@ -1268,7 +1379,7 @@ def import_file(
         "batch_date": batch_date,
         "job_ids": {j.get("job_id") for j in jobs if j.get("job_id")},
         "jobs": jobs_written,
-        "skill_rows": skill_rows_written,
+        "withheld": withheld,
         "profile_rows": profile_rows_written,
         "drift": drift,
         "enriched": enriched,
@@ -1360,6 +1471,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--resolved-only",
+        action="store_true",
+        help=(
+            "Publish only rows with valid, current career-band provenance; "
+            "withhold unresolved rows without treating files as complete snapshots"
+        ),
+    )
+    parser.add_argument(
         "--deactivate-missing",
         action="store_true",
         help="After a successful import, mark active jobs missing from this run inactive for imported companies only",
@@ -1376,6 +1495,12 @@ def main() -> None:
         raise SystemExit(2)
     if args.source_only and not args.run_date:
         log.error("--source-only requires --run-date so stale output folders cannot be republished")
+        raise SystemExit(2)
+    if args.resolved_only and not args.source_only:
+        log.error("--resolved-only requires --source-only")
+        raise SystemExit(2)
+    if args.resolved_only and args.deactivate_missing:
+        log.error("--resolved-only cannot be combined with --deactivate-missing")
         raise SystemExit(2)
     if args.deactivate_missing and args.all_dates:
         log.error("--deactivate-missing is only safe with the latest date folder, not --all-dates")
@@ -1444,6 +1569,30 @@ def main() -> None:
             raise SystemExit(2)
 
     log.info(f"Files to import: {len(json_files)}")
+    try:
+        matching_jobs, publishable_jobs, duplicate_jobs = _validate_source_matching_facts(
+            json_files,
+            allow_withheld=args.resolved_only,
+        )
+    except ValueError as exc:
+        log.error("%s", exc)
+        raise SystemExit(2) from exc
+    if args.resolved_only:
+        log.info(
+            "Resolved-only preflight OK: %s unique publishable, %s withheld, "
+            "%s duplicate source rows collapsed",
+            publishable_jobs,
+            matching_jobs - publishable_jobs - duplicate_jobs,
+            duplicate_jobs,
+        )
+        if publishable_jobs == 0:
+            log.error("No rows have publishable source matching facts")
+            raise SystemExit(2)
+    else:
+        log.info(
+            "Source matching-fact preflight OK: %s jobs with valid career bands",
+            matching_jobs,
+        )
     if args.dry_run:
         log.info("DRY RUN — no writes")
     if args.source_only:
@@ -1453,18 +1602,6 @@ def main() -> None:
     run_id = str(uuid.uuid4())
     log.info(f"Run ID: {run_id} ({run_label})")
     _assert_location_audit_contract(run_id)
-    supports_required_level = False if args.source_only else _job_skills_has_required_level()
-    if not args.source_only:
-        if supports_required_level:
-            log.info("job_skills.required_level contract OK")
-        else:
-            log.warning(
-                "job_skills.required_level is missing; dry-run can continue, "
-                "but real enriched uploads require scraper/sql/add_job_skills_required_level.sql"
-            )
-            if not args.dry_run:
-                log.error("Stopping before writes to avoid a partial jobs-only upload.")
-                raise SystemExit(2)
 
     _missing_forward_cols = _jobs_missing_forward_enrichment_columns()
     supports_forward_enrichment = not _missing_forward_cols
@@ -1542,7 +1679,7 @@ def main() -> None:
     unknown_location_counter: Counter[str] = Counter()
     imported_company_job_ids: dict[str, set[str]] = {}
     imported_company_batch_dates: dict[str, int] = {}
-    total_jobs = total_skill_rows = total_drift = total_unknown_location_rows = 0
+    total_jobs = total_withheld = total_drift = total_unknown_location_rows = 0
     t0 = time.time()
 
     for json_path in json_files:
@@ -1553,10 +1690,10 @@ def main() -> None:
             drift_counter,
             unknown_location_counter,
             args.dry_run,
-            supports_required_level,
             run_id,
             source_only=args.source_only,
             supports_forward_enrichment=supports_forward_enrichment,
+            resolved_only=args.resolved_only,
         )
         if "error" in result:
             log.warning(f"  {result['path']}: {result['error']}")
@@ -1566,13 +1703,14 @@ def main() -> None:
         enriched_pct = round(enriched / result["jobs"] * 100) if result["jobs"] else 0
         log.info(
             f"  {result['company']} [{result['date']}]: "
-            f"{result['jobs']} jobs, {result['skill_rows']} skill rows, "
+            f"{result['jobs']} jobs, "
             f"{enriched_pct}% enriched"
+            + (f", {result['withheld']} withheld" if result.get("withheld") else "")
             + (f", {result['drift']} drift" if result['drift'] else "")
             + (f", {result['unknown_location_rows']} unknown locations" if result.get("unknown_location_rows") else "")
         )
         total_jobs       += result["jobs"]
-        total_skill_rows += result["skill_rows"]
+        total_withheld   += result.get("withheld", 0)
         total_drift      += result.get("drift", 0)
         total_unknown_location_rows += result.get("unknown_location_rows", 0)
         if result.get("company") and result.get("jobs"):
@@ -1652,7 +1790,15 @@ def main() -> None:
                     )
 
     log.info("─" * 60)
-    log.info(f"Done: {total_jobs} jobs, {total_skill_rows} job_skills rows — {elapsed:.0f}s")
+    log.info(f"Done: {total_jobs} jobs published — {elapsed:.0f}s")
+    if total_withheld:
+        log.warning(
+            "%s rows withheld for an unresolved career band. These are NOT in "
+            "the jobs table and reach no user — fix resolution (deterministic "
+            "rules in job_career_band.py, or the model pass in "
+            "source_matching_facts.py) and re-publish the same run date.",
+            total_withheld,
+        )
     log.info(
         "Location quality: %s unknown rows (%s)",
         total_unknown_location_rows,

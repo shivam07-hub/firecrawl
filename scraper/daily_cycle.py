@@ -349,6 +349,33 @@ def ensure_job_embedding_ready(
     }
 
 
+def unload_embedding_model(*, env: dict[str, str]) -> dict:
+    """Free the embedding model's slot before the generative model is loaded.
+
+    Best-effort by design: if the unload fails the cycle should still continue
+    and let `ensure_inference_ready` try, because a failed unload is a worse
+    reason to abandon a completed scrape than a tight memory fit is.
+    """
+    try:
+        lms = _lms_binary()
+    except RuntimeError as exc:
+        return {"unloaded": False, "reason": str(exc)}
+
+    completed = subprocess.run(
+        [lms, "unload", JOB_EMBEDDING_MODEL],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "model": JOB_EMBEDDING_MODEL,
+        "unloaded": completed.returncode == 0,
+        "returncode": completed.returncode,
+    }
+
+
 def _write_report(report: dict) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -431,6 +458,12 @@ def main() -> None:
         report["failed_step"] = "job_embeddings"
         path = _write_report(report)
         raise SystemExit(f"Daily cycle failed during job embeddings; report: {path}")
+
+    # Hand the model slot over explicitly. Loading the generative model while the
+    # embedding model is still resident makes LM Studio evict one to fit the
+    # other, and the evicted side then fails as an unrelated-looking network
+    # error rather than anything naming the cause.
+    report["steps"]["embedding_unload"] = unload_embedding_model(env=env)
 
     try:
         report["steps"]["inference"] = ensure_inference_ready(

@@ -32,11 +32,27 @@ _TITLE_LEVELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("intern", ("intern", "internship", "apprentice", "trainee")),
 )
 
-_EXPERIENCE_RE = re.compile(
-    r"\b(?P<minimum>\d{1,2})\s*"
+_YEARS_RANGE = (
+    r"(?P<minimum>\d{1,2})\s*"
     r"(?:(?:[-–—]\s*|\s+to\s+)(?P<maximum>\d{1,2})|\+)?\s*"
-    r"(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z][a-z-]*\s+){0,3}experience\b",
-    re.IGNORECASE,
+    r"(?:years?|yrs?)"
+)
+_EXPERIENCE_PATTERNS = (
+    re.compile(
+        rf"\b{_YEARS_RANGE}\s*[’']?\s*"
+        r"(?:of\s+)?(?:[a-z][a-z-]*\s+){0,3}experience\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:expert\s+)?experience\s+(?:of\s+)?{_YEARS_RANGE}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:requirements?\s*:?\s*|minimum(?:\s+period\s+of)?\s+|"
+        rf"at\s+least\s+){_YEARS_RANGE}\s*[’']?\s*"
+        r"(?:of|in|handling|working|developing|leading)\b",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -121,13 +137,14 @@ def _coerce_year(value: Any) -> int | None:
 def _experience_bounds(description: str) -> tuple[int | None, int | None]:
     minimums: list[int] = []
     maximums: list[int] = []
-    for match in _EXPERIENCE_RE.finditer(description):
-        minimum = _coerce_year(match.group("minimum"))
-        maximum = _coerce_year(match.group("maximum"))
-        if minimum is not None:
-            minimums.append(minimum)
-        if maximum is not None:
-            maximums.append(maximum)
+    for pattern in _EXPERIENCE_PATTERNS:
+        for match in pattern.finditer(description):
+            minimum = _coerce_year(match.group("minimum"))
+            maximum = _coerce_year(match.group("maximum"))
+            if minimum is not None:
+                minimums.append(minimum)
+            if maximum is not None:
+                maximums.append(maximum)
     return (
         max(minimums) if minimums else None,
         max(maximums) if maximums else None,

@@ -81,9 +81,14 @@ python portal_inventory.py --probe --include-js --sample-size 3 # includes JS ro
 python portal_inventory.py --probe --include-js --from-inventory ../logs/portal_inventory_<merged>.json --probe-states skipped_needs_docker,fallback_needs_docker --needs-docker-only --limit 10 --offset 0
                                                                # re-probe only prior Docker-needed rows
 
+# Phase 2S — resolve source matching facts (career band + provenance). REQUIRED
+# before any source publication; the importer rejects rows without provenance.
+python source_matching_facts.py --run-date "$(date +%Y_%m_%d)"                    # fails if any job is unbanded
+python source_matching_facts.py --run-date "$(date +%Y_%m_%d)" --allow-unresolved # daily lane: withhold instead
+
 # Phase 3A — publish source fields immediately
-python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)" --dry-run
-python csv_importer.py --source-only --run-date "$(date +%Y_%m_%d)"
+python csv_importer.py --source-only --resolved-only --run-date "$(date +%Y_%m_%d)" --dry-run
+python csv_importer.py --source-only --resolved-only --run-date "$(date +%Y_%m_%d)"
 
 # Lazy Phase 2/3B — enrich queued forward-only jobs when inference is available
 ENRICH_FORCE_LLM=1 python enrichment_worker.py --batch-size 10 --max-messages 100
@@ -110,7 +115,10 @@ python csv_importer.py --company "Stripe"  # single company smoke test
 ```
 KNOWN_PORTALS.md → main.py/providers → raw JSON
                                       ↓
-                       csv_importer.py --source-only
+                 source_matching_facts.py --run-date   ← MANDATORY
+                 (stamps career_band + provenance in jobs.json)
+                                      ↓
+              csv_importer.py --source-only --resolved-only
                                       ↓
                      Supabase job visible immediately
                          ↙                         ↘
@@ -118,8 +126,58 @@ KNOWN_PORTALS.md → main.py/providers → raw JSON
                      ↓                              ↓
        job_embedding_worker.py (local)       enrichment_worker.py
                      ↓                              ↓
-         semantic retrieval RPC        enrichment patch + job_skills
+         semantic retrieval RPC        enrichment patch (job_summary + role_domain)
 ```
+
+**The resolver step is not optional.** `csv_importer` refuses to publish a row
+whose `career_band` has no current `career_band_source` + `career_band_source_hash`,
+and `writer.to_canonical` never writes those keys — they are not in
+`CANONICAL_FIELDS`. Scrape → publish with no resolver in between rejects the
+entire run. `daily_poll.py` wires all three steps in order (2026-08-07).
+
+**The model pass is off in the daily lane** (`--skip-model`, decided 2026-08-08).
+Measured on a 33,246-job run: deterministic rules banded 86.5% in **13 seconds**,
+while the model pass ran at **~2.7 calls/min and accepted ~7%** of candidates —
+hours added to a 9-hour cycle for a few hundred jobs. The acceptance gate is
+working, not broken: the unresolved tail is mostly titles with no groundable role
+phrase (`IN-Expert`, `Fixed Term Appointment`, bare ladder grades), so there is
+nothing for a grounded classifier to accept. Run `source_matching_facts.py`
+without the flag by hand to chase the tail.
+
+**One local-inference worker at a time (enforced 2026-08-12).** LM Studio holds
+few models resident, so the embedding and enrichment workers running together
+make it evict one to load the other — and the evicted side then fails as
+`nodename nor servname provided` / `Server disconnected`, naming nothing about
+the real cause. Three guards now hold this:
+- `lm_worker_lock.local_inference_lock` — both workers take one exclusive flock;
+  the second exits **3** (distinct from argparse's 2 and a drain failure) rather
+  than queueing, since a waiting worker holds a model slot hostage.
+- `daily_cycle.unload_embedding_model` — the cycle hands the slot over
+  explicitly between the embedding and enrichment stages instead of stacking
+  both models. Best-effort: a failed unload never abandons a finished scrape.
+- `enrichment_worker.local_inference_ready` — `/v1/models` lists **downloaded**
+  models, not **loaded** ones, so it also fires a 1-token probe. LM Studio
+  JIT-loads to answer it, so the probe both forces the load and waits for it;
+  paying that once is what stops every message paying it as a retry. Give the
+  model a TTL longer than the drain (`lms load … --ttl 86400`).
+
+**Midnight-spanning runs (latent, unfixed).** `daily_poll` publishes every date a
+run spanned, but `csv_importer._find_json_files` only considers each company's
+**newest** date folder. A company that scrapes *across* midnight leaves an
+earlier-date folder that can never be selected, so that date's publish exits 2
+(`No complete jobs.json files found`) and fails the whole cycle — this killed the
+2026-08-07 run at the publish step. Its pre-midnight partial folder also has no
+`jobs.complete` marker, so those rows are stranded until the next scrape (1,380
+Accenture jobs on 2026-08-08). Start long runs after midnight, or fix the
+date-selection contract.
+
+**Withheld rows.** `--resolved-only` publishes only rows with valid provenance
+and withholds the rest rather than guessing a band; the importer logs the count.
+A withheld row is a job no user can reach, so treat the count as work: extend the
+deterministic rules in `job_career_band.py` where the title is unambiguous, re-run
+the resolver for the same run date, and re-publish. Diagnostics and the baseline
+ledger record the **scraped** count, not the published one — withholding is a
+resolver gap, not a hiring-volume drop.
 
 ## COMPANY RUN HEALTH TRACKING
 
@@ -147,6 +205,8 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `enricher.py` | `enrich_job()` → RAG vocab → LM Studio → structured `skills` + back-compat arrays |
 | `writer.py` | `to_canonical()` → deduped JSON+CSV saved to output folder |
 | `job_career_band.py` | Deterministic source-level normalizer for Myro's four role families; no historical rewrite |
+| `source_matching_facts.py` | Mandatory pre-publish pass: stamps `career_band` + provenance on a run's `jobs.json`. Deterministic rules first; only the remainder go to the local model, and a classification is accepted only on a grounded, high-confidence source phrase |
+| `lm_worker_lock.py` | Exclusive flock so only ONE local-inference worker runs at a time. Second worker exits **3** instead of evicting the first one's model |
 | `job_seniority.py` | Deterministic source-level normalizer for seniority and experience bounds; no historical rewrite |
 | `main.py` | Orchestrator — all CLI flags; auto-runs self-diagnosis at run end |
 | `csv_importer.py` | Phase 3A source-only publish or legacy full upsert; source-only mode preserves model-owned columns |
@@ -223,6 +283,25 @@ python diagnose.py --json                   # machine-readable verdicts
 
 ### job_skills table (FK join table — canonical skill source)
 
+> **⚠️ THE SCRAPER NO LONGER WRITES `job_skills` (2026-08-07).** It belongs to
+> True_Yodha's skill engine: **Stage A** reads *where* in the JD each skill is
+> named (must-have / preferred / mentioned, → `is_primary`) and **Stage B** judges
+> *how deep* (→ `required_level`). Both key on this same Lightcast taxonomy.
+>
+> Why it moved: this side wrote every row with `is_primary=True`, so 94.2% of
+> 361,165 prod rows carried a constant where the importance signal belongs —
+> company demand reported every skill of every company as a 100% must-have. Worse,
+> `apply_job_enrichment` DELETEd the whole set first, destroying Stage A's read
+> and Stage B's verdicts on any newly scraped job, with `has_skill_floor` left
+> true so Stage A never revisited it.
+>
+> `csv_importer._resolve_and_upsert_skills` now only counts taxonomy drift.
+> `apply_job_enrichment` writes `job_summary` + `role_domain` only; its `p_skills`
+> argument is accepted and ignored so the deployed worker keeps its signature.
+> `jobs.main_skills` is derived from `job_skills` by a Supabase trigger.
+> Design + migrations: `True_Yodha/SKILL_ENGINE.md`,
+> `True_Yodha/database/migrations/20260807b_enrichment_stops_owning_skills.sql`.
+
 `job_skills` is the source of truth for skill↔job relationships in True_Yodha.
 `main_skills` TEXT array on `jobs` is the back-compat name mirror (True_Yodha chips read it); `side_skills` is deprecated (always `[]`) and can be dropped in a later cleanup.
 
@@ -239,7 +318,7 @@ python diagnose.py --json                   # machine-readable verdicts
 - LM Studio returns `skills[]` objects: `{name, required_level}` (no `is_primary`)
 - `_validate_enrichment()` canonicalizes against Lightcast L3, bounds level to 1–4 (default L2), caps the list at 10, sets `main_skills = [all names]` and `side_skills = []`
 - `writer.to_canonical` now persists the structured `skills` array (with model levels) into `jobs.json` — previously dropped, which is why pre-2026-06-07 rows defaulted to level 2
-- `csv_importer` writes every `job_skills` row with `is_primary=True` and the model `required_level`; the column gate (`add_job_skills_required_level.sql`) is live
+- ~~`csv_importer` writes every `job_skills` row with `is_primary=True`~~ — **retired 2026-08-07**, see the box above. That constant is exactly what broke company demand; `is_primary` now carries Stage A's must-have zone
 - **Forward-only: no backfill.** Existing rows keep their old levels; correctness applies from the next scrape onward (product philosophy: agile, downstream-only)
 - True_Yodha should read `job_skills.required_level` directly and keep any heuristic only as a fallback
 
@@ -322,7 +401,7 @@ Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
 3. `enrich_job()` sends vocab + JD to LM Studio (`gemma-3-4b`, max_tokens=512, temp=0.0)
 4. LLM returns `role_domain` + a single flat `skills[]` of `{name, required_level}` (no `is_primary`)
 5. `_validate_enrichment()` canonicalizes against Lightcast L3, bounds levels to 1–4 (default L2), caps at 10, sets `main_skills = [all names]` and `side_skills = []`
-6. `writer.to_canonical` persists the structured `skills` (with levels) to `jobs.json`; `csv_importer` resolves them → `job_skills` (`is_primary=True`, model `required_level`)
+6. `writer.to_canonical` persists the structured `skills` (with levels) to `jobs.json`. **They stop there** — `job_skills` is written by True_Yodha's Stage A/Stage B, not by this pipeline (see the job_skills box above). The importer resolves the names only to report taxonomy drift.
 
 ---
 

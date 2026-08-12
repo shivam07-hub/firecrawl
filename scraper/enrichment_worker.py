@@ -38,6 +38,11 @@ from enricher import (
     has_terminal_core_enrichment,
 )
 from writer import job_content_hash
+from lm_worker_lock import BUSY_EXIT_CODE, WorkerBusy, local_inference_lock
+
+# A loaded model answers a 1-token probe in well under this. An unloaded one
+# either stalls or errors, which is the signal we want before claiming work.
+INFERENCE_HEALTH_TIMEOUT_SECONDS = 30
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -305,13 +310,17 @@ def process_message(
         )
 
     if not store.apply(enriched, message.source_hash):
-        # Either a source change or lifecycle transition won the race and the
-        # database rejected a stale result, or the enrichment produced no
-        # taxonomy skill for this job.  `apply_job_enrichment` now refuses to
-        # call the second case `complete` -- it stamps `not_applicable` with a
-        # reason instead, because a job with no skills reaches no user, and 1,088
-        # rows sat in exactly that state reporting success.  Both causes are
-        # terminal for THIS message, so archiving is still correct.
+        # A source change or lifecycle transition won the race and the database
+        # rejected a stale result, or the model returned no summary/role_domain.
+        # Both are terminal for THIS message, so archiving is still correct.
+        #
+        # The "produced no taxonomy skill" case is no longer one of them.
+        # `apply_job_enrichment` stopped writing `job_skills` on 20260807b --
+        # skills belong to True_Yodha's Stage A (JD position) and Stage B
+        # (depth), and a write from this side deleted their read and replaced it
+        # with a constant `is_primary`.  Asserting a skill row here would now
+        # stamp `not_applicable` on jobs for the sole reason that STAGE A had
+        # not run yet, which is the same shape of fault in the other direction.
         _archive(queue, message)
         return ProcessOutcome("apply_incomplete")
 
@@ -340,7 +349,22 @@ def _handle_job_failure(
 
 
 def local_inference_ready() -> bool:
-    """Avoid claiming queue messages while local LM Studio is disconnected."""
+    """Avoid claiming queue messages while local LM Studio cannot actually infer.
+
+    `/v1/models` lists models LM Studio has **downloaded**, not the ones it has
+    **loaded**. Checking only that list is why a whole drain could pass preflight
+    with nothing loaded and then grind through the queue retrying
+    `/chat/completions` — the model's TTL had expired mid-run (observed
+    2026-08-08). So the listing check is kept as the cheap first gate, and then
+    the model is actually exercised.
+
+    The probe does more than detect: LM Studio JIT-loads a model to answer a
+    request, so this both forces the load and waits for it to finish (verified
+    2026-08-12 — an `lms ps` of `[]` became `['google/gemma-3-4b']` after one
+    probe). That is why it is worth a generous timeout: paying the load cost once
+    here is what stops every message in the drain paying it as a retry. It
+    returns False only when the model genuinely cannot serve.
+    """
     if INFERENCE_PROVIDER != "local":
         return True
     headers = {"Authorization": f"Bearer {INFERENCE_API_KEY}"}
@@ -359,7 +383,33 @@ def local_inference_ready() -> bool:
         for item in (payload.get("data") or [])
         if isinstance(item, dict) and item.get("id")
     }
-    return INFERENCE_MODEL in model_ids
+    if INFERENCE_MODEL not in model_ids:
+        return False
+
+    try:
+        probe = requests.post(
+            f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions",
+            headers={**headers, "Content-Type": "application/json"},
+            json={
+                "model": INFERENCE_MODEL,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "temperature": 0,
+            },
+            timeout=INFERENCE_HEALTH_TIMEOUT_SECONDS,
+        )
+        probe.raise_for_status()
+    except (requests.RequestException, ValueError):
+        log.error(
+            "%s is listed but did not answer a 1-token probe within %ss — it is "
+            "most likely unloaded (TTL expired). Load it before draining: "
+            "lms load %s --ttl 86400 --yes",
+            INFERENCE_MODEL,
+            INFERENCE_HEALTH_TIMEOUT_SECONDS,
+            INFERENCE_MODEL,
+        )
+        return False
+    return True
 
 
 def run_worker(
@@ -490,13 +540,18 @@ def main() -> None:
         )
         return
 
-    counts = run_worker(
-        _supabase(),
-        batch_size=min(args.batch_size, 100),
-        visibility_seconds=max(30, min(args.visibility_seconds, 7200)),
-        max_messages=args.max_messages,
-        max_attempts=args.max_attempts,
-    )
+    try:
+        with local_inference_lock("enrichment_worker"):
+            counts = run_worker(
+                _supabase(),
+                batch_size=min(args.batch_size, 100),
+                visibility_seconds=max(30, min(args.visibility_seconds, 7200)),
+                max_messages=args.max_messages,
+                max_attempts=args.max_attempts,
+            )
+    except WorkerBusy as exc:
+        log.error("%s", exc)
+        raise SystemExit(BUSY_EXIT_CODE) from exc
     log.info("Enrichment worker complete: %s", counts or {"queue_empty": 1})
     if counts.get("inference_unavailable") or counts.get("quota_retry"):
         raise SystemExit(4)

@@ -43,6 +43,7 @@ from validation import LOW_COUNT_THRESHOLD
 from pipeline_validator import run_gate
 from schema import is_missing_jd_description
 from scrape_select import select_for_cap
+from source_matching_facts import _normalize_source_facts
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
@@ -493,6 +494,7 @@ def enrich_only_run(
 
         # Write back JSON (atomic: tmp → rename)
         for job in jobs:
+            _normalize_source_facts(job)
             stamp_job_content_hash(job)
 
         tmp_path = json_path.with_name("jobs.tmp.json")

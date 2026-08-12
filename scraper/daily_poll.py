@@ -18,6 +18,8 @@ import sys
 import time
 from zoneinfo import ZoneInfo
 
+from daily_cycle import ensure_inference_ready
+
 
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
@@ -53,17 +55,36 @@ def build_commands(
         "--company-cap",
         str(company_cap),
     ]
+    # Career band is a source-level matching fact, and `csv_importer` refuses to
+    # publish a row whose band has no current provenance.  `writer.to_canonical`
+    # only ever fills the deterministic part, so this step has to run between
+    # the scrape and the publish or the publish rejects the whole run.
+    # --skip-model by decision on 2026-08-08, measured on a 33,246-job run:
+    # deterministic rules banded 86.5% in 13 seconds, while the model pass ran at
+    # ~2.7 calls/min and accepted ~7% of what it saw — hours added to a 9-hour
+    # cycle to band a few hundred jobs. Run source_matching_facts.py by hand,
+    # without this flag, to chase the tail.
+    resolve = [
+        python,
+        str(ROOT / "source_matching_facts.py"),
+        "--run-date",
+        run_date,
+        "--skip-model",
+        "--allow-unresolved",
+    ]
     publish = [
         python,
         str(ROOT / "csv_importer.py"),
         "--source-only",
+        "--resolved-only",
         "--run-date",
         run_date,
     ]
     if company:
         scrape.extend(["--company", company])
+        resolve.extend(["--company", company])
         publish.extend(["--company", company])
-    return [("scrape", scrape), ("publish", publish)]
+    return [("scrape", scrape), ("resolve", resolve), ("publish", publish)]
 
 
 def _run_step(name: str, command: list[str], *, env: dict[str, str]) -> dict:
@@ -154,23 +175,42 @@ def main() -> None:
             run_started.date(), datetime.now(timezone).date()
         )
         report["publish_dates"] = publish_dates
+
+        # The resolver classifies leftover jobs with the local generative model,
+        # so the model has to be up before it runs — but only now, after the
+        # scrape has released its memory, never alongside it.
+        try:
+            report["inference"] = ensure_inference_ready(
+                env=env,
+                model_ttl_seconds=int(os.getenv("POLL_MODEL_TTL_SECONDS", "3600")),
+                timeout_seconds=int(os.getenv("POLL_INFERENCE_TIMEOUT_SECONDS", "180")),
+            )
+        except Exception as exc:
+            report["status"] = "failed"
+            report["failed_step"] = "inference"
+            report["error"] = str(exc)
+            path = _write_report(report)
+            print(f"Daily poll could not start inference; report: {path}", file=sys.stderr)
+            raise SystemExit(4) from exc
+
         for publish_date in publish_dates:
-            publish_name, publish_command = build_commands(
+            dated = build_commands(
                 python=sys.executable,
                 run_date=publish_date,
                 scope=args.scope,
                 company_cap=args.company_cap,
                 company=args.company,
-            )[1]
-            step_name = f"{publish_name}:{publish_date}"
-            publish_step = _run_step(step_name, publish_command, env=env)
-            report["steps"].append(publish_step)
-            if publish_step["returncode"] != 0:
-                report["status"] = "failed"
-                report["failed_step"] = step_name
-                path = _write_report(report)
-                print(f"Daily poll failed in {step_name}; report: {path}", file=sys.stderr)
-                raise SystemExit(publish_step["returncode"])
+            )
+            for step_label, command in dated[1:]:
+                step_name = f"{step_label}:{publish_date}"
+                step = _run_step(step_name, command, env=env)
+                report["steps"].append(step)
+                if step["returncode"] != 0:
+                    report["status"] = "failed"
+                    report["failed_step"] = step_name
+                    path = _write_report(report)
+                    print(f"Daily poll failed in {step_name}; report: {path}", file=sys.stderr)
+                    raise SystemExit(step["returncode"])
 
         report["status"] = "complete"
         path = _write_report(report)

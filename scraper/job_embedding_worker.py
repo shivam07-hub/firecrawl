@@ -32,6 +32,7 @@ from job_embedding_state import (
     build_job_query_text,
     job_embedding_input_hash,
 )
+from lm_worker_lock import BUSY_EXIT_CODE, WorkerBusy, local_inference_lock
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -389,13 +390,18 @@ def main() -> None:
         print(json.dumps(matches, ensure_ascii=False, indent=2))
         return
 
-    counts = run_worker(
-        store,
-        client,
-        batch_size=min(args.batch_size, 100),
-        max_jobs=args.max_jobs,
-        max_attempts=args.max_attempts,
-    )
+    try:
+        with local_inference_lock("job_embedding_worker"):
+            counts = run_worker(
+                store,
+                client,
+                batch_size=min(args.batch_size, 100),
+                max_jobs=args.max_jobs,
+                max_attempts=args.max_attempts,
+            )
+    except WorkerBusy as exc:
+        log.error("%s", exc)
+        raise SystemExit(BUSY_EXIT_CODE) from exc
     log.info("Job embedding worker complete: %s", counts)
     if counts["retryable"]:
         raise SystemExit(4)

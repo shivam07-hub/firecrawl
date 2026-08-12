@@ -5,6 +5,65 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-08-08 — First run under the career-band publication gate
+
+**Objective:** Fresh full India scrape through `daily_cycle.py`, after verifying
+no staged work would change how data is captured.
+
+**Preflight caught a hard blocker before the run.** The staged (uncommitted)
+matching-fact preflight in `csv_importer` rejects any row whose `career_band`
+lacks current provenance, but `writer.to_canonical` never writes
+`career_band_source`/`career_band_source_hash` — they are not in
+`CANONICAL_FIELDS`. `source_matching_facts.py` was wired into nothing. Scrape →
+publish would have rejected the entire run after 9 hours of scraping. Verified
+empirically, not inferred, then wired `scrape → resolve → publish` into
+`daily_poll.py`.
+
+**Run:** 261 companies complete, 54 failed, 25,402 new jobs (9h, 23:28→08:26).
+Published **28,957** rows; **4,289 withheld** for an unresolved band; location
+quality 24 unknown (0.08%). Docker was off, so the 7 JS/Firecrawl portals
+returned 0.
+
+**Three latent defects found and fixed:**
+1. `source_matching_facts._write_jobs` sat inside `if not dry_run and pending:`,
+   so a company whose titles all resolved deterministically never had its
+   provenance persisted — the publish then withheld **the entire company**.
+   Caught live: resolver reported `0 unresolved` while the publish still
+   withheld 3. Guarded by `test_fully_deterministic_run_still_persists_provenance`.
+2. `public.claim_job_embeddings` wrote its status test as an OR whose branches
+   each name a status, which the planner cannot prove implies the partial index
+   predicate. It seq-scanned and sorted the whole queue on every claim and had
+   exceeded the statement timeout: **the embedding queue was dead since
+   2026-07-14** (30,248 pending). Predicate rewritten to match the index —
+   1,499ms → **5ms**. Migration: `sql/fix_job_embedding_claim_index_usage.sql`.
+3. `_PUBLIC_IMPACT_OCCUPATION` matched bare `scientist` ahead of the technical
+   check, so **every Data Scientist banded as research/people/public impact** —
+   contradicting the band guide ("data, AI" → engineering_data) and dropping
+   them from the technical keep-set `scrape_select` uses when a company is over
+   its cap. Fixed with `_TECHNICAL_SCIENTIST`, placed before the public-impact
+   rule; "Research Scientist" deliberately left in the research band.
+
+**Model pass retired from the daily lane.** Deterministic rules banded 86.5% of
+33,246 jobs in 13 seconds; the model pass ran at ~2.7 calls/min and accepted ~7%.
+`--skip-model` is now the daily default.
+
+**Band-rule expansion recovered only +242 of 4,501 withheld.** The remainder are
+titles that name no function (`IN-Expert`, `Fixed Term Appointment`, bare ladder
+grades) or hide it behind an employer-private prefix (`CBG:`, `DAS/MUM/…`).
+Generic rules cannot reach them; an employer-prefix map was considered and
+declined. ~13% withheld per run is the standing cost of withhold-don't-guess.
+
+**Cycle did not complete as one command.** The publish step for the spanned date
+`2026_08_07` exited 2 — see the midnight-spanning note in `CLAUDE.md`. Embeddings,
+skill floor, and enrichment were run separately afterwards, sequentially:
+running the embedding and enrichment workers concurrently made LM Studio evict
+one model for the other, failing both. Supabase was also materially degraded
+during the session (a trivial REST root request measured 10.0s/1.3s/2.6s), which
+caused repeated connection resets across all three workers; they are idempotent
+and were drained with retry loops.
+
+---
+
 ## Session 2026-07-13 — Source-first semantic job embeddings
 
 **Objective:** Unblock Myro's "brain is boss, no sieve" retrieval direction by
