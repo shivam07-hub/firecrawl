@@ -88,32 +88,33 @@ smoke coverage pass.
 
 ---
 
-### 3. `new_jobs_count` reports a torn, partial batch — and freezes it
-**Evidence.** Dashboard showed **4,095 new roles**; the correct answer for that
-account was **12,108**.
+### 3. ✅ DONE — `new_jobs_count` follows trusted live inventory and cannot freeze
+**Audit correction.** The dashboard's **4,095 new roles** was the product-correct
+count when notification 619 was written. The claimed **12,108** comparison used
+only `is_active=true`; it included more than 8,000 listings classified
+`uncertain`, `likely_closed`, or `closed`. Jobs RLS exposes only
+`is_active=true AND listing_confidence='active'` (plus a user's own extension
+rows), and new importer rows default to `uncertain`. Therefore an in-progress
+source publish was already invisible to students: no batch-atomicity layer was
+needed, and adding one would have hidden independently trusted inventory.
 
-- `last_match_run_at` = 2026-07-28 12:37:59 (a genuine search).
-- Active jobs with `ingested_at >` that: **12,108**.
-- PostgREST `count=exact` returns 12,108 correctly — the primitive is fine.
-- The 4,095 came from `user_notifications` id **619**, written 2026-08-10 11:18:52.
-  At that instant 12,108 qualifying rows already existed and were active, and **0**
-  landed afterwards — so it was wrong when written, not merely stale.
-- 4,095 corresponds exactly to a baseline of **04:09–04:10 UTC on 2026-08-08** —
-  mid-publish, when only 4,095 of that batch's 12,101 rows had been inserted.
+**Real faults.** The newer one-hop RPC was service-role-only and counted
+`is_active` without the trust predicate, changing both the old token/RLS
+semantics and its caller ACL. Separately, the inbox persisted a point-in-time
+number and returned it indefinitely. Code tracing found one writer: the
+`/jobs/matches` path records the count after recompute. Historical Railway HTTP
+logs were unavailable because the local CLI session was not authenticated; that
+missing log lane is not treated as evidence for the discarded batch theory.
 
-**Cause.** The publish takes ~15 minutes to insert ~12k rows and nothing marks a
-batch complete, so any consumer reading during that window sees a partial corpus.
-Here the partial count was then persisted into a durable notification the UI
-still renders days later.
-
-**Acceptance.** A batch is atomic to readers, or counts are computed only from
-completed batches. Separately: a persisted count must be re-derived or
-invalidated rather than trusted indefinitely.
-
-**Open question for the next session.** Exactly which caller computed it at
-04:09 UTC. This account has no `user_job_matches` row on 2026-08-08 (nearest are
-Aug 7 20:07 and Aug 10 11:19) and `last_match_run_at` is July 28, so neither
-documented baseline path explains it. Worth 30 minutes with backend logs.
+**Resolution (2026-08-13).** The security-invoker RPC now explicitly counts only
+active, trusted roles and is executable by `authenticated` and `service_role`
+while remaining denied to `anon`. RLS keeps an authenticated caller owner-scoped.
+Opening the inbox re-derives every unread new-role projection, repairs a changed
+count through the service client, resolves it at zero, and hides it if the live
+count is unavailable. A partial `ingested_at` index for trusted active roles cut
+the measured production query from **7,295ms / 13,369 buffers** to
+**0.84ms / 91 buffers**. Live smoke: auth-own **4,094**, auth-other **0**,
+service **4,094**, anon execute denied. Focused backend contracts pass.
 
 ---
 
