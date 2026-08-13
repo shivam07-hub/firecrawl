@@ -5,6 +5,39 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-08-13 — Unclassified jobs restored to browse without invented matching truth
+
+**Objective:** Close the recurring 13% publication loss without expanding
+employer-specific regex or weakening Myro's four-band evidence contract.
+
+**Decision:** Publication eligibility and matching readiness are separate.
+Source-valid jobs whose career band cannot be proven publish with
+`career_band=NULL`; they remain browse/search eligible and make no
+band-dependent matching claim. Invalid identity, seniority, and stale band
+claims still fail publication. The existing `listing_confidence` lifecycle
+continues to decide trusted user visibility.
+
+**Implementation:** `csv_importer --publish-unclassified` now separates
+unclassified, malformed-withheld, and duplicate-source counts; explicitly
+writes NULL on conflict so an old band cannot survive a source change; and keeps
+`--resolved-only` as a deprecated operational alias. `daily_poll.py` uses the
+new contract. The resolver CLI's percent-bearing help text was also fixed after
+Python 3.14 exposed an argparse formatting crash.
+
+**Measured closure:** The 2026-08-08 source corpus contained 33,246 rows. After
+deduplication, production run `1867389a-b29c-4377-b363-ed2214d0ab31` published
+**33,215 unique jobs** in 1,065s: **28,957 classified + 4,258 unclassified**, 31
+duplicate source rows collapsed, 0 malformed withheld, and 33 unknown locations
+(0.099%). All 261 company diagnostics and the `ok` run audit are persisted.
+Live SQL found zero empty-string bands. Trust was not bypassed: 747 unclassified
+rows were already trusted-active and 3,036 remain uncertain. Intel refresh and
+the scrape-landed sweep both accepted the run.
+
+**Verification:** 331 scraper tests passed under `/opt/anaconda3/bin/python`;
+owned Python files passed Ruff and `git diff --check`.
+
+---
+
 ## Session 2026-08-08 — First run under the career-band publication gate
 
 **Objective:** Fresh full India scrape through `daily_cycle.py`, after verifying

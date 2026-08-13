@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import pytest
+
 from enrichment_state import source_content_hash
 from source_matching_facts import (
     _normalize_source_facts,
     _parse_accepted_classifications,
 )
+
+
+def test_cli_help_renders_percentages_without_argparse_failure(monkeypatch, capsys) -> None:
+    import source_matching_facts
+
+    monkeypatch.setattr("sys.argv", ["source_matching_facts.py", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        source_matching_facts.main()
+
+    assert exc.value.code == 0
+    assert "~7%" in capsys.readouterr().out
 
 
 def _job() -> dict:

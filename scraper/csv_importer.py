@@ -138,11 +138,38 @@ def _source_matching_facts_are_publishable(job: dict) -> bool:
     return True
 
 
+def _source_row_is_publishable(
+    job: dict,
+    *,
+    publish_unclassified: bool = False,
+) -> bool:
+    """Separate source publication truth from optional matching readiness."""
+    if _source_matching_facts_are_publishable(job):
+        return True
+    if not publish_unclassified or not str(job.get("job_id") or "").strip():
+        return False
+    if str(job.get("career_band") or "").strip():
+        return False
+    if any(
+        str(job.get(field) or "").strip()
+        for field in (
+            "career_band_source",
+            "career_band_source_hash",
+            "career_band_evidence",
+            "career_band_model",
+            "career_band_provider",
+        )
+    ):
+        return False
+    seniority = str(job.get("seniority_level") or "").strip()
+    return not seniority or seniority in _VALID_SENIORITY_LEVELS
+
+
 def _validate_source_matching_facts(
     json_files: list[Path],
     *,
-    allow_withheld: bool = False,
-) -> tuple[int, int, int]:
+    publish_unclassified: bool = False,
+) -> tuple[int, int, int, int]:
     """Reject an entire publication before writes if matching facts are invalid."""
     invalid_bands: list[tuple[Path, str, str]] = []
     invalid_provenance: list[tuple[Path, str, str]] = []
@@ -150,6 +177,7 @@ def _validate_source_matching_facts(
     missing_job_ids: list[tuple[Path, str, str]] = []
     total_jobs = 0
     publishable_rows = 0
+    unclassified_keys: set[tuple[str, str]] = set()
     publishable_keys: set[tuple[str, str]] = set()
 
     for json_path in json_files:
@@ -169,9 +197,9 @@ def _validate_source_matching_facts(
                 missing_job_ids.append((json_path, title, ""))
             band = str(job.get("career_band") or "").strip()
             seniority = str(job.get("seniority_level") or "").strip()
-            if band not in VALID_CAREER_BANDS:
+            if band and band not in VALID_CAREER_BANDS:
                 invalid_bands.append((json_path, title, band))
-            else:
+            elif band:
                 source = str(job.get("career_band_source") or "").strip()
                 source_hash = str(job.get("career_band_source_hash") or "").strip()
                 provenance_valid = (
@@ -192,20 +220,41 @@ def _validate_source_matching_facts(
                     )
                 if not provenance_valid:
                     invalid_provenance.append((json_path, title, source))
+            elif any(
+                str(job.get(field) or "").strip()
+                for field in (
+                    "career_band_source",
+                    "career_band_source_hash",
+                    "career_band_evidence",
+                    "career_band_model",
+                    "career_band_provider",
+                )
+            ):
+                invalid_provenance.append((json_path, title, "unclassified_with_claim"))
             if seniority and seniority not in _VALID_SENIORITY_LEVELS:
                 invalid_seniority.append((json_path, title, seniority))
-            if _source_matching_facts_are_publishable(job):
+            if _source_row_is_publishable(
+                job,
+                publish_unclassified=publish_unclassified,
+            ):
                 publishable_rows += 1
+                if not band:
+                    unclassified_keys.add((
+                        str(job.get("company_name") or ""),
+                        str(job.get("job_id") or ""),
+                    ))
                 publishable_keys.add((
                     str(job.get("company_name") or ""),
                     str(job.get("job_id") or ""),
                 ))
 
-    if not allow_withheld and (
+    unresolved_rows = total_jobs - publishable_rows
+    if not publish_unclassified and (
         invalid_bands
         or invalid_provenance
         or invalid_seniority
         or missing_job_ids
+        or unresolved_rows
     ):
         details = []
         for label, rows in (
@@ -221,13 +270,13 @@ def _validate_source_matching_facts(
         raise ValueError(
             "Source matching-fact preflight failed before Supabase writes: "
             f"{len(missing_job_ids)} missing job IDs; "
-            f"{len(invalid_bands)} invalid/unresolved career bands; "
+            f"{unresolved_rows} invalid/unresolved career bands; "
             f"{len(invalid_provenance)} invalid/stale career-band provenance; "
             f"{len(invalid_seniority)} invalid seniority levels. "
             + " | ".join(details)
         )
     duplicate_rows = publishable_rows - len(publishable_keys)
-    return total_jobs, len(publishable_keys), duplicate_rows
+    return total_jobs, len(publishable_keys), duplicate_rows, len(unclassified_keys)
 
 
 def _parse_batch_date(value: str | int | None) -> int | None:
@@ -1028,6 +1077,12 @@ def _upsert_jobs(
                 continue
             row[f] = v
 
+        # NULL is a truthful matching state, not a publication failure. Include
+        # it explicitly so a changed source cannot retain a stale prior band on
+        # conflict; the database constraint permits NULL but rejects "".
+        band = str(job.get("career_band") or "").strip()
+        row["career_band"] = band if band in VALID_CAREER_BANDS else None
+
         carries_enrichment = has_core_enrichment_payload(job)
         if not source_only and carries_enrichment:
             for field in _ENRICHMENT_JOB_FIELDS:
@@ -1292,7 +1347,7 @@ def import_file(
     *,
     source_only: bool = False,
     supports_forward_enrichment: bool = False,
-    resolved_only: bool = False,
+    publish_unclassified: bool = False,
 ) -> dict:
     try:
         jobs = json.loads(json_path.read_text(encoding="utf-8"))
@@ -1309,6 +1364,8 @@ def import_file(
             "job_ids": set(),
             "jobs": 0,
             "withheld": 0,
+            "unclassified": 0,
+            "duplicates": 0,
             "profile_rows": 0,
             "drift": 0,
             "enriched": 0,
@@ -1321,18 +1378,29 @@ def import_file(
     # Scraped row count, kept before any withholding: this — not the published
     # count — is what company health and the baseline ledger mean by "raw jobs".
     source_rows = len(jobs)
-    if resolved_only:
-        jobs = [job for job in jobs if _source_matching_facts_are_publishable(job)]
+    withheld = 0
+    duplicates = 0
+    if publish_unclassified:
+        eligible_jobs = [
+            job for job in jobs
+            if _source_row_is_publishable(job, publish_unclassified=True)
+        ]
+        withheld = source_rows - len(eligible_jobs)
         # Preserve the last source occurrence, matching an upsert's terminal state.
         jobs = list({
             str(job["job_id"]): job
-            for job in jobs
+            for job in eligible_jobs
         }.values())
-    withheld = source_rows - len(jobs)
+        duplicates = len(eligible_jobs) - len(jobs)
+    unclassified = sum(
+        1
+        for job in jobs
+        if not str(job.get("career_band") or "").strip()
+    )
     if not jobs:
         if withheld:
             log.warning(
-                "  %s: all %d rows withheld — no resolved career band",
+                "  %s: all %d rows withheld — malformed source rows",
                 company,
                 withheld,
             )
@@ -1344,6 +1412,8 @@ def import_file(
             "job_ids": set(),
             "jobs": 0,
             "withheld": withheld,
+            "unclassified": unclassified,
+            "duplicates": duplicates,
             "profile_rows": 0,
             "drift": 0,
             "enriched": 0,
@@ -1391,6 +1461,8 @@ def import_file(
         "job_ids": {j.get("job_id") for j in jobs if j.get("job_id")},
         "jobs": jobs_written,
         "withheld": withheld,
+        "unclassified": unclassified,
+        "duplicates": duplicates,
         "profile_rows": profile_rows_written,
         "drift": drift,
         "enriched": enriched,
@@ -1482,11 +1554,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--publish-unclassified",
         "--resolved-only",
+        dest="publish_unclassified",
         action="store_true",
         help=(
-            "Publish only rows with valid, current career-band provenance; "
-            "withhold unresolved rows without treating files as complete snapshots"
+            "Publish source-valid rows even when career_band cannot be proven; "
+            "persist a truthful NULL band and exclude only malformed rows. "
+            "--resolved-only remains as a deprecated compatibility alias"
         ),
     )
     parser.add_argument(
@@ -1507,11 +1582,11 @@ def main() -> None:
     if args.source_only and not args.run_date:
         log.error("--source-only requires --run-date so stale output folders cannot be republished")
         raise SystemExit(2)
-    if args.resolved_only and not args.source_only:
-        log.error("--resolved-only requires --source-only")
+    if args.publish_unclassified and not args.source_only:
+        log.error("--publish-unclassified requires --source-only")
         raise SystemExit(2)
-    if args.resolved_only and args.deactivate_missing:
-        log.error("--resolved-only cannot be combined with --deactivate-missing")
+    if args.publish_unclassified and args.deactivate_missing:
+        log.error("--publish-unclassified cannot be combined with --deactivate-missing")
         raise SystemExit(2)
     if args.deactivate_missing and args.all_dates:
         log.error("--deactivate-missing is only safe with the latest date folder, not --all-dates")
@@ -1589,18 +1664,25 @@ def main() -> None:
 
     log.info(f"Files to import: {len(json_files)}")
     try:
-        matching_jobs, publishable_jobs, duplicate_jobs = _validate_source_matching_facts(
+        (
+            matching_jobs,
+            publishable_jobs,
+            duplicate_jobs,
+            unclassified_jobs,
+        ) = _validate_source_matching_facts(
             json_files,
-            allow_withheld=args.resolved_only,
+            publish_unclassified=args.publish_unclassified,
         )
     except ValueError as exc:
         log.error("%s", exc)
         raise SystemExit(2) from exc
-    if args.resolved_only:
+    if args.publish_unclassified:
         log.info(
-            "Resolved-only preflight OK: %s unique publishable, %s withheld, "
+            "Publication-safe preflight OK: %s unique publishable, "
+            "%s truthfully unclassified, %s malformed withheld, "
             "%s duplicate source rows collapsed",
             publishable_jobs,
+            unclassified_jobs,
             matching_jobs - publishable_jobs - duplicate_jobs,
             duplicate_jobs,
         )
@@ -1698,7 +1780,8 @@ def main() -> None:
     unknown_location_counter: Counter[str] = Counter()
     imported_company_job_ids: dict[str, set[str]] = {}
     imported_company_batch_dates: dict[str, int] = {}
-    total_jobs = total_withheld = total_drift = total_unknown_location_rows = 0
+    total_jobs = total_withheld = total_unclassified = total_duplicates = 0
+    total_drift = total_unknown_location_rows = 0
     t0 = time.time()
 
     for json_path in json_files:
@@ -1712,7 +1795,7 @@ def main() -> None:
             run_id,
             source_only=args.source_only,
             supports_forward_enrichment=supports_forward_enrichment,
-            resolved_only=args.resolved_only,
+            publish_unclassified=args.publish_unclassified,
         )
         if "error" in result:
             log.warning(f"  {result['path']}: {result['error']}")
@@ -1725,11 +1808,15 @@ def main() -> None:
             f"{result['jobs']} jobs, "
             f"{enriched_pct}% enriched"
             + (f", {result['withheld']} withheld" if result.get("withheld") else "")
+            + (f", {result['unclassified']} unclassified" if result.get("unclassified") else "")
+            + (f", {result['duplicates']} duplicates collapsed" if result.get("duplicates") else "")
             + (f", {result['drift']} drift" if result['drift'] else "")
             + (f", {result['unknown_location_rows']} unknown locations" if result.get("unknown_location_rows") else "")
         )
         total_jobs       += result["jobs"]
         total_withheld   += result.get("withheld", 0)
+        total_unclassified += result.get("unclassified", 0)
+        total_duplicates += result.get("duplicates", 0)
         total_drift      += result.get("drift", 0)
         total_unknown_location_rows += result.get("unknown_location_rows", 0)
         if result.get("company") and result.get("jobs"):
@@ -1812,12 +1899,19 @@ def main() -> None:
     log.info(f"Done: {total_jobs} jobs published — {elapsed:.0f}s")
     if total_withheld:
         log.warning(
-            "%s rows withheld for an unresolved career band. These are NOT in "
-            "the jobs table and reach no user — fix resolution (deterministic "
-            "rules in job_career_band.py, or the model pass in "
-            "source_matching_facts.py) and re-publish the same run date.",
+            "%s malformed source rows were withheld. Unclassified but otherwise "
+            "valid jobs publish with career_band=NULL; these withheld rows need "
+            "their identity, seniority, or provenance repaired.",
             total_withheld,
         )
+    if total_unclassified:
+        log.info(
+            "%s source-valid jobs published with career_band=NULL. They remain "
+            "browseable but make no career-band matching claim.",
+            total_unclassified,
+        )
+    if total_duplicates:
+        log.info("%s duplicate source rows collapsed before upsert.", total_duplicates)
     log.info(
         "Location quality: %s unknown rows (%s)",
         total_unknown_location_rows,

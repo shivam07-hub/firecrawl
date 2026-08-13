@@ -33,11 +33,11 @@ def test_career_band_is_resolved_before_publication() -> None:
     resolve = dict(commands)["resolve"]
     assert resolve[1].endswith("source_matching_facts.py")
     assert resolve[2:4] == ["--run-date", "2026_07_12"]
-    # Unresolved rows are withheld by the publish step, not fatal to the run.
+    # Unclassified rows publish for browse with a truthful null career band.
     assert "--allow-unresolved" in resolve
     # The model pass is too slow and too low-yield to sit inside the daily cycle.
     assert "--skip-model" in resolve
-    assert "--resolved-only" in dict(commands)["publish"]
+    assert "--publish-unclassified" in dict(commands)["publish"]
 
 
 def test_company_canary_scopes_both_steps() -> None:

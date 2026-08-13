@@ -118,6 +118,27 @@ def test_upsert_jobs_sends_non_null_quality_status_for_every_row(monkeypatch) ->
     assert [row["quality_status"] for row in batch] == ["ok", "auto_extracted"]
 
 
+def test_upsert_jobs_persists_an_unclassified_band_as_null(monkeypatch) -> None:
+    monkeypatch.setattr("csv_importer._jobs_has_job_content_hash_column", lambda: False)
+    fake = FakeSupabase()
+
+    _upsert_jobs(
+        fake,
+        [{
+            "job_id": "associate-1",
+            "job_title": "Associate",
+            "job_description": "Support a documented source function.",
+            "company_name": "Acme",
+            "location": "Bengaluru, India",
+            "career_band": "",
+        }],
+        batch_date=20260808,
+        location_alias_counter=Counter(),
+    )
+
+    assert fake.jobs.batches[0][0]["career_band"] is None
+
+
 def test_upsert_jobs_splits_batch_after_statement_timeout(monkeypatch) -> None:
     monkeypatch.setattr("csv_importer._jobs_has_job_content_hash_column", lambda: False)
     fake = TimeoutThenSplitSupabase()

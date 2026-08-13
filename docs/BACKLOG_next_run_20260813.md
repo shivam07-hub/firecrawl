@@ -121,16 +121,36 @@ service **4,094**, anon execute denied. Focused backend contracts pass.
 
 ## P1 — data the user sees is wrong or missing
 
-### 4. ~13% of every run is withheld and never reaches a user
-4,289 of 33,246 on this run. Rule expansion recovered only **+242 of 4,501** —
-the remainder either name no function (`IN-Expert`, `Fixed Term Appointment`,
-bare ladder grades) or hide it behind an employer-private prefix
-(`CBG:`, `WBCG:`, `DAS/MUM/…`).
+### 4. ✅ DONE — unclassified source jobs publish without a fabricated band
+**Evidence.** The 2026-08-08 run scraped 33,246 rows but published 28,957;
+4,289 were withheld solely because career band was treated as a publication
+license. Current deterministic rules resolve 28,987, leaving 4,259 unresolved.
+The remaining titles either name no function (`IN-Expert`, `Fixed Term
+Appointment`, bare ladder grades) or hide it behind employer-private vocabulary.
+More regex would turn a coverage metric into invented matching truth.
 
-Generic rules cannot reach these. The options are an employer-prefix map
-(rejected once as too company-specific and high-maintenance), accepting the loss,
-or a different resolution strategy entirely. **This needs a decision, not more
-regex.** One in eight scraped jobs is currently invisible.
+**Decision.** Publication eligibility and matching readiness are different
+contracts. A source-valid role without a provable career band is useful in
+browse/search and must publish with `career_band=NULL`; it does not enter
+band-dependent matching until evidence supports one of Myro's four real bands.
+This uses the database's existing nullable contract—production already had
+9,170 trusted active browseable jobs with no band—and adds no fake fifth band or
+employer-prefix dictionary.
+
+**Resolution (2026-08-13).** The daily lane now runs
+`--publish-unclassified`; `--resolved-only` remains a compatibility alias.
+Preflight separates unique published, truthfully unclassified, malformed
+withheld, and duplicate-source counts. Upserts explicitly write NULL so a source
+change cannot retain a stale former band. The resolver CLI's previously crashing
+percent-bearing help text is also guarded. Measured dry run: **33,215 unique
+publishable, 4,258 uniquely unclassified, 0 malformed withheld, 31 duplicate
+source rows collapsed**. Production run
+`1867389a-b29c-4377-b363-ed2214d0ab31` completed all **261 companies** in
+**1,065s** and recorded an `ok` run audit. Live verification is exact:
+**33,215 rows = 28,957 classified + 4,258 unclassified**, with **0 empty-string
+bands**. The existing trust lifecycle remains the visibility gate: 747 of those
+unclassified rows were already trusted-active, while 3,036 remain uncertain.
+Intel refresh and the scrape-landed sweep both accepted the completed run.
 
 ### 5. 54 companies failed to scrape
 Includes a cluster that looks like a real route regression, not noise:

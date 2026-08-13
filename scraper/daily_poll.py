@@ -46,10 +46,9 @@ def build_commands(
         "--run-date",
         run_date,
     ]
-    # Career band is a source-level matching fact, and `csv_importer` refuses to
-    # publish a row whose band has no current provenance.  `writer.to_canonical`
-    # only ever fills the deterministic part, so this step has to run between
-    # the scrape and the publish or the publish rejects the whole run.
+    # Career band is an optional source-level matching fact. This step stamps
+    # every provable band and clears stale claims before publication; a job with
+    # no provable band still publishes for browse with career_band=NULL.
     # --skip-model by decision on 2026-08-08, measured on a 33,246-job run:
     # deterministic rules banded 86.5% in 13 seconds, while the model pass ran at
     # ~2.7 calls/min and accepted ~7% of what it saw — hours added to a 9-hour
@@ -67,7 +66,7 @@ def build_commands(
         python,
         str(ROOT / "csv_importer.py"),
         "--source-only",
-        "--resolved-only",
+        "--publish-unclassified",
         "--run-date",
         run_date,
     ]

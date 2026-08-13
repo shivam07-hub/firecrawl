@@ -450,7 +450,7 @@ def main() -> None:
         help=(
             "Stamp deterministic bands and provenance only; do not call the "
             "model for the remainder. Measured 2026-08-08: the model pass ran "
-            "at ~2.7 calls/min and accepted ~7% of candidates, so it costs "
+            "at ~2.7 calls/min and accepted ~7%% of candidates, so it costs "
             "hours to band a handful of jobs. Use this to publish the "
             "deterministic majority now and iterate on the rules."
         ),
@@ -460,9 +460,9 @@ def main() -> None:
         action="store_true",
         help=(
             "Exit 0 even when some jobs keep no career band. The daily lane "
-            "sets this because `csv_importer --resolved-only` withholds those "
-            "rows rather than publishing a guessed band; they stay unpublished "
-            "until resolution improves. Omit it for a standalone run you want "
+            "sets this because `csv_importer --publish-unclassified` publishes "
+            "source-valid rows with a null band rather than guessing; they stay "
+            "outside band-dependent matching until resolution improves. Omit it for a standalone run you want "
             "to fail loudly."
         ),
     )
@@ -498,10 +498,10 @@ def main() -> None:
         log.info("Audit report: %s", report["report_path"])
     if report["unresolved"]:
         log.warning(
-            "%s jobs still have no career band and will NOT be published. "
-            "Each one is a job no user can reach — extend the deterministic "
-            "rules in job_career_band.py where the title is unambiguous, and "
-            "re-run this resolver for the same run date.",
+            "%s jobs still have no career band. The publication-safe importer "
+            "will expose them for browse with career_band=NULL while keeping "
+            "them outside band-dependent matching. Extend deterministic rules "
+            "only where the source evidence is unambiguous.",
             report["unresolved"],
         )
         if not args.allow_unresolved:

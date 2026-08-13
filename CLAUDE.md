@@ -87,8 +87,8 @@ python source_matching_facts.py --run-date "$(date +%Y_%m_%d)"                  
 python source_matching_facts.py --run-date "$(date +%Y_%m_%d)" --allow-unresolved # daily lane: withhold instead
 
 # Phase 3A — publish source fields immediately
-python csv_importer.py --source-only --resolved-only --run-date "$(date +%Y_%m_%d)" --dry-run
-python csv_importer.py --source-only --resolved-only --run-date "$(date +%Y_%m_%d)"
+python csv_importer.py --source-only --publish-unclassified --run-date "$(date +%Y_%m_%d)" --dry-run
+python csv_importer.py --source-only --publish-unclassified --run-date "$(date +%Y_%m_%d)"
 
 # Lazy Phase 2/3B — enrich queued forward-only jobs when inference is available
 ENRICH_FORCE_LLM=1 python enrichment_worker.py --batch-size 10 --max-messages 100
@@ -118,7 +118,7 @@ KNOWN_PORTALS.md → main.py/providers → raw JSON
                  source_matching_facts.py --run-date   ← MANDATORY
                  (stamps career_band + provenance in jobs.json)
                                       ↓
-              csv_importer.py --source-only --resolved-only
+              csv_importer.py --source-only --publish-unclassified
                                       ↓
                      Supabase job visible immediately
                          ↙                         ↘
@@ -169,13 +169,15 @@ folder even if a newer folder exists. Markerless partial folders remain
 quarantined. Regression coverage simulates partial + final saves across the
 boundary and guards the scrape → resolve → publish command contract.
 
-**Withheld rows.** `--resolved-only` publishes only rows with valid provenance
-and withholds the rest rather than guessing a band; the importer logs the count.
-A withheld row is a job no user can reach, so treat the count as work: extend the
-deterministic rules in `job_career_band.py` where the title is unambiguous, re-run
-the resolver for the same run date, and re-publish. Diagnostics and the baseline
-ledger record the **scraped** count, not the published one — withholding is a
-resolver gap, not a hiring-volume drop.
+**Unclassified rows.** Career band is matching metadata, not a publication
+license. `--publish-unclassified` publishes every otherwise valid source row;
+when no band can be proven it writes `career_band=NULL`, so the role remains
+browseable without entering band-dependent matching. Only malformed identity,
+seniority, or stale-provenance rows are withheld. `--resolved-only` remains a
+deprecated CLI alias for operational compatibility. Extend deterministic rules
+only where source evidence is unambiguous; never invent a band just to improve a
+coverage percentage. Diagnostics and the baseline ledger record the **scraped**
+count, while importer logs separate published-unclassified from truly withheld.
 
 ## COMPANY RUN HEALTH TRACKING
 
@@ -256,7 +258,7 @@ python diagnose.py --json                   # machine-readable verdicts
 | `job_id` | ATS native ID | dedup key |
 | `job_title` | ATS / page title | no LLM |
 | `job_description` | ATS JD endpoint or Firecrawl | full text |
-| `career_band` | `job_career_band.py` at source write | deterministic role family: engineering/data, business/product/operations, research/people/public impact, or design/creative; forward-only |
+| `career_band` | `job_career_band.py` at source write | nullable matching fact: one of the four deterministic role families when provable; NULL remains browseable but makes no band-dependent matching claim; forward-only |
 | `seniority_level` | `job_seniority.py` at source write | deterministic canonical ladder from provider metadata, title, and source JD; forward-only |
 | `min_years_experience` / `max_years_experience` | `job_seniority.py` at source write | parsed source bounds where explicit; no model inference |
 | `company_name` | KNOWN_PORTALS.md | |
