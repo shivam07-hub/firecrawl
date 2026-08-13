@@ -111,7 +111,8 @@ active, trusted roles and is executable by `authenticated` and `service_role`
 while remaining denied to `anon`. RLS keeps an authenticated caller owner-scoped.
 Opening the inbox re-derives every unread new-role projection, repairs a changed
 count through the service client, resolves it at zero, and hides it if the live
-count is unavailable. A partial `ingested_at` index for trusted active roles cut
+count is unavailable. The one-time live repair left **2 unread / 0 mismatched**
+projections and resolved the one zero-count row. A partial `ingested_at` index for trusted active roles cut
 the measured production query from **7,295ms / 13,369 buffers** to
 **0.84ms / 91 buffers**. Live smoke: auth-own **4,094**, auth-other **0**,
 service **4,094**, anon execute denied. Focused backend contracts pass.
