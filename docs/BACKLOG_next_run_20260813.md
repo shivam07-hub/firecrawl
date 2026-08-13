@@ -86,9 +86,6 @@ only `service_role`; Supabase advisors are clean for this subsystem. Focused
 backend contracts, the full 326-test scraper suite, and transactional live RPC
 smoke coverage pass.
 
-**Note.** I refreshed the data by hand. The trigger is still broken, so this will
-go stale again.
-
 ---
 
 ### 3. `new_jobs_count` reports a torn, partial batch — and freezes it
