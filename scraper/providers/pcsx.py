@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Phenom CX (pcsx) ATS provider.
 
 Two-step fetch:
@@ -13,16 +11,19 @@ Portal config keys:
   pcsx_domain  str   domain param e.g. haleon.com
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
+import time
 
 import requests
 
 from config import REQUEST_TIMEOUT
 from providers.base import ProviderResult, ScrapeReason
 from schema import Portal
-from utils import job_hash, strip_html
+from utils import strip_html
 
 _log = logging.getLogger("mirror")
 _PAGE_SIZE = 10
@@ -44,19 +45,85 @@ class PCSXProvider:
         max_jobs: int | None = None,
         validate_mode: bool = False,
     ) -> ProviderResult:
-        jobs = _scrape_pcsx(portal, max_jobs=max_jobs)
-        if jobs is None:
-            return ProviderResult.error(ScrapeReason.API_BLOCKED)
-        return ProviderResult.success(jobs)
+        return _scrape_pcsx(portal, max_jobs=max_jobs)
 
 
-def _fetch_jd(base: str, job_id: str) -> str:
+def _careers_url(base: str, domain: str) -> str:
+    return f"{base}/careers?domain={domain}&location=India"
+
+
+def _bootstrap_session(
+    session: requests.Session,
+    base: str,
+    domain: str,
+) -> bool:
+    """Load the public board once so PCSX/CloudFront can issue visitor cookies."""
+    try:
+        response = session.get(
+            _careers_url(base, domain),
+            headers={**_HEADERS, "Accept": "text/html,application/xhtml+xml"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as exc:
+        _log.warning("    [WARN] PCSX session bootstrap failed (%s): %s", base, exc)
+        return False
+
+
+def _session_get(
+    session: requests.Session,
+    url: str,
+    *,
+    base: str,
+    domain: str,
+    params: dict | None = None,
+    accept: str = "application/json",
+) -> requests.Response:
+    """GET with one fresh visitor-session recovery for auth-like PCSX blocks."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            response = session.get(
+                url,
+                params=params,
+                headers={
+                    **_HEADERS,
+                    "Accept": accept,
+                    "Referer": _careers_url(base, domain),
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_error = exc
+            status = getattr(exc.response, "status_code", None)
+            if attempt == 0 and status in {401, 403}:
+                _bootstrap_session(session, base, domain)
+                time.sleep(0.25)
+                continue
+            raise
+    assert last_error is not None
+    raise last_error
+
+
+def _fetch_jd(
+    session: requests.Session,
+    base: str,
+    domain: str,
+    job_id: str,
+) -> str:
     """Fetch job HTML page and extract JD from JSON-LD JobPosting schema."""
     url = f"{base}/careers/job/{job_id}"
     try:
-        r = requests.get(url, headers={**_HEADERS, "Accept": "text/html"}, timeout=REQUEST_TIMEOUT)
-        if r.status_code != 200:
-            return ""
+        r = _session_get(
+            session,
+            url,
+            base=base,
+            domain=domain,
+            accept="text/html",
+        )
         m = re.search(
             r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>',
             r.text, re.DOTALL
@@ -69,14 +136,21 @@ def _fetch_jd(base: str, job_id: str) -> str:
         return ""
 
 
-def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
+def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> ProviderResult:
     base = portal.get("endpoint", "").rstrip("/")
     domain = portal.get("pcsx_domain", "")
     company = portal["company"]
     cap = max_jobs or 2000
 
     jobs: list[dict] = []
+    seen_job_ids: set[str] = set()
     start = 0
+    session = requests.Session()
+    if not _bootstrap_session(session, base, domain):
+        return ProviderResult.error(
+            ScrapeReason.API_BLOCKED,
+            "pcsx_career_page_bootstrap_failed",
+        )
 
     while True:
         params = {
@@ -86,17 +160,22 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
             "start": start,
         }
         try:
-            r = requests.get(
+            r = _session_get(
+                session,
                 f"{base}/api/pcsx/search",
+                base=base,
+                domain=domain,
                 params=params,
-                headers=_HEADERS,
-                timeout=REQUEST_TIMEOUT,
             )
-            r.raise_for_status()
             data = r.json()
         except Exception as e:
             _log.error(f"    [ERROR] PCSX {company} start={start}: {e}")
-            return jobs or None
+            if jobs:
+                return ProviderResult.partial(
+                    jobs,
+                    f"pcsx_listing_failed_at_start_{start}: {e}",
+                )
+            return ProviderResult.error(ScrapeReason.API_BLOCKED, str(e))
 
         positions = data.get("data", {}).get("positions", [])
         total = data.get("data", {}).get("count", 0)
@@ -106,20 +185,20 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
 
         for p in positions:
             job_id = str(p.get("id") or "")
-            if not job_id:
+            if not job_id or job_id in seen_job_ids:
                 continue
             title = (p.get("name") or "").strip()
             if not title:
                 continue
 
             locs = p.get("locations") or p.get("standardizedLocations") or []
-            locs = [l for l in locs if isinstance(l, str) and l.strip()]
+            locs = [location for location in locs if isinstance(location, str) and location.strip()]
             loc = locs[0] if locs else ""
             if isinstance(loc, str):
                 # strip ATS prefix e.g. "Field Worker- IND Cx_MumbaiRSO, Mumbai, ..."
                 loc = loc.split(",")[-3].strip() if loc.count(",") >= 2 else loc
 
-            jd = _fetch_jd(base, job_id)
+            jd = _fetch_jd(session, base, domain, job_id)
             apply_url = f"{base}{p.get('positionUrl', f'/careers/job/{job_id}')}"
 
             jobs.append({
@@ -135,6 +214,7 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
                 "source_platform": "PhenomCX",
                 "industry":        portal.get("industry", ""),
             })
+            seen_job_ids.add(job_id)
 
             if len(jobs) >= cap:
                 break
@@ -144,4 +224,4 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> list[dict] | No
         start += _PAGE_SIZE
 
     _log.info(f"    {len(jobs)} India jobs fetched via PCSX ({company})")
-    return jobs
+    return ProviderResult.success(jobs)

@@ -32,7 +32,8 @@ from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from portal_reader import parse_portals
-from providers import dispatch_scrape
+from providers import dispatch_scrape_result
+from providers.base import ProviderResult, ScrapeReason
 from enricher import InferenceQuotaExceeded, enrich_job, has_terminal_core_enrichment
 from writer import (
     COMPLETE_MARKER_NAME,
@@ -116,8 +117,8 @@ def setup_logging(log_dir: str = "../logs") -> logging.Logger:
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 def scrape_portal(portal: dict, log: logging.Logger, max_jobs: int | None = None,
-                  validate_mode: bool = False, on_page_complete=None) -> list[dict]:
-    return dispatch_scrape(
+                  validate_mode: bool = False, on_page_complete=None) -> ProviderResult:
+    return dispatch_scrape_result(
         portal,
         log,
         max_jobs=max_jobs,
@@ -203,8 +204,13 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             company, output_base, checkpoint, log, run_date
         )
         try:
-            raw_jobs = scrape_portal(portal, log, max_jobs=max_jobs, validate_mode=validate_mode,
-                                     on_page_complete=page_cb)
+            scrape_result = scrape_portal(
+                portal,
+                log,
+                max_jobs=max_jobs,
+                validate_mode=validate_mode,
+                on_page_complete=page_cb,
+            )
         except Exception as e:
             log.error(f"  FATAL scrape error — {company}: {e}")
             if checkpoint:
@@ -220,23 +226,52 @@ def run(portals: list[dict], skip_enrich: bool, log: logging.Logger,
             summary["skipped"] += 1
             continue
 
-        if not raw_jobs:
-            log.info(f"  0 {scope} jobs — skipping")
+        raw_jobs = scrape_result.jobs
+        if scrape_result.reason == ScrapeReason.PARTIAL:
+            details = scrape_result.fallback_reason or "provider returned an incomplete snapshot"
+            log.error(
+                "  PARTIAL SNAPSHOT — %s returned %d rows before failure; "
+                "quarantining the batch",
+                company,
+                len(raw_jobs),
+            )
             if checkpoint:
-                checkpoint.mark_failed(company, reason="no_jobs_returned")
+                checkpoint.mark_failed(company, reason=f"partial_snapshot: {details}")
             summary["unresolved"].append({
                 "company": company,
                 "ats": ats,
                 "scope": scope,
-                "reason": "no_jobs_returned",
-                "details": "scraper returned empty result set",
+                "reason": "partial_snapshot",
+                "details": details,
+            })
+            summary["company_stats"].append({
+                "company": company,
+                "ats": ats,
+                "raw_jobs": len(raw_jobs),
+                "saved_new": 0,
+                "status": "partial",
+            })
+            summary["skipped"] += 1
+            continue
+
+        if not raw_jobs:
+            reason = scrape_result.reason.value
+            log.info(f"  0 {scope} jobs ({reason}) — skipping")
+            if checkpoint:
+                checkpoint.mark_failed(company, reason=reason)
+            summary["unresolved"].append({
+                "company": company,
+                "ats": ats,
+                "scope": scope,
+                "reason": reason,
+                "details": scrape_result.fallback_reason or "scraper returned empty result set",
             })
             summary["company_stats"].append({
                 "company": company,
                 "ats": ats,
                 "raw_jobs": 0,
                 "saved_new": 0,
-                "status": "no_jobs",
+                "status": reason,
             })
             summary["skipped"] += 1
             continue

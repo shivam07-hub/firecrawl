@@ -205,10 +205,29 @@ def save_jobs(
         except Exception:
             existing = []
 
-    existing_ids = {j['job_id'] for j in existing if j.get('job_id')}
-    new_jobs     = [j for j in jobs if j.get('job_id') not in existing_ids]
+    # Provider pages can overlap while the upstream board is changing. Keep a
+    # single row per requisition even if the same id is repeated within either
+    # the existing file or the newly completed snapshot.
+    deduped_existing: list[dict] = []
+    existing_ids: set[str] = set()
+    for job in existing:
+        job_id = str(job.get('job_id') or '')
+        if not job_id or job_id in existing_ids:
+            continue
+        existing_ids.add(job_id)
+        deduped_existing.append(job)
+
+    new_jobs: list[dict] = []
+    new_ids: set[str] = set()
+    for job in jobs:
+        job_id = str(job.get('job_id') or '')
+        if not job_id or job_id in existing_ids or job_id in new_ids:
+            continue
+        new_ids.add(job_id)
+        new_jobs.append(job)
+
     all_jobs = []
-    for job in existing + new_jobs:
+    for job in deduped_existing + new_jobs:
         batch_date = (
             default_batch_date
             if run_date is not None

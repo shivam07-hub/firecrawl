@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from schema import Portal
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
@@ -20,6 +20,7 @@ class ScrapeReason(str, Enum):
     CONFIG_ERROR  = "config_error"   # missing slug, bad endpoint, wrong tenant
     TIMEOUT       = "timeout"        # request timed out
     PARSE_ERROR   = "parse_error"    # response not parseable (unexpected format)
+    PARTIAL       = "partial"        # some pages returned, but snapshot did not complete
     FALLBACK      = "fallback"       # routed to secondary provider
 
 
@@ -45,6 +46,15 @@ class ProviderResult:
     @classmethod
     def error(cls, reason: ScrapeReason, note: str = "") -> "ProviderResult":
         return cls(jobs=[], reason=reason, fallback_reason=note or reason.value)
+
+    @classmethod
+    def partial(cls, jobs: list[dict], note: str) -> "ProviderResult":
+        """Keep partial rows as evidence, never as a publishable snapshot."""
+        return cls(
+            jobs=jobs,
+            reason=ScrapeReason.PARTIAL,
+            fallback_reason=note or ScrapeReason.PARTIAL.value,
+        )
 
     @classmethod
     def fallback(

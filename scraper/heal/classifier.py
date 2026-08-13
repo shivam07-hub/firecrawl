@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 # --- Buckets (map 1:1 to the hand-written handoff sections) ---------------
 REGRESSION = "REGRESSION"          # Bucket A: had a good baseline, now 0 / big drop
+INCOMPLETE_SNAPSHOT = "INCOMPLETE_SNAPSHOT"  # provider failed after returning some pages
 PARAM_SUSPECT = "PARAM_SUSPECT"    # Bucket E: direct-API route, 0, never confirmed good
 NEEDS_CRACK = "NEEDS_CRACK"        # Bucket C: JS-opaque / ats=other, never cracked
 COOKIE_NEEDED = "COOKIE_NEEDED"    # Bucket D: Darwinbox, needs CF cookies
@@ -30,6 +31,7 @@ OK = "OK"                          # not a failure
 
 # Priority order for reporting (cheap wins first).
 BUCKET_ORDER = [
+    INCOMPLETE_SNAPSHOT,
     REGRESSION,
     PARAM_SUSPECT,
     COOKIE_NEEDED,
@@ -99,6 +101,13 @@ def _classify_one(
 
     def v(bucket: str, evidence: str, action: str) -> Verdict:
         return Verdict(company, ats, bucket, this_count, baseline_count, reason, evidence, action)
+
+    if reason in {"partial", "partial_snapshot"}:
+        return v(
+            INCOMPLETE_SNAPSHOT,
+            f"provider returned {this_count} rows before the career-page snapshot failed",
+            "quarantine these rows; retry the provider until pagination completes",
+        )
 
     # 1. Regression — had a real baseline, now collapsed. Highest ROI, cheap fix.
     if baseline_count and baseline_count >= REGRESSION_MIN:

@@ -41,7 +41,7 @@ class ProbeResult:
     reachable: bool          # route returned without raising
     this_count: int          # India jobs the probe pulled now
     baseline_count: int | None
-    verdict: str             # RECOVERED | STILL_BROKEN | PARTIAL | ERROR
+    verdict: str             # RECOVERED | STILL_BROKEN | PARTIAL | COVERAGE_DROP | FALLBACK_NEEDED | ERROR
     error: str = ""
     sample_titles: list[str] = field(default_factory=list)
     suggested_fix: str = ""
@@ -63,13 +63,41 @@ def probe_company(
     portal["india_only"] = True
 
     try:
-        from providers import dispatch_scrape
-        jobs = dispatch_scrape(portal, log, max_jobs=max_jobs) or []
+        from providers import probe_scrape
+        from providers.base import ScrapeReason
+
+        result = probe_scrape(
+            portal,
+            log,
+            max_jobs=max_jobs,
+            allow_firecrawl=False,
+        )
     except Exception as e:  # noqa: BLE001 — a probe failure is data, not a crash
         return ProbeResult(
             company, ats, reachable=False, this_count=0, baseline_count=baseline_count,
             verdict="ERROR", error=str(e),
             suggested_fix="route raised — diff the provider since last_good_run; check host/cookies",
+        )
+
+    jobs = result.jobs
+    if result.reason == ScrapeReason.FALLBACK:
+        return ProbeResult(
+            company, ats, reachable=False, this_count=0, baseline_count=baseline_count,
+            verdict="FALLBACK_NEEDED", error=result.fallback_reason or "",
+            suggested_fix="direct route requires Firecrawl; re-probe only with Docker/cloud enabled",
+        )
+    if result.reason == ScrapeReason.PARTIAL:
+        return ProbeResult(
+            company, ats, reachable=False, this_count=len(jobs), baseline_count=baseline_count,
+            verdict="PARTIAL", error=result.fallback_reason or "",
+            sample_titles=[str(j.get("job_title") or j.get("title") or "") for j in jobs[:5]],
+            suggested_fix="provider returned a torn snapshot; do not publish until pagination completes",
+        )
+    if result.reason not in {ScrapeReason.SUCCESS, ScrapeReason.NO_JOBS}:
+        return ProbeResult(
+            company, ats, reachable=False, this_count=0, baseline_count=baseline_count,
+            verdict="ERROR", error=result.fallback_reason or result.reason.value,
+            suggested_fix="direct route failed — inspect the typed provider reason and endpoint contract",
         )
 
     count = len(jobs)
@@ -90,7 +118,7 @@ def probe_company(
     if count < max_jobs and baseline_count and count < baseline_count * 0.5:
         return ProbeResult(
             company, ats, reachable=True, this_count=count, baseline_count=baseline_count,
-            verdict="PARTIAL", sample_titles=titles,
+            verdict="COVERAGE_DROP", sample_titles=titles,
             suggested_fix=f"recovered {count} of ~{baseline_count} — check pagination cap / partial facet",
         )
 
@@ -143,7 +171,7 @@ def probe_company_firecrawl(
         from firecrawl_client import map_site, scrape
         links = map_site(careers_url, search="jobs india careers", limit=map_limit)
         ranked = sorted(links, key=_score_url, reverse=True)
-        candidates = [l["url"] for l in ranked[:5] if _score_url(l) > 0]
+        candidates = [link["url"] for link in ranked[:5] if _score_url(link) > 0]
         if not candidates:
             return FirecrawlProbeResult(company, careers_url, "NO_SIGNAL", candidate_urls=[])
         india = False

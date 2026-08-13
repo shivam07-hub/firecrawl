@@ -37,7 +37,7 @@ class Portal(TypedDict, total=False):
     company:      str   # display name — must match company_industries.json key
     ats:          str   # workday | smartrecruiters | greenhouse | lever | phenom_api
                         # | phenom_ssr | yello | sap_jobs2web_html | pepsico_jobs_api
-                        # | skima_careers | hm_wp_jobs | deloitte_usi
+                        # | skima_careers | deloitte_usi
                         # | apple_jobs | cognizant_xml | tata_elxsi | vector_consulting
                         # | deshaw_india | google_careers | intouchcx | microsoft_careers
                         # | hilabs_careers | blackbrix_jobs | icims_html | trakstar

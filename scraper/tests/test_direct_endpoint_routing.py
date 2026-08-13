@@ -142,6 +142,9 @@ def test_direct_endpoint_routes() -> None:
         "Hootsuite": "greenhouse",
         "Deepgram": "ashby",
         "Zapier": "ashby",
+        "H&M": "smartrecruiters",
+        "Tekion": "ashby",
+        "TVS Next": "keka",
     }
     for company, ats in expected.items():
         portal = _portal(company)

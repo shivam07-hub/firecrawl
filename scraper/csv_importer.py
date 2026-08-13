@@ -65,6 +65,7 @@ from enrichment_state import (  # noqa: E402
 )
 from utils import company_slug  # noqa: E402
 from job_career_band import VALID_CAREER_BANDS  # noqa: E402
+from trusted_job_lifecycle import sync_import_run  # noqa: E402
 
 _VALID_SENIORITY_LEVELS = frozenset({
     "intern", "entry", "mid", "senior", "lead", "executive",
@@ -1850,6 +1851,27 @@ def main() -> None:
             status=status,
             message=message,
         )
+
+    lifecycle_summary = sync_import_run(
+        sb,
+        feed_run_id=run_id,
+        json_files=json_files,
+        skill_id_map=skill_id_map,
+        eligible_companies=set(imported_company_job_ids),
+        quality_status=status,
+        dry_run=args.dry_run,
+        # Source-only jobs have not completed Phase 2 skill extraction. Writing
+        # empty company-skill facts here would falsely mark real demand dormant.
+        write_skill_facts=not args.source_only,
+        eligible_job_ids=imported_company_job_ids,
+    )
+    log.info(
+        "Trusted lifecycle: complete=%s partial=%s failed=%s retired=%s",
+        lifecycle_summary["complete"],
+        lifecycle_summary["partial"],
+        lifecycle_summary["failed"],
+        lifecycle_summary["retired"],
+    )
 
     total_missing = total_deactivated = blocked_deactivation = 0
     if args.deactivate_missing:

@@ -392,6 +392,14 @@
     "route": null,
     "updated": "2026-08-13"
   },
+  "Binance": {
+    "company": "Binance",
+    "ats": "lever",
+    "last_good_count": 1,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
+    "route": null,
+    "updated": "2026-08-13"
+  },
   "BlackBerry": {
     "company": "BlackBerry",
     "ats": "",
@@ -938,11 +946,11 @@
   },
   "H&M": {
     "company": "H&M",
-    "ats": "",
-    "last_good_count": 113,
-    "last_good_run": "c8917f0f-e64c-4a6c-81e3-9aa1dac822bf",
+    "ats": "smartrecruiters",
+    "last_good_count": 62,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": null,
-    "updated": "2026-06-13"
+    "updated": "2026-08-13"
   },
   "HCL Technologies": {
     "company": "HCL Technologies",
@@ -1069,6 +1077,14 @@
     "ats": "",
     "last_good_count": 39,
     "last_good_run": "1867389a-b29c-4377-b363-ed2214d0ab31",
+    "route": null,
+    "updated": "2026-08-13"
+  },
+  "Infineon Technologies": {
+    "company": "Infineon Technologies",
+    "ats": "pcsx",
+    "last_good_count": 140,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": null,
     "updated": "2026-08-13"
   },
@@ -1208,6 +1224,14 @@
     "route": null,
     "updated": "2026-07-13"
   },
+  "Lam Research": {
+    "company": "Lam Research",
+    "ats": "pcsx",
+    "last_good_count": 73,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
+    "route": null,
+    "updated": "2026-08-13"
+  },
   "Lendingkart": {
     "company": "Lendingkart",
     "ats": "",
@@ -1307,10 +1331,10 @@
   "Micron Technology": {
     "company": "Micron Technology",
     "ats": "pcsx",
-    "last_good_count": 294,
-    "last_good_run": "20260515",
+    "last_good_count": 261,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": "micron.eightfold.ai/api/pcsx/search?domain=micron.com&location=India",
-    "updated": "2026-05-15"
+    "updated": "2026-08-13"
   },
   "Microsoft": {
     "company": "Microsoft",
@@ -1419,10 +1443,10 @@
   "NVIDIA": {
     "company": "NVIDIA",
     "ats": "pcsx",
-    "last_good_count": 201,
-    "last_good_run": "20260515",
+    "last_good_count": 218,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": "jobs.nvidia.com/api/pcsx/search?domain=nvidia.com&location=india",
-    "updated": "2026-05-15"
+    "updated": "2026-08-13"
   },
   "NXP Semiconductors": {
     "company": "NXP Semiconductors",
@@ -1557,6 +1581,14 @@
     "ats": "",
     "last_good_count": 124,
     "last_good_run": "1867389a-b29c-4377-b363-ed2214d0ab31",
+    "route": null,
+    "updated": "2026-08-13"
+  },
+  "PayPal": {
+    "company": "PayPal",
+    "ats": "pcsx",
+    "last_good_count": 3,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": null,
     "updated": "2026-08-13"
   },
@@ -1936,6 +1968,14 @@
     "route": null,
     "updated": "2026-08-13"
   },
+  "TVS Next": {
+    "company": "TVS Next",
+    "ats": "keka",
+    "last_good_count": 23,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
+    "route": null,
+    "updated": "2026-08-13"
+  },
   "Target": {
     "company": "Target",
     "ats": "",
@@ -1978,11 +2018,11 @@
   },
   "Tekion": {
     "company": "Tekion",
-    "ats": "",
-    "last_good_count": 45,
-    "last_good_run": "320df930-2975-44a4-aab1-467704726e66",
+    "ats": "ashby",
+    "last_good_count": 61,
+    "last_good_run": "6eb699b7-64d0-4ad4-b2b2-344b866ea7f4",
     "route": null,
-    "updated": "2026-07-13"
+    "updated": "2026-08-13"
   },
   "Teradyne": {
     "company": "Teradyne",

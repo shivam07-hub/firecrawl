@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+import json
 
+import trusted_job_lifecycle as lifecycle
 from trusted_job_lifecycle import assess_source_run, missing_transition
 
 
@@ -50,3 +52,65 @@ def test_additional_misses_do_not_extend_quarantine() -> None:
 
     assert transition.listing_confidence == "closed"
     assert transition.quarantine_until is None
+
+
+def test_source_only_lifecycle_promotes_seen_without_writing_skill_facts(monkeypatch):
+    calls = []
+    monkeypatch.setattr(lifecycle, "_resolve_company", lambda sb, company: "company-1")
+    monkeypatch.setattr(lifecycle, "_fetch_company_jobs", lambda sb, company_id: [])
+    monkeypatch.setattr(lifecycle, "_prior_good_count", lambda sb, company_id: None)
+    monkeypatch.setattr(lifecycle, "_write_source_run", lambda *args, **kwargs: "source-run-1")
+    monkeypatch.setattr(lifecycle, "_apply_seen", lambda *args, **kwargs: calls.append("seen"))
+    monkeypatch.setattr(lifecycle, "_apply_missing", lambda *args, **kwargs: calls.append("missing"))
+    monkeypatch.setattr(
+        lifecycle,
+        "build_company_skill_facts",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not write skill facts")),
+    )
+
+    result = lifecycle.sync_company_run(
+        object(),
+        feed_run_id="feed-run-1",
+        company="Example",
+        jobs=[{"job_id": "one"}],
+        skill_id_map={},
+        quality_status="ok",
+        dry_run=False,
+        write_skill_facts=False,
+    )
+
+    assert result.status == "complete"
+    assert calls == ["seen", "missing"]
+
+
+def test_import_run_excludes_rows_not_accepted_by_importer(monkeypatch, tmp_path):
+    output = tmp_path / "Example" / "Outputs" / "2026_08_13"
+    output.mkdir(parents=True)
+    path = output / "jobs.json"
+    path.write_text(
+        json.dumps([
+            {"job_id": "published", "company_name": "Example"},
+            {"job_id": "withheld", "company_name": "Example"},
+        ]),
+        encoding="utf-8",
+    )
+    seen = []
+    monkeypatch.setattr(
+        lifecycle,
+        "sync_company_run",
+        lambda sb, **kwargs: seen.extend(job["job_id"] for job in kwargs["jobs"])
+        or lifecycle.SourceRunAssessment("complete", None),
+    )
+
+    lifecycle.sync_import_run(
+        object(),
+        feed_run_id="feed-run-1",
+        json_files=[path],
+        skill_id_map={},
+        eligible_companies={"Example"},
+        quality_status="ok",
+        dry_run=True,
+        eligible_job_ids={"Example": {"published"}},
+    )
+
+    assert seen == ["published"]

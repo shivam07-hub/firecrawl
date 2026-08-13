@@ -65,7 +65,9 @@ def update_ledger(
         return False
     ledger[company] = {
         "company": company,
-        "ats": ats,
+        # Canonical output rows do not always carry the registry key. A later
+        # successful import must not erase a known route family with "".
+        "ats": ats or (prev or {}).get("ats", ""),
         "last_good_count": count,
         "last_good_run": run_id,
         "route": route if route is not None else (prev or {}).get("route"),

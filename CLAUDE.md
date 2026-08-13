@@ -179,6 +179,19 @@ only where source evidence is unambiguous; never invent a band just to improve a
 coverage percentage. Diagnostics and the baseline ledger record the **scraped**
 count, while importer logs separate published-unclassified from truly withheld.
 
+**Complete-source trust is part of publish.** `csv_importer.py` always invokes
+`trusted_job_lifecycle.sync_import_run` after the source upsert. Complete rows are
+promoted to `listing_confidence='active'`; a successful upsert alone is not a
+user-visible outcome. Source-only imports deliberately skip company-skill facts
+until Phase 2 evidence exists, but never skip the listing lifecycle.
+
+**Partial provider results are evidence, not inventory.** Providers can return a
+typed `partial` result when later pagination fails. Dispatch preserves the type;
+`main.py` marks the checkpoint failed, writes no completion marker, and publishes
+nothing from that prefix. PCSX bootstraps its public career page to acquire the
+visitor session required by CloudFront, refreshes once on 401/403, and otherwise
+fails closed.
+
 ## COMPANY RUN HEALTH TRACKING
 
 Official company hiring-volume and scraper-health metrics are recorded **only after the final Supabase load for that company**.
@@ -197,7 +210,7 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `portal_reader.py` | Parses `KNOWN_PORTALS.md` → list of portal dicts |
 | `schema.py` | `Portal` TypedDict + `CANONICAL_FIELDS` — single source of truth |
 | `providers/` | One module per ATS type — all scraping logic lives here |
-| `providers/_paginate.py` | Shared `paginate()` seam — one tested home for the pagination stop decision (empty / `>= total` / `has_more` / no-new-id / max_pages). Adopted by zwayam, hm_wp_jobs, eightfold; other providers migrate on-touch |
+| `providers/_paginate.py` | Shared `paginate()` seam — one tested home for the pagination stop decision (empty / `>= total` / `has_more` / no-new-id / max_pages). Adopted by zwayam and eightfold; other providers migrate on-touch |
 | `workday_registry.json` | Per-tenant: India UUID, facet params, `blocked=true` flag — auto-written |
 | `generic_registry.json` | Per-company: which JSON keys worked — auto-written on first success |
 | `company_industries.json` | Company → Industry mapping — manual |
@@ -360,14 +373,14 @@ Full spec: `/Users/incognito/True_Yodha/docs/REPORT_INACTIVE_FEATURE.md`
 | Lever | Direct GET `?location=india` | |
 | Phenom | REST API per tenant | |
 | Phenom SSR | GET search-results page → embedded `phApp.ddo.eagerLoadRefineSearch.data.jobs` → per-job JSON-LD detail | Adobe, ABB, Cisco, P&G |
-| PCSX (Phenom CX) | GET `/api/pcsx/search?domain=X&location=india&start=N` + per-job HTML JSON-LD | |
+| PCSX (Phenom CX) | Bootstrap public career board for visitor cookies, then GET `/api/pcsx/search?domain=X&location=india&start=N` + per-job HTML JSON-LD; later-page failures quarantine the whole snapshot | NVIDIA, Micron, PayPal, Infineon, Lam Research, Qualcomm |
 | Pinpoint | GET `/en/postings.json?location_id[]=ID1&location_id[]=ID2` | |
 | Darwinbox | POST `/ms/candidateapi/job/alljobs` — requires CF cookies in env vars | Swiggy, Flipkart, Myntra, OYO, IIFL |
 | Oracle HCM | GET finder=findReqs + India locationId; JD from API or HTML `og:description` fallback | |
 | Taleo (Oracle TBE) | POST `/services/jobs/search/` + per-job HTML BeautifulSoup | HCL Technologies |
 | TalentBrew | Direct paginated HTML — India location filter in URL path + per-job detail page | Intuit, ADP |
 | Siemens ExternalJobs | GET `/SearchJobs` paginate with `folderOffset` → per-job `/JobDetail/{id}` HTML | Siemens |
-| H&M WP Jobs | POST `/wp-json/hm/v1/sr/jobs/search` with `{"locations":["cou:in"],"page":N}` | H&M |
+| Keka Hire | GET public `/careers/api/jobs/default/active`; full JD and locations in listing JSON | TVS Next |
 | Yello (Recsolu) | GET `/job_boards/{board_id}/search?filters={country_id}&page_number=N` → per-job detail page | EY India |
 | SAP Jobs2Web HTML | GET `/search/?locationsearch=india&startrow=N` paginated HTML → per-job detail page | Alstom, Monitor Deloitte, EY India Experienced |
 | PepsiCo Jobs API | GET `pepsicojobs.com/api/jobs?country=India&page=N` JSON | PepsiCo |

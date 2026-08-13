@@ -42,7 +42,6 @@ from providers.pepsico_jobs_api import PepsiCoJobsAPIProvider
 from providers.publicis_sapient import PublicisSapientProvider
 from providers.rippling import RipplingProvider
 from providers.skima_careers import SkimaCareersProvider
-from providers.hm_wp_jobs import HMWordPressJobsProvider
 from providers.hilabs_careers import HiLabsCareersProvider
 from providers.michelin_astro import MichelinAstroProvider
 from providers.pinpoint import PinpointProvider
@@ -63,6 +62,7 @@ from providers.ubs_brassring import UBSBrassRingProvider
 from providers.virtusa_firecrawl import VirtusaFirecrawlProvider
 from providers.workline import WorklineProvider
 from providers.bdo_firecrawl import BDOFirecrawlProvider
+from providers.keka import KekaProvider
 
 _FIRECRAWL_PROVIDER = FirecrawlJSProvider()
 _GENERIC_PROVIDER = GenericJSONProvider()
@@ -110,7 +110,6 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "publicis_sapient": PublicisSapientProvider(),
     "rippling": RipplingProvider(),
     "skima_careers": SkimaCareersProvider(),
-    "hm_wp_jobs": HMWordPressJobsProvider(),
     "hilabs_careers": HiLabsCareersProvider(),
     "michelin_astro": MichelinAstroProvider(),
     "spire2grow": Spire2GrowProvider(),
@@ -124,6 +123,7 @@ _ATS_PROVIDERS: dict[str, Provider] = {
     "virtusa_firecrawl": VirtusaFirecrawlProvider(),
     "workline": WorklineProvider(),
     "bdo_firecrawl": BDOFirecrawlProvider(),
+    "keka": KekaProvider(),
 }
 
 
@@ -133,13 +133,13 @@ def _provider_for_portal(portal: Portal) -> Provider:
     return _ATS_PROVIDERS.get(portal.get("ats", ""), _GENERIC_PROVIDER)
 
 
-def _run_firecrawl_extract(
+def _run_firecrawl_result(
     portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None,
     validate_mode: bool,
-) -> list[dict]:
+) -> ProviderResult:
     company = portal["company"]
     result = _FIRECRAWL_PROVIDER.scrape(
         portal,
@@ -151,19 +151,19 @@ def _run_firecrawl_extract(
         log.info(f"    Firecrawl {'scrape' if validate_mode else 'extract'}: {len(jobs)} entries")
     else:
         log.warning(f"    Firecrawl returned 0 for {company}")
-    return jobs
+    return result
 
 
-def _apply_fallback(
+def _apply_fallback_result(
     result: ProviderResult,
     portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None,
     validate_mode: bool,
-) -> list[dict]:
+) -> ProviderResult:
     if result.fallback_policy != FALLBACK_FIRECRAWL_EXTRACT:
-        return result.jobs
+        return result
 
     fallback_portal = result.fallback_portal or portal
     reason = result.fallback_reason or "fallback_requested"
@@ -175,7 +175,7 @@ def _apply_fallback(
     else:
         log.info(f"    Provider fallback -> Firecrawl ({reason})")
 
-    return _run_firecrawl_extract(
+    return _run_firecrawl_result(
         fallback_portal,
         log,
         max_jobs=max_jobs,
@@ -183,19 +183,19 @@ def _apply_fallback(
     )
 
 
-def dispatch_scrape(
+def dispatch_scrape_result(
     portal: Portal,
     log: logging.Logger,
     *,
     max_jobs: int | None = None,
     validate_mode: bool = False,
     on_page_complete=None,  # Callable[[list[dict], int], None] | None — Workday/Taleo only
-) -> list[dict]:
+) -> ProviderResult:
     provider = _provider_for_portal(portal)
 
     # JS-required portals and explicit Firecrawl usage go through Firecrawl provider directly.
     if provider is _FIRECRAWL_PROVIDER:
-        return _run_firecrawl_extract(
+        return _run_firecrawl_result(
             portal,
             log,
             max_jobs=max_jobs,
@@ -214,13 +214,35 @@ def dispatch_scrape(
     if result.reason not in (ScrapeReason.SUCCESS, ScrapeReason.NO_JOBS, ScrapeReason.FALLBACK):
         log.warning(f"    [{portal['company']}] scrape reason: {result.reason.value}")
 
-    return _apply_fallback(
+    return _apply_fallback_result(
         result,
         portal,
         log,
         max_jobs=max_jobs,
         validate_mode=validate_mode,
     )
+
+
+def dispatch_scrape(
+    portal: Portal,
+    log: logging.Logger,
+    *,
+    max_jobs: int | None = None,
+    validate_mode: bool = False,
+    on_page_complete=None,
+) -> list[dict]:
+    """Backward-compatible jobs-only adapter.
+
+    New pipeline code must use ``dispatch_scrape_result`` so a partial/error
+    outcome cannot be collapsed into a seemingly healthy non-empty list.
+    """
+    return dispatch_scrape_result(
+        portal,
+        log,
+        max_jobs=max_jobs,
+        validate_mode=validate_mode,
+        on_page_complete=on_page_complete,
+    ).jobs
 
 
 def probe_scrape(
@@ -253,13 +275,11 @@ def probe_scrape(
     )
 
     if result.fallback_policy == FALLBACK_FIRECRAWL_EXTRACT and allow_firecrawl:
-        jobs = _apply_fallback(
+        return _apply_fallback_result(
             result,
             portal,
             log,
             max_jobs=max_jobs,
             validate_mode=validate_mode,
         )
-        return ProviderResult.success(jobs)
-
     return result

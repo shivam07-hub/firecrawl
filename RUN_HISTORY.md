@@ -5,6 +5,54 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-08-13 — 54-company failure incident and trusted publication closure
+
+**Objective:** Recover current jobs from durable official career-page routes,
+prevent incomplete snapshots from becoming user inventory, and classify every
+company in the failed cohort without pretending a block or genuine zero is a
+successful scrape.
+
+**Root causes and repairs:** The five failed PCSX tenants needed visitor cookies
+from a career-page bootstrap before paginated API calls. The provider also
+collapsed a later-page 403 into a successful prefix; Micron demonstrated the bug
+by saving 170 rows as complete. PCSX now reuses/refreshes a visitor session and
+returns a typed partial result. Dispatch preserves it and the orchestrator
+quarantines it. Writer/provider batch dedupe also removes overlapping page ids.
+H&M moved from its 403 WordPress proxy to SmartRecruiters; Tekion moved from a
+404 Greenhouse board to Ashby; TVS Next gained a Keka provider. The retired H&M
+provider was removed. Diagnostics now resolve persisted run ids, execute JSON
+probes, and keep Firecrawl out of cheap direct-route probes.
+
+**Measured closure:** Complete targeted collections produced H&M 62, Tekion 61,
+TVS Next 23, Binance 1, NVIDIA 218, Micron 261, PayPal 3, Infineon 140, and Lam
+Research 73: **842 unique jobs**, each with a full JD and apply URL. Resolver
+facts were deterministic for 760; the other 82 published truthfully with a null
+career band. Import run `6eb699b7-64d0-4ad4-b2b2-344b866ea7f4` published all
+842, using timeout-splitting during Supabase degradation.
+
+**Visibility bug found during closure:** The importer said it tracked lifecycle
+but never called `trusted_job_lifecycle`; a successful upsert could remain
+`listing_confidence='uncertain'` and invisible. Lifecycle sync is now mandatory
+after import. Source-only publication promotes seen listings but defers company
+skill facts until Phase 2. Reconciliation accepted 9/9 complete source runs;
+live reads confirmed **842/842 active, trusted, and applyable**.
+
+**Opaque-route budget:** Firecrawl Cloud checked all eight NEEDS_CRACK companies.
+Six returned no listing signal; Tech Mahindra returned generic careers pages;
+FinIQ returned a campus aggregate table, not atomic public jobs with apply URLs.
+No weak candidate was promoted.
+
+The final direct-route probe sweep measured 8 recovered, 16 reachable-zero, 7
+fallback-needed, 5 typed errors, and 1 coverage drop. The probe vocabulary was
+fixed so `PARTIAL` now means only a typed torn snapshot; an undersized but
+successful sample is `COVERAGE_DROP`.
+
+**Verification:** 343 scraper tests pass; owned Python passes Ruff; production
+publication, lifecycle reconciliation, and exact trusted/applyable counts were
+verified.
+
+---
+
 ## Session 2026-08-13 — Unclassified jobs restored to browse without invented matching truth
 
 **Objective:** Close the recurring 13% publication loss without expanding

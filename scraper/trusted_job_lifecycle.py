@@ -87,8 +87,14 @@ def sync_import_run(
     eligible_companies: set[str],
     quality_status: str,
     dry_run: bool,
+    write_skill_facts: bool = True,
+    eligible_job_ids: dict[str, set[str]] | None = None,
 ) -> dict[str, int]:
-    grouped = _load_company_jobs(json_files, eligible_companies)
+    grouped = _load_company_jobs(
+        json_files,
+        eligible_companies,
+        eligible_job_ids=eligible_job_ids,
+    )
     summary = {"complete": 0, "partial": 0, "failed": 0, "retired": 0}
     for company, jobs in sorted(grouped.items()):
         result = sync_company_run(
@@ -99,6 +105,7 @@ def sync_import_run(
             skill_id_map=skill_id_map,
             quality_status=quality_status,
             dry_run=dry_run,
+            write_skill_facts=write_skill_facts,
         )
         summary[result.status] += 1
     if not dry_run and summary["complete"]:
@@ -116,6 +123,7 @@ def sync_company_run(
     skill_id_map: dict[str, int],
     quality_status: str,
     dry_run: bool,
+    write_skill_facts: bool = True,
 ) -> SourceRunAssessment:
     current_ids = {str(job.get("job_id")) for job in jobs if job.get("job_id")}
     if dry_run:
@@ -145,7 +153,7 @@ def sync_company_run(
         jobs=jobs,
         now=now,
     )
-    if assessment.status == "complete":
+    if assessment.status == "complete" and write_skill_facts:
         facts = build_company_skill_facts(
             jobs,
             skill_id_map=skill_id_map,
@@ -181,7 +189,10 @@ def sync_company_run(
 
 
 def _load_company_jobs(
-    json_files: list[Path], eligible_companies: set[str]
+    json_files: list[Path],
+    eligible_companies: set[str],
+    *,
+    eligible_job_ids: dict[str, set[str]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for path in json_files:
@@ -195,7 +206,13 @@ def _load_company_jobs(
         company = str((rows[0].get("company_name") if rows else fallback) or fallback)
         if company not in eligible_companies:
             continue
-        grouped.setdefault(company, []).extend(row for row in rows if isinstance(row, dict))
+        allowed = eligible_job_ids.get(company) if eligible_job_ids is not None else None
+        grouped.setdefault(company, []).extend(
+            row
+            for row in rows
+            if isinstance(row, dict)
+            and (allowed is None or str(row.get("job_id") or "") in allowed)
+        )
     return grouped
 
 

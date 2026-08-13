@@ -6,6 +6,7 @@ from heal.baseline import update_ledger
 from heal.classifier import (
     BLOCKED_EXPECTED,
     COOKIE_NEEDED,
+    INCOMPLETE_SNAPSHOT,
     LOW_COUNT,
     NEEDS_CRACK,
     OK,
@@ -36,6 +37,15 @@ def test_big_drop_is_regression_not_low_count():
     baseline = {"Micron": {"last_good_count": 294}}
     v = _by_company(classify_run(s, baseline, set()))["Micron"]
     assert v.bucket == REGRESSION  # 3 < 294*0.5
+
+
+def test_partial_snapshot_is_quarantined_before_regression_logic():
+    s = _summary([{"company": "Micron", "ats": "pcsx", "raw_jobs": 170, "saved_new": 0, "status": "partial"}])
+    s["unresolved"] = [{"company": "Micron", "ats": "pcsx", "reason": "partial_snapshot"}]
+    baseline = {"Micron": {"last_good_count": 294}}
+    v = _by_company(classify_run(s, baseline, set()))["Micron"]
+    assert v.bucket == INCOMPLETE_SNAPSHOT
+    assert "quarantine" in v.suggested_action
 
 
 def test_blocked_workday_is_expected_not_regression():
@@ -86,3 +96,9 @@ def test_ledger_forward_only_ignores_zero():
     assert update_ledger(ledger, "NVIDIA", "pcsx", 201, "r1") is True
     assert update_ledger(ledger, "NVIDIA", "pcsx", 0, "r2") is False  # bad run never lowers baseline
     assert ledger["NVIDIA"]["last_good_count"] == 201
+
+
+def test_ledger_refresh_does_not_erase_known_ats():
+    ledger = {"NVIDIA": {"company": "NVIDIA", "ats": "pcsx", "last_good_count": 201}}
+    assert update_ledger(ledger, "NVIDIA", "", 218, "r2") is True
+    assert ledger["NVIDIA"]["ats"] == "pcsx"

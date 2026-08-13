@@ -37,6 +37,7 @@ LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
 WORKDAY_REGISTRY = os.path.join(os.path.dirname(__file__), "workday_registry.json")
 
 _BUCKET_BLURB = {
+    "INCOMPLETE_SNAPSHOT": "Provider returned rows but did not finish; quarantine and retry.",
     "REGRESSION": "Bucket A — were cracked, now 0/dropped. Cheapest wins; re-test endpoint + diff provider.",
     "PARAM_SUSPECT": "Bucket E — single direct route returned 0; verify id/param/facet.",
     "COOKIE_NEEDED": "Bucket D — Darwinbox; needs CF cookies in env.",
@@ -57,6 +58,17 @@ def load_blocked_tenants(path: str = WORKDAY_REGISTRY) -> set[str]:
 def find_run_summary(run_id: str | None) -> str:
     if run_id:
         hits = glob.glob(os.path.join(LOGS_DIR, f"run_summary_*{run_id}*.json"))
+        if not hits:
+            # The filename timestamp is written when the report closes and is
+            # intentionally different from the checkpoint/run_id inside it.
+            # Resolve the documented --run contract against persisted content.
+            for candidate in glob.glob(os.path.join(LOGS_DIR, "run_summary_*.json")):
+                try:
+                    with open(candidate, encoding="utf-8") as f:
+                        if str(json.load(f).get("run_id") or "") == run_id:
+                            hits.append(candidate)
+                except (OSError, ValueError, TypeError):
+                    continue
         if not hits:
             raise FileNotFoundError(f"no run_summary matching run_id={run_id}")
         return max(hits, key=os.path.getmtime)
@@ -215,15 +227,23 @@ def main() -> None:
     if args.bucket:
         verdicts = [v for v in verdicts if v.bucket == args.bucket.upper()]
 
+    probes = None
+    if args.probe:
+        probes = run_probes(verdicts, load_ledger())
+
     if args.json:
-        print(json.dumps([v.__dict__ for v in verdicts], indent=2, ensure_ascii=False))
+        payload: object = [v.__dict__ for v in verdicts]
+        if probes is not None:
+            payload = {
+                "verdicts": [v.__dict__ for v in verdicts],
+                "probes": [p.__dict__ for p in probes],
+            }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
     print_summary(run_summary, verdicts)
 
-    probes = None
-    if args.probe:
-        probes = run_probes(verdicts, load_ledger())
+    if probes is not None:
         print(f"\n  Probed {len(probes)} routes:")
         for p in probes:
             print(f"    {p.verdict:<12} {p.company:<22} now={p.this_count:<4} base={p.baseline_count}")

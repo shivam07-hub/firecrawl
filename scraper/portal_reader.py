@@ -421,6 +421,7 @@ def _custom(rows) -> list[Portal]:
         "Pebl": "ashby",
         "SentiLink": "ashby",
         "Waaree Group": "waaree_static",
+        "TVS Next": "keka",
     }
     endpoint_overrides: dict[str, str] = {
         "Confluent": "https://api.ashbyhq.com/posting-api/job-board/confluent",
@@ -442,6 +443,7 @@ def _custom(rows) -> list[Portal]:
         "NETGEAR": "https://api.ashbyhq.com/posting-api/job-board/netgear",
         "Pebl": "https://api.ashbyhq.com/posting-api/job-board/pebl",
         "SentiLink": "https://api.ashbyhq.com/posting-api/job-board/sentilink",
+        "TVS Next": "https://tvsnext.keka.com/careers/api/jobs/default/active",
     }
     custom_extra: dict[str, dict] = {
         "NPCI": {"zoho_page_id": "190737000000336688"},
@@ -658,7 +660,6 @@ _ATS_OVERRIDES: dict[str, str] = {
     'Deloitte India (BrassRing)': 'deloitte_usi',
     'Deloitte India': 'deloitte_usi',
     'ADP': 'talentbrew',
-    'H&M': 'hm_wp_jobs',
     'Intuit': 'talentbrew',
     'AstraZeneca': 'talentbrew',
     'Adobe': 'phenom_ssr',
@@ -761,7 +762,6 @@ _INDIA_ONLY_OVERRIDES: dict[str, bool] = {
     'Deloitte India (BrassRing)': True,
     'Deloitte India': True,
     'ADP': True,
-    'H&M': True,
     'Intuit': True,
     'AstraZeneca': True,
     'Adobe': True,
@@ -956,7 +956,6 @@ def _mynexthire(rows) -> list[Portal]:
         company     = r.get('Company', '').strip()
         careers_url = r.get('Careers URL', '').strip()
         tenant      = r.get('Tenant Domain', '').strip()
-        workspace   = r.get('Workspace ID', '').strip()
         if not careers_url:
             continue
         out.append({

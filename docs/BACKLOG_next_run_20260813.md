@@ -152,15 +152,56 @@ bands**. The existing trust lifecycle remains the visibility gate: 747 of those
 unclassified rows were already trusted-active, while 3,036 remain uncertain.
 Intel refresh and the scrape-landed sweep both accepted the completed run.
 
-### 5. 54 companies failed to scrape
-Includes a cluster that looks like a real route regression, not noise:
-**six PCSX/Eightfold tenants now returning 403** — Qualcomm, NVIDIA, PayPal,
-Infineon, Lam Research, Micron. Also Greenhouse Tekion 404, Lever Dream11 404,
-Zwayam Persistent 503. The Docker-dependent Firecrawl portals failed only because
-Docker was off, which is expected.
+### 5. ✅ DONE — 54 failed companies are measured, recoverable routes restored
+**Correction to the premise.** Qualcomm was not one of the failures: it completed
+the source run with 260 jobs. Five PCSX tenants failed together. The shared cause
+was a missing career-page bootstrap: PCSX/CloudFront issues visitor cookies on the
+public board before accepting paginated API traffic. Worse, the provider returned
+an already-fetched prefix as success when a later page failed. Micron proved the
+impact live: 170 rows were saved and its checkpoint was marked complete after the
+next page returned 403.
 
-Run `diagnose.py --probe` and triage the 403 cluster first — six tenants failing
-the same way on the same day is one cause, not six.
+**Resolution (2026-08-13).** PCSX now bootstraps and reuses a visitor session,
+retries one auth-like failure after refreshing it, and returns a typed partial
+result if pagination still breaks. `main.py` quarantines that evidence and cannot
+write a completion marker or publish it. The result contract survives provider
+dispatch and diagnostics; cheap probes no longer invoke Firecrawl implicitly.
+The diagnostic CLI now resolves an actual persisted run id and `--probe --json`
+really executes probes. Overlapping upstream pages are deduplicated at both the
+provider and writer boundaries.
+
+Three stale routes were replaced end to end: H&M's 403 WordPress proxy with
+SmartRecruiters, Tekion's 404 Greenhouse board with Ashby, and TVS Next's unwired
+Keka board with a first-class provider. The retired H&M provider and registry
+override were deleted. Binance's existing Lever route also recovered.
+
+**Measured user outcome.** Nine complete company snapshots produced **842 unique
+India jobs**, all with full descriptions and apply URLs: H&M 62, Tekion 61, TVS
+Next 23, Binance 1, NVIDIA 218, Micron 261, PayPal 3, Infineon 140, and Lam
+Research 73. Source-only publication run
+`6eb699b7-64d0-4ad4-b2b2-344b866ea7f4` completed despite Supabase batch timeouts
+by recursively splitting writes. A second stale seam was closed: the importer
+claimed lifecycle tracking but never called it. The trusted lifecycle is now
+part of every import; source-only mode promotes observed jobs without fabricating
+company-skill facts. Reconciliation accepted all nine source runs as complete,
+and live verification found **842/842 active + `listing_confidence='active'` +
+apply URL**.
+
+**Disposition of the original 54.** Recovered and published: the nine above.
+Known Cloudflare-blocked Workday tenants: Bank of America, Engie, Ford, GE
+Aerospace, Hitachi Vantara, Inspire Brands, Medtronic. Cookie-gated Darwinbox:
+Flipkart and IIFL Finance. The bounded Firecrawl pass over all eight opaque routes
+found no durable listing signal for Amdocs, Arvind SmartSpaces, Coromandel
+International, Integrow Asset Management, Lodha Ventures, or Syneriq Global;
+Tech Mahindra mapped only generic careers pages, and FinIQ's page exposes a
+campus hiring table rather than atomic public jobs/apply URLs. None were promoted
+or fabricated. The remaining direct-route failures retain explicit typed probe
+evidence instead of being counted as empty career pages; future route work can
+start from that evidence without repeating this incident. The final direct-route
+sweep measured **8 recovered, 16 reachable-zero, 7 fallback-needed, 5 typed
+errors, and 1 coverage drop**. `PARTIAL` is now reserved for a provider that
+actually tore a snapshot; a capped probe below its historical baseline reports
+`COVERAGE_DROP` instead.
 
 ### 6. Generic soft skills dominate the demand rail — product decision
 After the refresh, `Communication` ranks #1 in Gurugram (117 roles, 30 employers)
