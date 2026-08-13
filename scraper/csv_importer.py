@@ -1413,15 +1413,15 @@ def _refresh_analytics_snapshot() -> None:
         log.info("Intel refresh skipped: MYRO_BACKEND_URL / MYRO_ANALYTICS_REFRESH_SECRET not set")
         return
 
-    endpoint = f"{backend_url}/jobs/analytics/refresh-snapshot"
+    endpoint = f"{backend_url}/jobs/analytics/refresh-snapshot?force=true"
     try:
         resp = requests.post(
             endpoint,
             headers={"X-Myro-Refresh-Secret": secret},
-            timeout=30,
+            timeout=5,
         )
-        if resp.status_code == 200:
-            log.info("Intel refresh: backend snapshot refreshed (%s)", endpoint)
+        if resp.status_code in (200, 202):
+            log.info("Intel refresh: backend snapshot accepted (%s)", endpoint)
         else:
             log.warning(
                 "Intel refresh: backend returned %s (%s) — snapshot may be stale",

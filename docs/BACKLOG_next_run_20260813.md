@@ -54,7 +54,7 @@ coverage and the full `scraper/tests` suite pass.
 
 ---
 
-### 2. The skill-demand / analytics refresh cannot be triggered by the scraper
+### 2. ✅ DONE — skill-demand / analytics refresh is durable and independently retryable
 **Evidence.** Every publish logged
 `Intel refresh failed (…/jobs/analytics/refresh-snapshot): Read timed out (read timeout=30)`.
 The snapshot then sat at 2026-07-21 for 22 days while the UI kept rendering it.
@@ -72,6 +72,19 @@ The snapshot then sat at 2026-07-21 for 22 days while the UI kept rendering it.
 asynchronously or on its own schedule, each snapshot's staleness is observable,
 and the panel refuses to render a snapshot older than N days rather than showing
 a stale number with an apology label.
+
+**Implemented 2026-08-13.** The scraper now sends `force=true`, accepts the
+backend's asynchronous `202`, and waits at most 5 seconds. The backend persists
+one refresh request before acknowledging, then claims analytics, skill demand,
+and search independently; one failure is recorded without gating either sibling.
+Prod now has per-product status/lease/error state plus staggered hourly SQL retry
+crons for skill demand and global search. The existing daily analytics HTTP cron
+was deliberately left unchanged until `Develop` is promoted. Skill-demand reads
+suppress snapshots older than 48 hours while preserving `computed_at` for
+operational diagnosis. Live ACL verification denies both API roles and permits
+only `service_role`; Supabase advisors are clean for this subsystem. Focused
+backend contracts, the full 326-test scraper suite, and transactional live RPC
+smoke coverage pass.
 
 **Note.** I refreshed the data by hand. The trigger is still broken, so this will
 go stale again.
