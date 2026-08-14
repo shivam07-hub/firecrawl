@@ -4,9 +4,11 @@ from schema import Portal
 
 import json
 import logging
+import re
 import threading
 import requests
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import firecrawl_client as fc
 from config import REQUEST_TIMEOUT, WORKDAY_PAGE_SIZE, WORKDAY_MAX_JOBS, WORKDAY_JD_FETCH_LIMIT
@@ -27,6 +29,38 @@ _HEADERS = {
 }
 
 _WORKDAY_BLOCKED = object()  # sentinel: API redirected/errored → try Firecrawl
+_LOCALE_SEGMENT = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$", re.IGNORECASE)
+
+
+def _workday_public_url(portal: Portal, external_path: str) -> str:
+    """Return the addressable public URL for a Workday CXS posting.
+
+    Workday's list API returns ``externalPath`` relative to the configured
+    career site (usually ``/job/...``). The public router needs that site slug
+    between the optional locale and the job path. Preserve a site already
+    present so alternate CXS payload shapes cannot duplicate it.
+    """
+    external_path = (external_path or "").strip()
+    tenant = (portal.get("tenant") or "").strip()
+    instance = (portal.get("instance") or "").strip()
+    career_site = (portal.get("career_site") or "").strip()
+    if not external_path or not tenant or not instance or not career_site:
+        return ""
+
+    parsed = urlsplit(external_path)
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if not segments:
+        return ""
+
+    site_index = 1 if _LOCALE_SEGMENT.fullmatch(segments[0]) else 0
+    if len(segments) <= site_index or segments[site_index].casefold() != career_site.casefold():
+        segments.insert(site_index, career_site)
+
+    path = "/" + "/".join(segments)
+    if parsed.path.endswith("/"):
+        path += "/"
+    host = f"{tenant}.{instance}.myworkdayjobs.com"
+    return urlunsplit(("https", host, path, parsed.query, parsed.fragment))
 
 
 class WorkdayProvider:
@@ -189,9 +223,7 @@ def scrape_workday(
                 seen_ids.add(jid)
             new_on_page += 1
 
-            tenant   = portal['tenant']
-            instance = portal['instance']
-            url = f"https://{tenant}.{instance}.myworkdayjobs.com{ext}" if ext else ''
+            url = _workday_public_url(portal, ext)
             loc = p.get('locationsText') or p.get('primaryLocation', '')
             if india_only and use_search_text and not is_india(loc):
                 continue
@@ -303,7 +335,7 @@ def _workday_india_uuid(endpoint: str):
         r.raise_for_status()
         body = r.text.strip()
         if not body:
-            _log.error(f"    [ERROR] Workday UUID discovery: empty response body")
+            _log.error("    [ERROR] Workday UUID discovery: empty response body")
             return _WORKDAY_BLOCKED
         return _find_india_id(r.json())
     except Exception as e:
