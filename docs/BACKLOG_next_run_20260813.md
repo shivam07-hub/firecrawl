@@ -203,7 +203,7 @@ errors, and 1 coverage drop**. `PARTIAL` is now reserved for a provider that
 actually tore a snapshot; a capped probe below its historical baseline reports
 `COVERAGE_DROP` instead.
 
-### 6. Generic soft skills dominate the demand rail — product decision
+### 6. ✅ DONE — L3 practice mode separates levelled and scenario demand
 After the refresh, `Communication` ranks #1 in Gurugram (117 roles, 30 employers)
 and appears in **15 cities / 4,157 roles**; `Collaboration` in 9 cities.
 
@@ -211,6 +211,42 @@ These are real extractions, not artefacts, so the denylist deliberately does not
 touch them — whether "Communication" is useful market intelligence for a job
 seeker is a judgement call. If the answer is no, the fix is a soft-skill class in
 the taxonomy, not individual denies.
+
+**Decision (2026-08-14).** Domain → Cluster → Skill remains the three-level
+taxonomy. How Myro may practise a canonical L3 Skill is a separate L3 contract:
+`levelled` for objective L1-L5 assessment, `scenario` for behavioral/case-study
+evidence, and `observed` for real demand with no current practice mode. This is
+not a five-domain "technical" allowlist: objectively assessable professional
+skills such as Financial Accounting, Management Consulting, and Product Strategy
+remain levelled. Only levelled skills may drive the current demand rail,
+Learning Ladder, numeric gaps, public/authenticated fit, or matching.
+
+**Resolution.** TY `4f2b97e3` adds generated `skills.practice_mode` with asserted
+L3 overrides for mixed Communication areas, splits behavioral demand into the
+service-only `skill_scenario_demand_snapshot`, and carries required depth plus
+practice mode through the job-skill RPC. It closes a second real seam: the RPC
+previously discarded `required_level` and the soft/levelled boundary on scoped
+reads. Scenario/observed skills are now excluded consistently from matching,
+public fit, authenticated skill gaps, Mentor gap plans, and job-anchored
+practice—not merely hidden in one UI.
+
+Learning proof remains separate: a clear writes `skill_assessed_level`, never
+silently mutating CV-derived skills, matching, or score truth. The result now
+offers an explicit **Update Main CV** action. Existing evidence opens Mentor on
+the living Main CV; without a CV bullet, the existing Skills Refresh/autosave
+path adds only the selected assessed Skill to the Main CV skills line and never
+fabricates an achievement bullet.
+
+**Live verification.** Prod holds **34,831 levelled / 283 scenario** Skills.
+Communication, Collaboration, and Cross-Functional Collaboration are scenario;
+the three professional examples above are levelled. The projections contain
+**350 levelled rows / 117 scenario rows with 0 cross-mode leaks**. Current
+scenario demand remains measured separately: Communication 30 cells / 4,118
+roles, Collaboration 25 / 2,270, Cross-Functional Collaboration 17 / 953. The
+V2 RPC returned depth + mode in **8.6ms**, permits authenticated/service roles,
+and denies anon. Supabase security advisors report no finding on the new objects.
+All TY gates pass: **2,175 backend tests**, frontend typecheck/lint, **612 + 21
+frontend tests**, UI-drift guard, and production build.
 
 ---
 
