@@ -1505,9 +1505,8 @@ def _refresh_analytics_snapshot() -> None:
         log.warning("Intel refresh failed (%s): %s — snapshot may be stale", endpoint, e)
 
 
-def _notify_scrape_landed() -> None:
-    """Tell the Myro backend a fresh jobs batch landed → it re-matches + notifies
-    affected users immediately (Backlog #36 event-driven matching).
+def _notify_scrape_landed(run_id: str) -> None:
+    """Tell Myro a fresh batch landed so it can enqueue the Stage A skill floor.
 
     Fire-and-forget: never raises, so a webhook failure cannot fail the import.
     Skipped silently if either env var is absent. Reuses MYRO_BACKEND_URL (already
@@ -1521,9 +1520,14 @@ def _notify_scrape_landed() -> None:
 
     endpoint = f"{backend_url}/internal/scrape/landed"
     try:
-        resp = requests.post(endpoint, json={}, headers={"X-Scrape-Token": token}, timeout=15)
+        resp = requests.post(
+            endpoint,
+            json={"run_id": run_id},
+            headers={"X-Scrape-Token": token},
+            timeout=15,
+        )
         if resp.status_code == 200:
-            log.info("Scrape-landed webhook: Myro sweep triggered (%s)", resp.json())
+            log.info("Scrape-landed webhook: Myro hand-off accepted (%s)", resp.json())
         else:
             log.warning(
                 "Scrape-landed webhook: backend returned %s (%s)", resp.status_code, endpoint
@@ -1959,10 +1963,10 @@ def main() -> None:
     # Clean, real load only — tell the Myro intel page to refresh its snapshot.
     if not args.dry_run:
         _refresh_analytics_snapshot()
-        # Event-driven matching (#36): a genuine new-jobs batch → sweep + notify
-        # affected users now. Only when jobs actually landed (the event itself).
+        # A genuine publication hands its run id to Myro. Stage A is free and
+        # queues immediately; user matching remains pull-driven.
         if total_jobs > 0:
-            _notify_scrape_landed()
+            _notify_scrape_landed(run_id)
 
 
 if __name__ == "__main__":

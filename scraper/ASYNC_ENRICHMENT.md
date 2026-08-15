@@ -15,7 +15,10 @@ The scraper no longer needs inference to publish a job:
 4. `enrichment_worker.py` drains the queue whenever LM Studio or an approved
    remote open-weight endpoint is available.
 5. A hash-guarded database function atomically patches the enrichment-owned job
-   fields and replaces `job_skills`.
+   summary and role-domain fields.
+6. After publication, `csv_importer.py` sends the immutable run id to Myro's
+   authenticated scrape-landed hook. True_Yodha queues its deterministic Stage A
+   worker, which writes `job_skills` and asserts the unattempted queue is empty.
 
 The existing trusted lifecycle/delisting loop remains independent and owns
 whether a listing is active.
@@ -37,9 +40,10 @@ whether a listing is active.
 Source import owns title, JD, company, industry, location, apply URL, source
 metadata, provider chips, batch markers, and lifecycle input.
 
-The lazy worker owns `job_summary`, `role_domain`, `main_skills`,
-`side_skills`, `job_skills`, enrichment hashes/status/model/version, and
-enrichment timestamps.
+The lazy enrichment worker owns `job_summary`, `role_domain`, enrichment
+hashes/status/model/version, and enrichment timestamps. True_Yodha's Stage A
+and Stage B own `job_skills`; the trigger-derived `main_skills` mirror follows
+those rows. `side_skills` is retired.
 
 Source-only upserts never send model-owned columns, so a repeat scrape cannot
 erase completed enrichment.

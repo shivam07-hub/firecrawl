@@ -312,6 +312,11 @@ python diagnose.py --json                   # machine-readable verdicts
 > `apply_job_enrichment` writes `job_summary` + `role_domain` only; its `p_skills`
 > argument is accepted and ignored so the deployed worker keeps its signature.
 > `jobs.main_skills` is derived from `job_skills` by a Supabase trigger.
+> After a successful publication, `csv_importer` sends the immutable `run_id` to
+> True_Yodha's authenticated `/internal/scrape/landed` hook. That hook enqueues
+> the deterministic Stage A drain on Myro's durable bulk Work Lane and asserts
+> the unattempted queue returns to zero. This hand-off uses no LM Studio or LLM
+> tokens; Stage B remains the separate judgment-model pass.
 > Design + migrations: `True_Yodha/SKILL_ENGINE.md`,
 > `True_Yodha/database/migrations/20260807b_enrichment_stops_owning_skills.sql`.
 
