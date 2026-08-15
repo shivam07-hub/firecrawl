@@ -106,6 +106,7 @@ _UNKNOWN_LOCATION_THRESHOLD = 0.10
 _MAX_DEACTIVATION_RATE = 0.75
 _LOCATION_PARSER_VERSION = "v1"
 _DEFAULT_PROFILE_VERSION = "cv_profile_v1"
+_SCRAPE_HANDOFF_BACKOFF_SECONDS = (0, 2, 5)
 
 
 def _source_matching_facts_are_publishable(job: dict) -> bool:
@@ -1506,34 +1507,69 @@ def _refresh_analytics_snapshot() -> None:
 
 
 def _notify_scrape_landed(run_id: str) -> None:
-    """Tell Myro a fresh batch landed so it can enqueue the Stage A skill floor.
+    """Hand a published run to Myro's durable Stage A queue or fail the publish.
 
-    Fire-and-forget: never raises, so a webhook failure cannot fail the import.
-    Skipped silently if either env var is absent. Reuses MYRO_BACKEND_URL (already
-    used by the intel refresh) and sends the shared secret in a header.
+    Source rows are already committed when this runs, so retrying the failed
+    daily-poll publish is safe: source upserts are idempotent and the immutable
+    ``run_id`` is Myro's RQ correlation key. A false success here is not safe —
+    it is the exact gap that left thousands of jobs invisible to the matcher.
     """
     backend_url = (os.getenv("MYRO_BACKEND_URL", "") or "").rstrip("/")
     token = (os.getenv("SCRAPE_WEBHOOK_TOKEN", "") or "").strip()
     if not backend_url or not token:
-        log.info("Scrape-landed webhook skipped: MYRO_BACKEND_URL / SCRAPE_WEBHOOK_TOKEN not set")
-        return
+        raise RuntimeError(
+            "Stage A hand-off requires MYRO_BACKEND_URL and SCRAPE_WEBHOOK_TOKEN"
+        )
 
     endpoint = f"{backend_url}/internal/scrape/landed"
-    try:
-        resp = requests.post(
-            endpoint,
-            json={"run_id": run_id},
-            headers={"X-Scrape-Token": token},
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            log.info("Scrape-landed webhook: Myro hand-off accepted (%s)", resp.json())
-        else:
-            log.warning(
-                "Scrape-landed webhook: backend returned %s (%s)", resp.status_code, endpoint
+    last_error = "no response"
+    for attempt, delay_seconds in enumerate(_SCRAPE_HANDOFF_BACKOFF_SECONDS, start=1):
+        if delay_seconds:
+            time.sleep(delay_seconds)
+        try:
+            resp = requests.post(
+                endpoint,
+                json={"run_id": run_id},
+                headers={"X-Scrape-Token": token},
+                timeout=15,
             )
-    except requests.RequestException as e:
-        log.warning("Scrape-landed webhook failed (%s): %s", endpoint, e)
+        except requests.RequestException as exc:
+            last_error = f"{exc.__class__.__name__}: {exc}"
+            log.warning(
+                "Stage A hand-off attempt %s/%s failed (%s): %s",
+                attempt,
+                len(_SCRAPE_HANDOFF_BACKOFF_SECONDS),
+                endpoint,
+                last_error,
+            )
+            continue
+
+        if resp.status_code == 200:
+            try:
+                payload = resp.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("skill_floor_enqueued") is True:
+                log.info("Stage A hand-off accepted: run_id=%s", run_id)
+                return
+            last_error = "HTTP 200 without skill_floor_enqueued=true"
+            break
+
+        last_error = f"HTTP {resp.status_code}"
+        log.warning(
+            "Stage A hand-off attempt %s/%s returned %s (%s)",
+            attempt,
+            len(_SCRAPE_HANDOFF_BACKOFF_SECONDS),
+            resp.status_code,
+            endpoint,
+        )
+        if resp.status_code != 429 and resp.status_code < 500:
+            break
+
+    raise RuntimeError(
+        f"Source rows published, but Myro did not accept Stage A for run {run_id}: "
+        f"{last_error}. Re-run this publish; its upserts and hand-off are idempotent."
+    )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

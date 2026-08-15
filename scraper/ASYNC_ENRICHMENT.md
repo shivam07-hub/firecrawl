@@ -19,6 +19,9 @@ The scraper no longer needs inference to publish a job:
 6. After publication, `csv_importer.py` sends the immutable run id to Myro's
    authenticated scrape-landed hook. True_Yodha queues its deterministic Stage A
    worker, which writes `job_skills` and asserts the unattempted queue is empty.
+   The publish step requires `skill_floor_enqueued=true`; it retries transient
+   failures and exits non-zero otherwise, so `daily_poll` cannot report a run
+   complete while its jobs remain outside Stage A.
 
 The existing trusted lifecycle/delisting loop remains independent and owns
 whether a listing is active.

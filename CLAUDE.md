@@ -316,7 +316,11 @@ python diagnose.py --json                   # machine-readable verdicts
 > True_Yodha's authenticated `/internal/scrape/landed` hook. That hook enqueues
 > the deterministic Stage A drain on Myro's durable bulk Work Lane and asserts
 > the unattempted queue returns to zero. This hand-off uses no LM Studio or LLM
-> tokens; Stage B remains the separate judgment-model pass.
+> tokens; Stage B remains the separate judgment-model pass. Publication is not
+> complete until Myro returns `skill_floor_enqueued=true`: transport/5xx failures
+> receive bounded retries, and a missing or rejected hand-off makes `daily_poll`
+> fail at `publish`. Re-running is safe because source upserts and the run-id
+> correlation key are idempotent.
 > Design + migrations: `True_Yodha/SKILL_ENGINE.md`,
 > `True_Yodha/database/migrations/20260807b_enrichment_stops_owning_skills.sql`.
 
