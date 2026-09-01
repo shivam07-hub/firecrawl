@@ -65,6 +65,49 @@ def _parse_embedded_jobs(page_html: str) -> list[dict]:
         return []
 
 
+def _decode_js_literal(value: str) -> str:
+    """Decode a JavaScript single-quoted string without executing page code."""
+    out: list[str] = []
+    i = 0
+    simple = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v"}
+    while i < len(value):
+        if value[i] != "\\" or i + 1 >= len(value):
+            out.append(value[i])
+            i += 1
+            continue
+        nxt = value[i + 1]
+        if nxt == "x" and i + 3 < len(value):
+            try:
+                out.append(chr(int(value[i + 2 : i + 4], 16)))
+                i += 4
+                continue
+            except ValueError:
+                pass
+        if nxt == "u" and i + 5 < len(value):
+            try:
+                out.append(chr(int(value[i + 2 : i + 6], 16)))
+                i += 6
+                continue
+            except ValueError:
+                pass
+        out.append(simple.get(nxt, nxt))
+        i += 2
+    return "".join(out)
+
+
+def _parse_detail_job(page_html: str) -> dict:
+    """Read modern Zoho detail JSON embedded as ``JSON.parse('...')``."""
+    for match in re.finditer(r"JSON\.parse\('(.+?)'\)", page_html, re.DOTALL):
+        try:
+            payload = json.loads(_decode_js_literal(match.group(1)))
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+            if payload[0].get("Job_Description"):
+                return payload[0]
+    return {}
+
+
 def _build_apply_url(portal: Portal, job_id: str) -> str:
     page_id = str(portal.get("zoho_page_id") or _PAGE_ID).strip()
     endpoint = (portal.get("endpoint") or "").strip()
@@ -113,7 +156,6 @@ class ZohoRecruitProvider:
         india_jobs = [j for j in all_jobs if (j.get("Country") or "").strip() == "India"]
         if not india_jobs:
             india_jobs = all_jobs  # India-only portal fallback
-
         cap = max_jobs or 2000
         results = []
         for job in india_jobs[:cap]:
@@ -127,7 +169,6 @@ class ZohoRecruitProvider:
             country = (job.get("Country") or "India").strip()
             location_raw = ", ".join(p for p in [city, state, country] if p)
             raw_jd = (job.get("Job_Description") or "").strip()
-
             results.append({
                 "job_id": job_id,
                 "job_title": title,
