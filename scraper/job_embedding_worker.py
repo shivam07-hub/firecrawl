@@ -17,7 +17,6 @@ import os
 from typing import Protocol
 
 import requests  # type: ignore[import-untyped]
-from dotenv import load_dotenv
 from supabase import Client, create_client
 
 from config import (
@@ -35,7 +34,9 @@ from job_embedding_state import (
 from lm_worker_lock import BUSY_EXIT_CODE, WorkerBusy, local_inference_lock
 
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+from environment import load_environment
+
+load_environment()
 log = logging.getLogger("job_embedding_worker")
 
 

@@ -41,14 +41,15 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 from postgrest.exceptions import APIError
 from supabase import create_client, Client
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
-load_dotenv(_HERE / ".env")
+from environment import EnvironmentError_, load_environment, require
+
+load_environment()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1506,6 +1507,22 @@ def _refresh_analytics_snapshot() -> None:
         log.warning("Intel refresh failed (%s): %s — snapshot may be stale", endpoint, e)
 
 
+def _stage_a_reachable() -> str | None:
+    """Return why Stage A is unreachable, or None when the backend answers.
+
+    Config presence is not the same claim as a live backend, and both faults
+    used to surface only at the end of publish.  Any HTTP status counts as
+    reachable — the hand-off endpoint authenticates separately, and this probe
+    must not care how the base URL routes.
+    """
+    backend_url = (os.getenv("MYRO_BACKEND_URL", "") or "").rstrip("/")
+    try:
+        requests.get(backend_url, timeout=10)
+    except requests.RequestException as exc:
+        return f"{backend_url} did not answer ({exc.__class__.__name__})"
+    return None
+
+
 def _notify_scrape_landed(run_id: str) -> None:
     """Hand a published run to Myro's durable Stage A queue or fail the publish.
 
@@ -1640,6 +1657,27 @@ def main() -> None:
     if args.run_date and deactivation_batch_date is None:
         log.error("--run-date must be YYYYMMDD, YYYY-MM-DD, or YYYY_MM_DD")
         raise SystemExit(2)
+
+    # Config validity is knowable now; discovering it after the upsert costs a
+    # full re-run.  A real publish also hands the run to Stage A at the very
+    # end, so that capability is asserted here rather than at its call site.
+    try:
+        require("supabase")
+        if not args.dry_run:
+            require("stage_a")
+    except EnvironmentError_ as exc:
+        log.error("%s", exc)
+        raise SystemExit(2)
+    if not args.dry_run:
+        unreachable = _stage_a_reachable()
+        if unreachable:
+            log.error(
+                "Stage A backend unreachable: %s. Publication would commit source "
+                "rows and then fail to enqueue the skill floor. Start the backend "
+                "or correct MYRO_BACKEND_URL, then re-run.",
+                unreachable,
+            )
+            raise SystemExit(2)
 
     sb = _supabase()
     skill_id_map = {} if args.source_only else _build_skill_id_map(sb)

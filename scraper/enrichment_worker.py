@@ -18,7 +18,6 @@ import os
 from typing import Callable, Protocol
 
 import requests  # type: ignore[import-untyped]
-from dotenv import load_dotenv
 from supabase import Client, create_client
 
 from config import (
@@ -45,7 +44,9 @@ from lm_worker_lock import BUSY_EXIT_CODE, WorkerBusy, local_inference_lock
 INFERENCE_HEALTH_TIMEOUT_SECONDS = 30
 
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+from environment import load_environment
+
+load_environment()
 
 log = logging.getLogger("enrichment_worker")
 

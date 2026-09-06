@@ -8,7 +8,6 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 
 from question_bank.config import QuestionBankConfig
 from question_bank.llm import LocalQuestionLLM
@@ -22,6 +21,7 @@ from question_bank.sources import (
 from question_bank.state import RunState
 from question_bank.supabase_writer import QuestionBankSupabase
 
+from environment import load_environment
 
 _HERE = Path(__file__).resolve().parent
 _SCRAPER_DIR = _HERE.parent
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit < 0:
         parser.error("--limit cannot be negative")
 
-    load_dotenv(_SCRAPER_DIR / ".env")
+    load_environment()
     manifest = load_manifest(args.manifest)
     selected = selected_skill_keys(args, manifest)
 

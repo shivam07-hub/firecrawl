@@ -24,7 +24,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from dotenv import load_dotenv
+
+from environment import load_environment
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
@@ -63,7 +64,7 @@ _PAGE_SIZE = 1000
 
 
 def _load_env() -> tuple[str, str]:
-    load_dotenv(_HERE / ".env")
+    load_environment()
     url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
     key = os.getenv("SUPABASE_SERVICE_KEY") or ""
     if not url or not key:

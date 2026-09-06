@@ -19,12 +19,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from dotenv import load_dotenv
 from supabase import Client, create_client
 
 
 HERE = Path(__file__).resolve().parent
-load_dotenv(HERE / ".env")
+from environment import load_environment
+
+load_environment()
 
 PAGE_SIZE = 500
 IN_BATCH_SIZE = 100

@@ -3,6 +3,7 @@ __pycache__/
 /node_modules/
 /dist/
 .env
+.env.bak
 *.csv
 dump.rdb
 /mongo-data

@@ -169,6 +169,16 @@ folder even if a newer folder exists. Markerless partial folders remain
 quarantined. Regression coverage simulates partial + final saves across the
 boundary and guards the scrape → resolve → publish command contract.
 
+**Two `.env` files, one per consumer (declared 2026-09-01).** `<repo>/.env`
+belongs to Docker Compose and configures the Firecrawl stack. `scraper/.env` is
+the only file any Python entry point reads, through the single seam in
+`environment.py` — nothing else may call `load_dotenv` or guess a key name.
+Run `python environment.py` to see which capabilities the current environment
+can run; it reports presence, never values. Publication asserts `supabase`, and
+for a real run `stage_a` plus backend reachability, **before its first write**:
+missing config used to surface only at the Stage A hand-off, after every source
+row was already committed. The preflight now refuses in under a second.
+
 **Unclassified rows.** Career band is matching metadata, not a publication
 license. `--publish-unclassified` publishes every otherwise valid source row;
 when no band can be proven it writes `career_band=NULL`, so the role remains
@@ -206,7 +216,8 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 
 | File | Role |
 |---|---|
-| `config.py` | Env vars: LM Studio URL/key/model, Firecrawl URL, output paths |
+| `environment.py` | **The declared environment surface.** Every env key, the capability it unlocks, and whether that capability can run without it. Owns the single `load_dotenv` seam and the `require()` preflight. `python environment.py` prints presence-only status; never a value |
+| `config.py` | Resolved config values: inference/embedding endpoints, Firecrawl URL, output paths, tuning knobs |
 | `portal_reader.py` | Parses `KNOWN_PORTALS.md` → list of portal dicts |
 | `schema.py` | `Portal` TypedDict + `CANONICAL_FIELDS` — single source of truth |
 | `providers/` | One module per ATS type — all scraping logic lives here |

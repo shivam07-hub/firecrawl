@@ -34,7 +34,6 @@ from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlparse
 
 import requests
-from dotenv import load_dotenv
 from supabase import Client, create_client
 
 
@@ -47,7 +46,9 @@ from discovery.ats_probes import PROBES, name_matches  # noqa: E402
 from portal_reader import parse_portals  # noqa: E402
 
 
-load_dotenv(SCRAPER_DIR / ".env")
+from environment import load_environment
+
+load_environment()
 
 PAGE_SIZE = 500
 IN_BATCH_SIZE = 100

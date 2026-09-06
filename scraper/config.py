@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 from urllib.parse import urlparse
-from dotenv import load_dotenv
+from environment import load_environment
 
-load_dotenv(Path(__file__).parent / ".env")
+load_environment()
 
 # ── Open-weight inference ────────────────────────────────────────────────────
 _LOCAL_INFERENCE_BASE_URL = "http://localhost:1234/v1"
