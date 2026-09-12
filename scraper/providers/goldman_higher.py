@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import logging
 import requests
@@ -40,7 +41,7 @@ class GoldmanHigherProvider:
 def _scrape_higher(portal: Portal, *, max_jobs: int | None) -> list[dict]:
     company = portal.get("company", "Goldman Sachs")
     start_url = portal.get("endpoint") or portal.get("careers_url") or "https://higher.gs.com/roles/"
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     api_url = "https://api-higher.gs.com/gateway/api/v1/graphql"
 

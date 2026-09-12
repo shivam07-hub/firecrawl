@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Siemens Careers Marketplace provider (jobs.siemens.com externaljobs).
 
@@ -227,7 +228,7 @@ def _scrape_siemens_externaljobs(portal: Portal, max_jobs: int | None = None) ->
     company = portal.get("company", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     if not base_url.startswith("http") or "/externaljobs/SearchJobs" not in base_url:
         _log.error(f"    [ERROR] SiemensExternalJobs: invalid endpoint for {company}: {base_url}")

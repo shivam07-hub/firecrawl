@@ -41,15 +41,18 @@ whether a listing is active.
 ## Column ownership
 
 Source import owns title, JD, company, industry, location, apply URL, source
-metadata, provider chips, batch markers, and lifecycle input.
+metadata, provider chips, batch markers, lifecycle input, and a first-fill
+extractive `job_summary` (only written when the database cell is empty).
 
-The lazy enrichment worker owns `job_summary`, `role_domain`, enrichment
-hashes/status/model/version, and enrichment timestamps. True_Yodha's Stage A
-and Stage B own `job_skills`; the trigger-derived `main_skills` mirror follows
-those rows. `side_skills` is retired.
+The lazy enrichment worker upgrades `job_summary`, and owns `role_domain`,
+enrichment hashes/status/model/version, and enrichment timestamps. True_Yodha's
+Stage A and Stage B own `job_skills`; the trigger-derived `main_skills` mirror
+follows those rows. `side_skills` is retired.
 
-Source-only upserts never send model-owned columns, so a repeat scrape cannot
-erase completed enrichment.
+Source-only upserts never send `role_domain` or skill arrays, and they never
+overwrite a non-empty `job_summary`. The source snapshot writer splits mixed
+fill/preserve batches so PostgREST cannot NULL an omitted summary on a sibling
+row. `retire_closed_jobs` is drained in pages of 5000 (the live RPC max).
 
 ## Live commands
 
@@ -118,9 +121,9 @@ Codex automation `Daily trusted career poll` owns the recurring source run. It
 is re-anchored for 24 hours after poll-and-publish finishes and never creates
 consumers when enrichment workers are already active. The old 15-minute `Lazy
 job enrichment worker` automation is deleted, preventing duplicate tasks and
-repeated model starts. Local automation requires this Mac to be on.
+repeated model starts. Local automation requires this Mac to be on. The 2026-09-07 architecture cutover keeps the clock on the laptop; moving `daily_cycle.py` to Railway/Fly is the next version.
 
-For an always-on worker independent of this Mac, authenticate Railway, link the
+For an always-on worker independent of this Mac (next version), authenticate Railway, link the
 intended project, and run the same worker command with the scraper environment
 variables. Do not move the long scrape into Supabase Cron; Cron is suitable only
 for a short trigger/watchdog, while a container performs long-running work.

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 from schema import Portal
 
@@ -48,7 +49,7 @@ def _scrape_pinpoint(portal: Portal, max_jobs: int | None = None) -> list[dict] 
 
     india_ids: list[str] = portal.get("pinpoint_india_location_ids", [])
     company = portal["company"]
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     params: list[tuple[str, str]] = []
     for lid in india_ids:

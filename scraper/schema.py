@@ -84,7 +84,7 @@ CANONICAL_FIELDS: list[str] = [
     "job_id",
     "job_title",
     "job_description",         # full raw JD (kept for Tailor CV / detail view)
-    "job_summary",             # LLM-generated ≤100-word clean summary (card body)
+    "job_summary",             # extractive at scrape; LLM upgrade later (card body)
     "industry",
     "industry_group",
     "company_name",

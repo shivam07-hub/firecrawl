@@ -6,6 +6,7 @@ import logging
 import re
 
 import firecrawl_client as fc
+import scrapling_client as scrapling
 from providers.base import ProviderResult, ScrapeReason
 from utils import is_india, job_hash
 
@@ -74,8 +75,10 @@ def scrape_validate(portal: Portal, max_jobs: int = 5) -> list[dict] | None:
     Returns None if Firecrawl returned no markdown (hard failure).
     """
     url = portal['endpoint']
-    _log.info(f"    Firecrawl scrape (validate): {url}")
-    md = fc.scrape(url)
+    _log.info(f"    Listing scrape (validate): {url}")
+    md = scrapling.fetch_listing_markdown(url)
+    if not md:
+        md = fc.scrape(url)
     if not md:
         return None
 
@@ -125,8 +128,12 @@ def scrape_extract(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
     else:
         actions = _COOKIE_DISMISS_ACTIONS
 
-    _log.info(f"    Firecrawl scrape (Docker): {url}")
-    markdown = fc.scrape(url, actions=actions)
+    _log.info(f"    Listing scrape: {url}")
+    markdown = scrapling.fetch_listing_markdown(url)
+    listing_via = "scrapling"
+    if not markdown or len(markdown) < 200:
+        listing_via = "firecrawl"
+        markdown = fc.scrape(url, actions=actions)
     if not markdown or len(markdown) < 200:
         return None
 
@@ -151,14 +158,48 @@ def scrape_extract(portal: Portal, max_jobs: int | None = None) -> list[dict] | 
         _log.warning("    No job links found — returning 0 jobs (no placeholder row)")
         return []
 
-    cap = max_jobs or 200
-    job_links = job_links[:cap]
+    if listing_via == "scrapling":
+        cap = max_jobs  # None = every link Scrapling found
+    else:
+        # Firecrawl batch_scrape spends one credit per detail URL.
+        cap = max_jobs or 200
+    job_links = job_links[:cap] if cap else job_links
 
     BATCH = 20
     india_only = portal.get('india_only', True)
     jobs = []
-    for i in range(0, len(job_links), BATCH):
-        chunk = job_links[i:i + BATCH]
+    pending_firecrawl: list[tuple[str, str]] = []
+    for link_title, job_url in job_links:
+        jd_md = ""
+        if listing_via == "scrapling":
+            jd_md = scrapling.fetch_text(job_url) or ""
+        if not jd_md or len(jd_md) < 100:
+            pending_firecrawl.append((link_title, job_url))
+            continue
+        if india_only and not is_india(link_title + ' ' + jd_md[:1500]):
+            continue
+        title = link_title if (
+            len(link_title) > 5 and
+            not any(w in link_title.lower() for w in _NOISE_WORDS)
+        ) else company
+        jobs.append({
+            'job_id':          job_hash(title, job_url),
+            'title':           title,
+            'job_url':         job_url,
+            'source_api_url':  url,
+            'business_unit':   None,
+            'raw_jd_text':     jd_md,
+            'location_city':   'India',
+            'date_posted':     None,
+            'source_platform': 'Scrapling' if listing_via == "scrapling" else 'Firecrawl',
+            'industry':        portal.get('industry', ''),
+        })
+
+    if listing_via == "scrapling":
+        pending_firecrawl = pending_firecrawl[: min(len(pending_firecrawl), 200)]
+
+    for i in range(0, len(pending_firecrawl), BATCH):
+        chunk = pending_firecrawl[i:i + BATCH]
         results = fc.batch_scrape([link for _, link in chunk])
         for link_title, job_url in chunk:
             jd_md = results.get(job_url, '')

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 from schema import Portal
 
@@ -42,7 +43,7 @@ def scrape_phenom_api(portal: Portal, max_jobs: int | None = None) -> list[dict]
     india_only = portal.get('india_only', True)
     jobs       = []
     page       = 1
-    _GLOBAL_CAP = max_jobs or 2000
+    _GLOBAL_CAP = job_limit(max_jobs)
 
     while True:
         url = f"{base_url}&page={page}"

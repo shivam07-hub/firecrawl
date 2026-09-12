@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Yello (Recsolu) provider.
 
@@ -243,7 +244,7 @@ def _scrape_yello(portal: Portal, max_jobs: int | None = None) -> list[dict] | N
     company = portal.get("company", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     session = requests.Session()
     session.headers.update(_HEADERS)

@@ -275,7 +275,7 @@ def scrape_workday(
     else:
         selected = jobs
 
-    budget = max_jobs if max_jobs else WORKDAY_JD_FETCH_LIMIT  # total JD-fetch cap
+    budget = max_jobs if max_jobs else len(selected)
     kept: list[dict] = []
     fetched = 0
     for ci, i in enumerate(range(0, len(selected), WORKDAY_PAGE_SIZE)):

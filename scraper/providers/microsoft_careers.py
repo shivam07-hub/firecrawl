@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import requests
 
 from config import REQUEST_TIMEOUT
+from job_cap import job_limit
 from providers.base import ProviderResult, ScrapeReason
 from schema import Portal
 from utils import is_india, job_hash, strip_html
@@ -122,7 +123,7 @@ def parse_microsoft_search_payload(
     if not isinstance(positions, list):
         return []
 
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
     india_only = portal.get("india_only", True)
     source_url = portal.get("endpoint") or _SEARCH_URL
     industry = portal.get("industry", "")
@@ -230,7 +231,7 @@ def _fetch_detail(session: requests.Session, position_id: str) -> dict:
 
 def _scrape_microsoft(portal: Portal, max_jobs: int | None = None) -> list[dict] | None:
     company = portal.get("company", "Microsoft")
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
     session = requests.Session()
     session.headers.update(_HEADERS)
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 from schema import Portal
 
@@ -182,7 +183,7 @@ def _scrape_phenom_ssr(portal: Portal, max_jobs: int | None = None) -> list[dict
         return None
 
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     jobs: list[dict] = []
     seen_ids: set[str] = set()

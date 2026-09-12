@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Michelin Astro/CXF careers provider.
 
@@ -141,7 +142,7 @@ def _scrape_michelin(portal: Portal, max_jobs: int | None = None) -> list[dict]:
 
     endpoint = portal.get("endpoint") or f"{_BASE_URL}{_SEARCH_PATH}"
     industry = portal.get("industry", "")
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
     jobs: list[dict] = []
     seen: set[str] = set()
     page = 1

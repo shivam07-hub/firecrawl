@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Apple Jobs direct API provider.
 
@@ -130,7 +131,7 @@ def _detail_text(detail: dict[str, Any], fallback: str) -> str:
 
 
 def _scrape_apple_jobs(portal: Portal, max_jobs: int | None = None) -> list[dict]:
-    cap = max_jobs or 200
+    cap = job_limit(max_jobs)
     session = requests.Session()
     session.headers.update(_HEADERS)
     session.get(_CSRF_URL, timeout=REQUEST_TIMEOUT)

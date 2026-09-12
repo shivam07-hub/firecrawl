@@ -45,6 +45,7 @@ def test_to_canonical_matches_jobs_table_fields() -> None:
     check("candidate profile version retained", row["candidate_profile_version"] == "cv_profile_v1")
     check("candidate profile hash retained", row["candidate_profile_hash"] == "hash-123")
     check("content hash populated", bool(row["job_content_hash"]))
+    check("extractive summary stamped", bool(row["job_summary"]) and row["job_summary"] != MISSING_JD_NOTE)
 
 
 def test_job_content_hash_changes_when_embedding_inputs_change() -> None:

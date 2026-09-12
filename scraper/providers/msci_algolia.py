@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import logging
 import requests
@@ -44,7 +45,7 @@ class MsciAlgoliaProvider:
 
 def _scrape_msci(portal: Portal, *, max_jobs: int | None) -> list[dict]:
     company = portal["company"]
-    cap = max_jobs or 500
+    cap = job_limit(max_jobs)
 
     # Single request — index has ~156 global jobs total
     payload = {

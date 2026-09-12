@@ -12,6 +12,7 @@ Portal config keys:
 """
 
 from __future__ import annotations
+from job_cap import job_limit
 
 import json
 import logging
@@ -140,7 +141,7 @@ def _scrape_pcsx(portal: Portal, max_jobs: int | None = None) -> ProviderResult:
     base = portal.get("endpoint", "").rstrip("/")
     domain = portal.get("pcsx_domain", "")
     company = portal["company"]
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     jobs: list[dict] = []
     seen_job_ids: set[str] = set()

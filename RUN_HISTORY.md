@@ -5,6 +5,21 @@ Current architecture and run commands live in `CLAUDE.md`. Portal config lives i
 
 ---
 
+## Session 2026-09-07 — Job-feed architecture (uncap, extractive summary, 30-day delist, Scrapling fetch)
+
+**Closed without an E2E import.** Next session runs the canary → source-only publish path.
+
+**Shipped locally, not committed** (on `main` after `223578206`):
+- `--company-cap` default **0** (unlimited) on `main.py` / `daily_poll.py` / `daily_cycle.py`; provider loops no longer stop at a silent 2000.
+- Extractive `job_summary` at scrape; source-only import writes it only when the DB cell is empty.
+- Full-scope publish closes active rows with `last_seen` older than **30 days**. `--company` canaries skip that backstop. NULL `last_seen` left alone.
+- Scrapling HTTP fetch in front of Firecrawl for opaque HTML (`scrapling_client.py`). Direct ATS APIs unchanged. StealthyFetcher not wired.
+- Laptop clock kept; cloud schedule deferred.
+
+**Do not full-publish first.** A complete import will retire April-era active rows by design. Start with `--company "Stripe"`.
+
+---
+
 ## Session 2026-08-13 — 54-company failure incident and trusted publication closure
 
 **Objective:** Recover current jobs from durable official career-page routes,

@@ -104,18 +104,21 @@ def test_upsert_jobs_sends_non_null_quality_status_for_every_row(monkeypatch) ->
     )
 
     assert written == 2
-    batch = fake.jobs.batches[0]
-    assert batch[0]["min_years_experience"] == 6
-    assert isinstance(batch[0]["min_years_experience"], int)
-    assert batch[0]["max_years_experience"] == 12
-    assert isinstance(batch[0]["max_years_experience"], int)
-    assert batch[1]["job_title"] == ""
-    assert batch[1]["job_description"] == ""
-    assert batch[1]["industry"] == "unknown"
-    assert batch[1]["ingestion_source"] == "scraper"
-    assert "min_years_experience" not in batch[1]
-    assert "max_years_experience" not in batch[1]
-    assert [row["quality_status"] for row in batch] == ["ok", "auto_extracted"]
+    by_id = {row["job_id"]: row for batch in fake.jobs.batches for row in batch}
+    assert by_id["job-1"]["min_years_experience"] == 6
+    assert isinstance(by_id["job-1"]["min_years_experience"], int)
+    assert by_id["job-1"]["max_years_experience"] == 12
+    assert isinstance(by_id["job-1"]["max_years_experience"], int)
+    assert by_id["job-2"]["job_title"] == ""
+    assert by_id["job-2"]["job_description"] == ""
+    assert by_id["job-2"]["industry"] == "unknown"
+    assert by_id["job-2"]["ingestion_source"] == "scraper"
+    assert "min_years_experience" not in by_id["job-2"]
+    assert "max_years_experience" not in by_id["job-2"]
+    assert by_id["job-1"]["quality_status"] == "ok"
+    assert by_id["job-2"]["quality_status"] == "auto_extracted"
+    for batch in fake.jobs.batches:
+        assert len({frozenset(row.keys()) for row in batch}) == 1
 
 
 def test_upsert_jobs_persists_an_unclassified_band_as_null(monkeypatch) -> None:

@@ -104,13 +104,14 @@ def main() -> None:
         description="Daily forward-only career source poll and immediate Supabase publication"
     )
     parser.add_argument("--scope", choices=["india", "global"], default="india")
-    parser.add_argument("--company-cap", type=int, default=2000)
+    parser.add_argument("--company-cap", type=int, default=0,
+                        help="Max jobs per company (default: 0 = unlimited).")
     parser.add_argument("--company", help="Run one company only (operational canary)")
     parser.add_argument("--timezone", default=os.getenv("POLL_TIMEZONE", DEFAULT_TIMEZONE))
     parser.add_argument("--dry-run", action="store_true", help="Print the execution plan without running it")
     args = parser.parse_args()
-    if args.company_cap < 1:
-        parser.error("--company-cap must be positive")
+    if args.company_cap < 0:
+        parser.error("--company-cap cannot be negative")
 
     timezone = ZoneInfo(args.timezone)
     run_started = datetime.now(timezone)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import json
 import logging
@@ -147,7 +148,7 @@ class CornerstoneProvider:
 
             origin = f"{urlsplit(endpoint).scheme}://{urlsplit(endpoint).netloc}"
             site_id = int(site_match.group(1))
-            cap = max_jobs or 2000
+            cap = job_limit(max_jobs)
             page_size = min(cap, 100)
             search_payload = {
                 "careerSiteId": site_id,

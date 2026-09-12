@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Deloitte USI careers provider (Avature-style server-rendered HTML).
 
@@ -221,7 +222,7 @@ def _scrape_deloitte_usi(portal: Portal, max_jobs: int | None = None) -> list[di
     company = portal.get("company", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     if not base_url.startswith("http") or "/SearchJobs" not in base_url:
         _log.error(f"    [ERROR] DeloitteUSI: invalid endpoint for {company}: {base_url}")

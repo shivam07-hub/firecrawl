@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Tata Elxsi careers HTML provider.
 
@@ -147,7 +148,7 @@ def _scrape_tata_elxsi(portal: Portal, max_jobs: int | None = None) -> list[dict
     company = portal.get("company", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     if not endpoint.startswith("http"):
         _log.error(f"    [ERROR] Tata Elxsi: invalid endpoint for {company}: {endpoint}")

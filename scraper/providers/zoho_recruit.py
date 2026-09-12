@@ -8,6 +8,7 @@ No pagination needed; one GET returns all India jobs.
 """
 
 from __future__ import annotations
+from job_cap import job_limit
 
 import html
 import json
@@ -114,7 +115,7 @@ class ZohoRecruitProvider:
         if not india_jobs:
             india_jobs = all_jobs  # India-only portal fallback
 
-        cap = max_jobs or 2000
+        cap = job_limit(max_jobs)
         results = []
         for job in india_jobs[:cap]:
             job_id = str(job.get("id", "")).strip()

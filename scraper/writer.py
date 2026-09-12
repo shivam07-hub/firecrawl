@@ -23,6 +23,7 @@ from utils import company_slug
 from config import OUTPUT_BASE
 from job_career_band import normalize_job_career_band
 from job_seniority import normalize_job_seniority
+from job_summary import extractive_job_summary
 from schema import CANONICAL_FIELDS, MIN_JOB_DESCRIPTION_LEN, MISSING_JD_NOTE
 
 # SCHEMA kept as alias for backward-compat imports (e.g. main.py: from writer import SCHEMA)
@@ -118,12 +119,26 @@ def to_canonical(raw: dict, company_name: str) -> dict:
         "job_title": _get('title', 'job_title'),
         "role_domain": source_role_domain,
     })
+    job_title = _get('title', 'job_title')
+    existing_summary = str(raw.get('job_summary') or '').strip()
+    if (
+        existing_summary
+        and not metadata_only
+        and existing_summary != MISSING_JD_NOTE
+    ):
+        job_summary = existing_summary
+    else:
+        job_summary = extractive_job_summary(
+            job_title,
+            source_job_description,
+            metadata_only=metadata_only,
+        )
 
     row = {
         "job_id":           raw.get('job_id') or '',
-        "job_title":        _get('title', 'job_title'),
+        "job_title":        job_title,
         "job_description":  job_description,
-        "job_summary":      MISSING_JD_NOTE if metadata_only else (raw.get('job_summary') or ''),
+        "job_summary":      job_summary,
         "industry":         raw.get('industry') or '',
         "industry_group":   raw.get('industry_group') or '',
         "company_name":     company_name,

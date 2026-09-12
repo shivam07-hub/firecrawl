@@ -53,6 +53,17 @@ def test_company_canary_scopes_both_steps() -> None:
         assert command[-2:] == ["--company", "Stripe"]
 
 
+def test_unlimited_company_cap_is_passed_to_main() -> None:
+    commands = build_commands(
+        python="python",
+        run_date="2026_09_07",
+        scope="india",
+        company_cap=0,
+    )
+    scrape = dict(commands)["scrape"]
+    assert scrape[scrape.index("--company-cap") + 1] == "0"
+
+
 def test_one_logical_run_date_owns_scrape_resolve_and_publish() -> None:
     commands = build_commands(
         python="python",

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """Google Careers provider via embedded AF_initDataCallback job data.
 
@@ -214,7 +215,7 @@ def _scrape_google_careers(portal: Portal, max_jobs: int | None = None) -> list[
         _log.error(f"    [ERROR] Google Careers provider: invalid endpoint for {company}: {endpoint}")
         return None
 
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
     jobs: list[dict] = []
     seen: set[str] = set()
     session = requests.Session()

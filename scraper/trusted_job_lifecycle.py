@@ -19,7 +19,9 @@ from lifecycle_writer import apply_seen as _apply_seen
 
 MIN_SAFE_COVERAGE = 0.25
 QUARANTINE_DAYS = 30
+AGE_STALE_DAYS = 30
 _BATCH_SIZE = 200
+_PAGE_SIZE = 1000
 log = logging.getLogger("trusted_job_lifecycle")
 
 
@@ -78,6 +80,75 @@ def missing_transition(
     )
 
 
+def stale_last_seen_cutoff(*, days: int = AGE_STALE_DAYS, today: datetime | None = None) -> int:
+    """Integer YYYYMMDD: last_seen values older than this are ghost listings."""
+    day = (today or datetime.now(timezone.utc)).date()
+    return int((day - timedelta(days=days)).strftime("%Y%m%d"))
+
+
+def delist_stale_jobs(
+    sb: Any,
+    *,
+    days: int = AGE_STALE_DAYS,
+    dry_run: bool = False,
+    today: datetime | None = None,
+) -> dict[str, int]:
+    """Age backstop: hide jobs not seen in ``days`` (25–30 max; default 30).
+
+    Presence-based close (three complete misses) is the primary clock for
+    companies in this run. This catches companies that never appeared in a
+    later folder — the ghost-job path. Rows with NULL last_seen are left
+    alone; those are extension/saved-job entries, not scraper inventory.
+    """
+    cutoff = stale_last_seen_cutoff(days=days, today=today)
+    ids = _fetch_stale_active_ids(sb, cutoff)
+    result = {"cutoff": cutoff, "candidates": len(ids), "changed": 0}
+    if dry_run or not ids:
+        return result
+    timestamp = (today or datetime.now(timezone.utc)).isoformat()
+    payload = {
+        "is_active": False,
+        "listing_confidence": "closed",
+        "confidence_reason": f"last_seen_older_than_{days}_days",
+        "lifecycle_updated_at": timestamp,
+    }
+    changed = 0
+    for i in range(0, len(ids), _BATCH_SIZE):
+        chunk = ids[i:i + _BATCH_SIZE]
+        sb.table("jobs").update(payload).in_("job_id", chunk).execute()
+        changed += len(chunk)
+    result["changed"] = changed
+    log.info(
+        "Age delist: last_seen < %s → %s inactive",
+        cutoff,
+        changed,
+    )
+    return result
+
+
+def _fetch_stale_active_ids(sb: Any, cutoff: int) -> list[str]:
+    ids: list[str] = []
+    page = 0
+    while True:
+        batch = (
+            sb.table("jobs")
+            .select("job_id")
+            .eq("is_active", True)
+            .not_.is_("last_seen", "null")
+            .lt("last_seen", cutoff)
+            .range(page * _PAGE_SIZE, (page + 1) * _PAGE_SIZE - 1)
+            .execute()
+        ).data or []
+        for row in batch:
+            job_id = str(row.get("job_id") or "")
+            if job_id:
+                ids.append(job_id)
+        if len(batch) < _PAGE_SIZE:
+            break
+        page += 1
+    return ids
+
+
 def sync_import_run(
     sb: Any,
     *,
@@ -95,7 +166,7 @@ def sync_import_run(
         eligible_companies,
         eligible_job_ids=eligible_job_ids,
     )
-    summary = {"complete": 0, "partial": 0, "failed": 0, "retired": 0}
+    summary = {"complete": 0, "partial": 0, "failed": 0}
     for company, jobs in sorted(grouped.items()):
         result = sync_company_run(
             sb,
@@ -108,9 +179,6 @@ def sync_import_run(
             write_skill_facts=write_skill_facts,
         )
         summary[result.status] += 1
-    if not dry_run and summary["complete"]:
-        response = sb.rpc("retire_closed_jobs", {"p_limit": 500}).execute()
-        summary["retired"] = len(response.data or [])
     return summary
 
 

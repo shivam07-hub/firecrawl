@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """IntouchCX jobs provider via WordPress feed + detail pages.
 
@@ -80,7 +81,7 @@ def parse_intouchcx_feed(data: dict, portal: Portal, max_jobs: int | None = None
     source_url = portal.get("endpoint", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     jobs: list[dict] = []
     seen_ids: set[str] = set()

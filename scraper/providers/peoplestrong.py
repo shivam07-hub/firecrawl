@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import logging
 from urllib.parse import quote
@@ -108,7 +109,7 @@ class PeopleStrongProvider:
         base = _base_url(portal)
         if not base.startswith("http"):
             return ProviderResult.error(ScrapeReason.CONFIG_ERROR, "bad_endpoint")
-        limit = max_jobs or 2000
+        limit = job_limit(max_jobs)
         listing_url = f"{base}/api/cp/rest/altone/cp/jobs/v1?offset=0&limit={limit}"
         try:
             response = requests.post(

@@ -389,7 +389,8 @@ def main() -> None:
         description="Poll, publish, embed jobs, start inference, and drain enrichment"
     )
     parser.add_argument("--scope", choices=["india", "global"], default="india")
-    parser.add_argument("--company-cap", type=int, default=2000)
+    parser.add_argument("--company-cap", type=int, default=0,
+                        help="Max jobs per company (default: 0 = unlimited).")
     parser.add_argument("--company", help="Run one company only")
     parser.add_argument("--max-messages", type=int, default=100000)
     parser.add_argument("--max-embeddings", type=int, default=100000)
@@ -397,13 +398,14 @@ def main() -> None:
     parser.add_argument("--inference-timeout-seconds", type=int, default=180)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.company_cap < 0:
+        parser.error("--company-cap cannot be negative")
     if min(
-        args.company_cap,
         args.max_messages,
         args.max_embeddings,
         args.model_ttl_seconds,
     ) < 1:
-        parser.error("company cap, max messages, max embeddings, and model TTL must be positive")
+        parser.error("max messages, max embeddings, and model TTL must be positive")
 
     poll, embeddings, worker = build_commands(
         python=sys.executable,

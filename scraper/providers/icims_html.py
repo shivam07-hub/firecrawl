@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import logging
 import re
@@ -81,7 +82,7 @@ def parse_icims_html_listing(listing_html: str, portal: Portal, max_jobs: int | 
     soup = BeautifulSoup(listing_html, "html.parser")
     jobs: list[dict] = []
     seen: set[str] = set()
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     for card in soup.select("li.iCIMS_JobCardItem"):
         link = card.select_one(".title a[href]") or card.select_one("a.iCIMS_Anchor[href]")

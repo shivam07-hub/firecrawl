@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 import logging
 import re
@@ -55,7 +56,7 @@ def parse_trakstar_listing(listing_html: str, portal: Portal, max_jobs: int | No
     base_url = portal.get("endpoint", "")
     jobs: list[dict] = []
     seen: set[str] = set()
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     for card in soup.select(".js-careers-page-job-list-item"):
         href = (card.get("data-href") or "").strip()

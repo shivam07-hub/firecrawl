@@ -41,7 +41,6 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from postgrest.exceptions import APIError
 from supabase import create_client, Client
 
 _HERE = Path(__file__).resolve().parent
@@ -66,7 +65,9 @@ from enrichment_state import (  # noqa: E402
 )
 from utils import company_slug  # noqa: E402
 from job_career_band import VALID_CAREER_BANDS  # noqa: E402
-from trusted_job_lifecycle import sync_import_run  # noqa: E402
+from job_summary import extractive_job_summary  # noqa: E402
+from schema import MIN_JOB_DESCRIPTION_LEN  # noqa: E402
+from source_snapshot import finalize_source_snapshot, upsert_rows  # noqa: E402
 
 _VALID_SENIORITY_LEVELS = frozenset({
     "intern", "entry", "mid", "senior", "lead", "executive",
@@ -696,7 +697,9 @@ def _jobs_missing_forward_enrichment_columns() -> list[str]:
 
 
 # Card-data columns added for the job_summary + structured-chip work.
-# _upsert_jobs sends these on every row, so they MUST exist before real writes.
+# They MUST exist before real writes. job_summary is sent only on first-fill
+# rows; source_snapshot.upsert_rows groups those separately so omit-to-preserve
+# cannot NULL an existing model summary.
 _CARD_COLUMNS = (
     "job_summary", "date_posted", "seniority_level",
     "work_mode", "min_years_experience", "max_years_experience",
@@ -734,53 +737,6 @@ def _coerce_smallint(value) -> int | None:
         if math.isfinite(parsed) and parsed.is_integer():
             return int(parsed)
     return None
-
-
-def _is_statement_timeout(exc: Exception) -> bool:
-    return isinstance(exc, APIError) and getattr(exc, "code", None) == "57014"
-
-
-def _upsert_with_timeout_split(
-    sb: Client,
-    table_name: str,
-    rows: list[dict],
-    *,
-    on_conflict: str,
-    ignore_duplicates: bool = False,
-) -> None:
-    if not rows:
-        return
-    try:
-        sb.table(table_name).upsert(
-            rows,
-            on_conflict=on_conflict,
-            ignore_duplicates=ignore_duplicates,
-        ).execute()
-    except Exception as exc:
-        if not _is_statement_timeout(exc) or len(rows) == 1:
-            raise
-        mid = max(1, len(rows) // 2)
-        log.warning(
-            "%s upsert timed out for %s rows; retrying as %s + %s",
-            table_name,
-            len(rows),
-            mid,
-            len(rows) - mid,
-        )
-        _upsert_with_timeout_split(
-            sb,
-            table_name,
-            rows[:mid],
-            on_conflict=on_conflict,
-            ignore_duplicates=ignore_duplicates,
-        )
-        _upsert_with_timeout_split(
-            sb,
-            table_name,
-            rows[mid:],
-            on_conflict=on_conflict,
-            ignore_duplicates=ignore_duplicates,
-        )
 
 
 def _jobs_missing_card_columns() -> list[str]:
@@ -908,7 +864,7 @@ def _upsert_candidate_profiles(sb: Client, jobs: list[dict], dry_run: bool) -> i
     if _candidate_profile_upload_disabled():
         return 0
     for i in range(0, len(rows), _BATCH_SIZE):
-        _upsert_with_timeout_split(
+        upsert_rows(
             sb,
             "job_candidate_profiles",
             rows[i:i + _BATCH_SIZE],
@@ -1044,6 +1000,36 @@ def _namespace_cross_company_collisions(sb: Client, jobs: list[dict]) -> int:
     return changed
 
 
+def _fetch_existing_summaries(sb: Client, job_ids: list[str]) -> dict[str, str]:
+    """Map job_id → current job_summary. Missing ids are new rows."""
+    out: dict[str, str] = {}
+    for i in range(0, len(job_ids), _BATCH_SIZE):
+        chunk = job_ids[i:i + _BATCH_SIZE]
+        rows = (
+            sb.table("jobs")
+            .select("job_id,job_summary")
+            .in_("job_id", chunk)
+            .execute()
+        ).data or []
+        for row in rows:
+            job_id = str(row.get("job_id") or "")
+            if job_id:
+                out[job_id] = str(row.get("job_summary") or "")
+    return out
+
+
+def _source_summary_for_insert(job: dict) -> str:
+    existing = str(job.get("job_summary") or "").strip()
+    if existing:
+        return existing
+    desc = str(job.get("job_description") or "")
+    return extractive_job_summary(
+        str(job.get("job_title") or ""),
+        desc,
+        metadata_only=len(desc.strip()) < MIN_JOB_DESCRIPTION_LEN,
+    )
+
+
 def _upsert_jobs(
     sb: Client,
     jobs: list[dict],
@@ -1056,6 +1042,12 @@ def _upsert_jobs(
     _namespace_cross_company_collisions(sb, jobs)
     rows = []
     unknown_location_rows = 0
+    existing_summaries: dict[str, str] = {}
+    if source_only:
+        existing_summaries = _fetch_existing_summaries(
+            sb,
+            [str(job.get("job_id")) for job in jobs if job.get("job_id")],
+        )
     supports_job_content_hash = (
         not source_only and _jobs_has_job_content_hash_column()
     )
@@ -1087,7 +1079,13 @@ def _upsert_jobs(
         row["career_band"] = band if band in VALID_CAREER_BANDS else None
 
         carries_enrichment = has_core_enrichment_payload(job)
-        if not source_only and carries_enrichment:
+        if source_only:
+            job_id = str(job.get("job_id") or "")
+            if not str(existing_summaries.get(job_id) or "").strip():
+                summary = _source_summary_for_insert(job)
+                if summary:
+                    row["job_summary"] = summary
+        elif not source_only and carries_enrichment:
             for field in _ENRICHMENT_JOB_FIELDS:
                 value = job.get(field)
                 if value is not None:
@@ -1146,7 +1144,7 @@ def _upsert_jobs(
         batch = rows[i:i + _BATCH_SIZE]
         # On conflict: update everything EXCEPT first_seen and is_active
         # (community owns is_active; first_seen is set once at insert)
-        _upsert_with_timeout_split(
+        upsert_rows(
             sb,
             "jobs",
             batch,
@@ -1930,7 +1928,7 @@ def main() -> None:
             message=message,
         )
 
-    lifecycle_summary = sync_import_run(
+    lifecycle_summary = finalize_source_snapshot(
         sb,
         feed_run_id=run_id,
         json_files=json_files,
@@ -1942,6 +1940,7 @@ def main() -> None:
         # empty company-skill facts here would falsely mark real demand dormant.
         write_skill_facts=not args.source_only,
         eligible_job_ids=imported_company_job_ids,
+        company_scope=args.company,
     )
     log.info(
         "Trusted lifecycle: complete=%s partial=%s failed=%s retired=%s",

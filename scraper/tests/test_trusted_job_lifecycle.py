@@ -114,3 +114,32 @@ def test_import_run_excludes_rows_not_accepted_by_importer(monkeypatch, tmp_path
     )
 
     assert seen == ["published"]
+
+
+def test_sync_import_run_does_not_call_retire_rpc(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "Example" / "Outputs" / "2026_09_07"
+    output.mkdir(parents=True)
+    path = output / "jobs.json"
+    path.write_text('[{"job_id": "published", "company_name": "Example"}]', encoding="utf-8")
+
+    class _Sb:
+        def rpc(self, *args, **kwargs):
+            raise AssertionError("retire_closed_jobs belongs to source_snapshot")
+
+    monkeypatch.setattr(
+        lifecycle,
+        "sync_company_run",
+        lambda sb, **kwargs: lifecycle.SourceRunAssessment("complete", None),
+    )
+    summary = lifecycle.sync_import_run(
+        _Sb(),
+        feed_run_id="feed-run-1",
+        json_files=[path],
+        skill_id_map={},
+        eligible_companies={"Example"},
+        quality_status="ok",
+        dry_run=False,
+        eligible_job_ids={"Example": {"published"}},
+    )
+    assert summary["complete"] == 1
+    assert "retired" not in summary

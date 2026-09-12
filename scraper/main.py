@@ -57,12 +57,10 @@ from source_matching_facts import _normalize_source_facts
 
 _VALIDATE_OUTPUT_BASE = str(Path(OUTPUT_BASE).parent / "validation_outputs")
 _VALIDATE_MAX_JOBS    = 5
-_GLOBAL_SCOPE_DEFAULT_CAP = 2000
-# Quality-aware cap (see docs/DESIGN_quality_aware_company_cap.md). Companies at or under
-# this keep every role; over it, the quality selector keeps technical/JD-bearing roles.
-# 2500 lets large service integrators (Accenture) capture their technical tail; small
-# companies are unaffected (they sit under the cap → keep-all).
-_DEFAULT_COMPANY_CAP = 2500
+# 0 = unlimited. A volume gate makes presence-based delisting dishonest: the
+# truncated tail looks missing on the next complete census. Quality filters
+# (identity, thin JD) still drop junk; they are not a count cap.
+_DEFAULT_COMPANY_CAP = 0
 
 _INTER_COMPANY_DELAY = 2   # seconds between companies
 
@@ -595,7 +593,7 @@ def main():
     parser.add_argument("--scope", choices=["india", "global"], default="india",
                         help="Job geography scope (default: india).")
     parser.add_argument("--company-cap", type=int, default=_DEFAULT_COMPANY_CAP,
-                        help=f"Max jobs per company for all runs (default: {_DEFAULT_COMPANY_CAP}). Set 0 for no cap.")
+                        help="Max jobs per company (default: 0 = unlimited). Set a positive integer only for probes.")
     parser.add_argument("--global-cap", type=int, default=None,
                         help="Alias for --company-cap (kept for backward compat).")
     parser.add_argument("--resume-run", metavar="RUN_ID",
@@ -630,7 +628,7 @@ def main():
         return
 
     # --validate: cap to 5 jobs/company, no enrichment, separate output folder
-    # --company-cap: per-company limit applied on all runs (default 1000); 0 = unlimited
+    # --company-cap: 0 = unlimited (default); a positive integer is a probe/debug limit
     validate_mode = args.validate
     if validate_mode:
         max_jobs = _VALIDATE_MAX_JOBS

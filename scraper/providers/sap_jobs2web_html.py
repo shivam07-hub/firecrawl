@@ -1,4 +1,5 @@
 from __future__ import annotations
+from job_cap import job_limit
 
 """SAP SuccessFactors Jobs2Web HTML provider.
 
@@ -179,7 +180,7 @@ def _scrape_sap_jobs2web_html(portal: Portal, max_jobs: int | None = None) -> li
     company = portal.get("company", "")
     industry = portal.get("industry", "")
     india_only = portal.get("india_only", True)
-    cap = max_jobs or 2000
+    cap = job_limit(max_jobs)
 
     if not endpoint.startswith("http"):
         _log.error(f"    [ERROR] SAP Jobs2Web HTML: invalid endpoint for {company}: {endpoint}")
