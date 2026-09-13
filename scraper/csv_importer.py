@@ -1943,11 +1943,11 @@ def main() -> None:
         company_scope=args.company,
     )
     log.info(
-        "Trusted lifecycle: complete=%s partial=%s failed=%s retired=%s",
+        "Trusted lifecycle: complete=%s partial=%s failed=%s age_delist=%s",
         lifecycle_summary["complete"],
         lifecycle_summary["partial"],
         lifecycle_summary["failed"],
-        lifecycle_summary["retired"],
+        lifecycle_summary.get("age_delist"),
     )
 
     total_missing = total_deactivated = blocked_deactivation = 0

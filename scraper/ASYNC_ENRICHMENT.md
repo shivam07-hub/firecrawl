@@ -52,7 +52,7 @@ follows those rows. `side_skills` is retired.
 Source-only upserts never send `role_domain` or skill arrays, and they never
 overwrite a non-empty `job_summary`. The source snapshot writer splits mixed
 fill/preserve batches so PostgREST cannot NULL an omitted summary on a sibling
-row. `retire_closed_jobs` is drained in pages of 5000 (the live RPC max).
+row. Closed listings wait one hour, then True_Yodha archives to `job_archive_v1` files and deletes. This writer does not call `retire_closed_jobs`.
 
 ## Live commands
 

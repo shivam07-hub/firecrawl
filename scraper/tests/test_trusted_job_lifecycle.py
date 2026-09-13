@@ -42,7 +42,7 @@ def test_three_complete_misses_close_then_quarantine_listing() -> None:
     assert third.listing_confidence == "closed"
     assert third.is_active is False
     assert third.quarantine_until is not None
-    assert (third.quarantine_until - now).days == 30
+    assert (third.quarantine_until - now).total_seconds() == 3600
 
 
 def test_additional_misses_do_not_extend_quarantine() -> None:
@@ -124,7 +124,7 @@ def test_sync_import_run_does_not_call_retire_rpc(monkeypatch, tmp_path) -> None
 
     class _Sb:
         def rpc(self, *args, **kwargs):
-            raise AssertionError("retire_closed_jobs belongs to source_snapshot")
+            raise AssertionError("physical delete is True_Yodha archive-then-retire")
 
     monkeypatch.setattr(
         lifecycle,

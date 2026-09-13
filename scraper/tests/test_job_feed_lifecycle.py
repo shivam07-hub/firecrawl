@@ -107,6 +107,8 @@ def test_age_delist_closes_stale_active_rows() -> None:
     assert result["changed"] == 1
     assert sb.jobs.updates[0]["is_active"] is False
     assert sb.jobs.updates[0]["listing_confidence"] == "closed"
+    assert sb.jobs.updates[0]["deletion_eligible_at"] == "2026-09-07T01:00:00+00:00"
+    assert sb.jobs.updates[0]["quarantine_until"] == sb.jobs.updates[0]["deletion_eligible_at"]
 
 
 def test_age_delist_dry_run_does_not_write() -> None:

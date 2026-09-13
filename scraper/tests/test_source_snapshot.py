@@ -6,8 +6,6 @@ from postgrest.exceptions import APIError
 
 from csv_importer import _upsert_jobs
 from source_snapshot import (
-    RETIRE_PAGE_SIZE,
-    drain_retire_closed_jobs,
     fill_blank_summaries,
     finalize_source_snapshot,
     upsert_rows,
@@ -152,29 +150,35 @@ def test_source_only_mixed_fill_and_preserve_does_not_null_llm_summary() -> None
     assert all("job_summary" not in row for row in preserve_batch)
 
 
-def test_drain_retire_pages_at_rpc_max_until_short() -> None:
+def test_finalize_never_calls_retire_rpc(monkeypatch) -> None:
+    """Physical delete is True_Yodha's archive-then-retire. Publish must not delete."""
     sb = PostgrestSb()
-    sb.rpc_pages = [[{"job_id": str(i)} for i in range(RETIRE_PAGE_SIZE)], [{"job_id": "last"}]]
+    monkeypatch.setattr(
+        "source_snapshot.sync_import_run",
+        lambda *args, **kwargs: {"complete": 1, "partial": 0, "failed": 0},
+    )
+    monkeypatch.setattr(
+        "source_snapshot.delist_stale_jobs",
+        lambda *args, **kwargs: {"cutoff": 1, "candidates": 0, "changed": 0},
+    )
 
-    retired = drain_retire_closed_jobs(sb)
+    summary = finalize_source_snapshot(
+        sb,
+        feed_run_id="run-1",
+        json_files=[],
+        skill_id_map={},
+        eligible_companies={"Stripe"},
+        quality_status="ok",
+        dry_run=False,
+        company_scope=None,
+    )
 
-    assert retired == RETIRE_PAGE_SIZE + 1
-    assert [params["p_limit"] for _, params in sb.rpc_calls] == [RETIRE_PAGE_SIZE, RETIRE_PAGE_SIZE]
-    assert all(1 <= params["p_limit"] <= RETIRE_PAGE_SIZE for _, params in sb.rpc_calls)
-
-
-def test_drain_clamps_oversize_page_to_rpc_max() -> None:
-    sb = PostgrestSb()
-    sb.rpc_pages = [[]]
-
-    drain_retire_closed_jobs(sb, page_size=10000)
-
-    assert sb.rpc_calls[0][1]["p_limit"] == RETIRE_PAGE_SIZE
+    assert sb.rpc_calls == []
+    assert "retired" not in summary
 
 
 def test_finalize_company_scope_skips_age_delist(monkeypatch) -> None:
     sb = PostgrestSb()
-    sb.rpc_pages = [[{"job_id": "closed-1"}]]
     monkeypatch.setattr(
         "source_snapshot.sync_import_run",
         lambda *args, **kwargs: {"complete": 1, "partial": 0, "failed": 0},
@@ -196,10 +200,10 @@ def test_finalize_company_scope_skips_age_delist(monkeypatch) -> None:
         company_scope="Stripe",
     )
 
-    assert summary["retired"] == 1
     assert summary["age_delist"]["skipped"] is True
     assert age_calls == []
-    assert sb.rpc_calls[0][1]["p_limit"] == RETIRE_PAGE_SIZE
+    assert sb.rpc_calls == []
+    assert "retired" not in summary
 
 
 def test_finalize_full_scope_runs_age_delist(monkeypatch) -> None:
@@ -229,7 +233,7 @@ def test_finalize_full_scope_runs_age_delist(monkeypatch) -> None:
     assert summary["age_delist"].get("skipped") is not True
 
 
-def test_finalize_dry_run_skips_retire(monkeypatch) -> None:
+def test_finalize_dry_run_does_not_delete(monkeypatch) -> None:
     sb = PostgrestSb()
     monkeypatch.setattr(
         "source_snapshot.sync_import_run",
@@ -252,7 +256,7 @@ def test_finalize_dry_run_skips_retire(monkeypatch) -> None:
     )
 
     assert sb.rpc_calls == []
-    assert summary["retired"] == 0
+    assert "retired" not in summary
 
 
 def test_fill_blank_summaries_skips_existing_and_writes_extractive() -> None:

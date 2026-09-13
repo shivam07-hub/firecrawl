@@ -37,7 +37,7 @@ Weekly global scrape of 100+ company portals → full JDs → LM Studio skill ex
 
 ## CURRENT STATE (as of 2026-09-07)
 
-- **Session 2026-09-07 — source snapshot writer landed; Stripe canary found two publication bugs, now fixed.** `source_snapshot.py` owns homogeneous PostgREST upserts (omit-to-preserve cannot NULL sibling `job_summary` cells) and feed close (paged `retire_closed_jobs` at 5000, 30-day age delist on full scope only). Stripe `--company` upserted 40 rows then crashed on `p_limit=10000`; mixed fill/preserve also wiped 11 LLM summaries. Repair those 11 with extractive fill, re-run the Stripe canary, then a full-scope publish is safe to close `last_seen` older than 30 days. Clock stays on this laptop; uncommitted on `main` after `223578206`.
+- **Session 2026-09-07 — source snapshot writer landed; Stripe canary found two publication bugs, now fixed.** `source_snapshot.py` owns homogeneous PostgREST upserts (omit-to-preserve cannot NULL sibling `job_summary` cells) and feed close (presence + 30-day age delist on full scope only). Physical unload is True_Yodha after a one-hour quarantine — this writer does not delete rows. Stripe `--company` upserted 40 rows then crashed on `p_limit=10000`; mixed fill/preserve also wiped 11 LLM summaries. Repair those 11 with extractive fill, re-run the Stripe canary, then a full-scope publish is safe to close `last_seen` older than 30 days. Clock stays on this laptop; uncommitted on `main` after `223578206`.
 - **Job-feed contract (2026-09-07):** `--company-cap` default is **0 (unlimited)** on `main.py`, `daily_poll.py`, and `daily_cycle.py`. Provider listing loops no longer substitute a silent 2000. Workday lists up to `WORKDAY_MAX_JOBS` (runaway 100000) and fetches JDs for the full selected set when uncapped. Quality `select_for_cap` still runs only when a positive cap is passed. Every imported row gets an **extractive `job_summary`** at scrape/import if the DB cell is empty; the LLM summary remains an upgrade and is never overwritten by a re-scrape. After a full-scope publish, jobs with `last_seen` older than **30 days** are closed (`AGE_STALE_DAYS`); `--company` canaries skip that backstop. NULL `last_seen` (extension saves) is left alone. Clock stays on this laptop this version; cloud move is next. Opaque HTML boards try [Scrapling](https://github.com/D4Vinci/Scrapling) HTTP fetch before Firecrawl (`scrapling_client.py`). Direct ATS APIs stay the default.
 - **Data:** 53,046 jobs in Supabase (`jobs`, project `gipvxuugajkugntwkeiz`), 46,206 currently active, and 413,836 `job_skills` rows (read-only snapshot 2026-07-12; active count moves as the delisting loop runs).
 - **Portals:** `KNOWN_PORTALS.md` is the source of truth — current parser count **316 active rows**. The 2026-07-12 `career-ops` audit added five Greenhouse boards and first-class Ashby parsing for Deepgram/Zapier; ElevenLabs remains parked for location-semantic review. Per-crack history lives there + in git, not here.
@@ -235,7 +235,7 @@ Official company hiring-volume and scraper-health metrics are recorded **only af
 | `lm_worker_lock.py` | Exclusive flock so only ONE local-inference worker runs at a time. Second worker exits **3** instead of evicting the first one's model |
 | `job_seniority.py` | Deterministic source-level normalizer for seniority and experience bounds; no historical rewrite |
 | `main.py` | Orchestrator — all CLI flags; auto-runs self-diagnosis at run end |
-| `source_snapshot.py` | Source snapshot writer: homogeneous jobs upsert + feed close (paged retire, full-scope age delist) |
+| `source_snapshot.py` | Source snapshot writer: homogeneous jobs upsert + feed close (presence + full-scope age delist). Does not delete rows. |
 | `csv_importer.py` | Phase 3A source-only publish or legacy full upsert; shapes rows then hands writes to `source_snapshot` |
 | `enrichment_state.py` | Forward-only source hash and enrichment-version contract |
 | `enrichment_worker.py` | Lazy Supabase queue consumer; retries inference outages and rejects stale/inactive work |
@@ -477,7 +477,7 @@ Confirmed blocked: Engie, GE Aerospace, Bank of America, Ford, Medtronic, Inspir
 
 ### 0 — Next: full-scope source publish
 
-Stripe `--company` canary is green on the source snapshot writer (2026-09-08 re-run of run date `2026_09_07`: summaries survived, retire RPC 200, Stage A accepted). A full-scope importer without `--company` will close every active job with `last_seen` older than 30 days. Pin `--run-date` to the scrape folder. Clock stays on this laptop.
+Stripe `--company` canary is green on the source snapshot writer (2026-09-08 re-run of run date `2026_09_07`: summaries survived, Stage A accepted). A full-scope importer without `--company` will close every active job with `last_seen` older than 30 days; True_Yodha unloads those rows one hour later after writing `job_archive_v1` files. Pin `--run-date` to the scrape folder. Clock stays on this laptop.
 
 ### 1 — Parked portals (no durable route)
 

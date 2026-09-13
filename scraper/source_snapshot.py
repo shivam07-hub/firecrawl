@@ -1,8 +1,9 @@
 """Source snapshot writer — source-owned jobs writes and feed close.
 
 Callers pass sparse source rows. This module owns PostgREST's uniform-keys
-invariant (an omitted key in a mixed batch becomes NULL on conflict) and the
-post-write close drain (presence retire + full-scope age backstop).
+invariant (an omitted key in a mixed batch becomes NULL on conflict). Feed
+close records presence and age-delists ghosts; physical unload is True_Yodha's
+archive-then-delete after a one-hour quarantine.
 """
 from __future__ import annotations
 
@@ -16,9 +17,6 @@ from schema import MIN_JOB_DESCRIPTION_LEN
 from trusted_job_lifecycle import AGE_STALE_DAYS, delist_stale_jobs, sync_import_run
 
 log = logging.getLogger("source_snapshot")
-
-# Live retire_closed_jobs RPC rejects p_limit outside 1..5000.
-RETIRE_PAGE_SIZE = 5000
 
 
 def is_statement_timeout(exc: Exception) -> bool:
@@ -101,22 +99,6 @@ def _upsert_with_timeout_split(
         )
 
 
-def drain_retire_closed_jobs(
-    sb: Any,
-    *,
-    page_size: int = RETIRE_PAGE_SIZE,
-) -> int:
-    """Apply listing_confidence=closed → inactive in RPC-legal pages."""
-    limit = min(max(int(page_size), 1), RETIRE_PAGE_SIZE)
-    retired = 0
-    while True:
-        response = sb.rpc("retire_closed_jobs", {"p_limit": limit}).execute()
-        n = len(response.data or [])
-        retired += n
-        if n < limit:
-            return retired
-
-
 def finalize_source_snapshot(
     sb: Any,
     *,
@@ -130,11 +112,10 @@ def finalize_source_snapshot(
     eligible_job_ids: dict[str, set[str]] | None = None,
     company_scope: str | None = None,
 ) -> dict[str, Any]:
-    """Seen/missing lifecycle, then retire drain, then full-scope age delist.
+    """Seen/missing lifecycle, then full-scope age delist.
 
-    ``company_scope`` set (a ``--company`` canary) skips the 30-day age
-    backstop. Presence retire still drains globally — those rows are already
-    closed by evidence.
+    Physical delete is True_Yodha's archive-then-retire after one hour.
+    ``company_scope`` (a ``--company`` canary) skips the 30-day age backstop.
     """
     summary: dict[str, Any] = sync_import_run(
         sb,
@@ -147,10 +128,6 @@ def finalize_source_snapshot(
         write_skill_facts=write_skill_facts,
         eligible_job_ids=eligible_job_ids,
     )
-    summary.setdefault("retired", 0)
-    if not dry_run and summary.get("complete"):
-        summary["retired"] = drain_retire_closed_jobs(sb)
-        log.info("Retired %s closed listings", summary["retired"])
     if company_scope:
         summary["age_delist"] = {"skipped": True, "reason": "company_scope"}
     else:

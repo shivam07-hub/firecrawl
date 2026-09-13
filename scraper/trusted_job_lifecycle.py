@@ -18,7 +18,7 @@ from lifecycle_writer import apply_seen as _apply_seen
 
 
 MIN_SAFE_COVERAGE = 0.25
-QUARANTINE_DAYS = 30
+QUARANTINE_AFTER_CLOSE = timedelta(hours=1)
 AGE_STALE_DAYS = 30
 _BATCH_SIZE = 200
 _PAGE_SIZE = 1000
@@ -76,7 +76,7 @@ def missing_transition(
         misses,
         "closed",
         False,
-        timestamp + timedelta(days=QUARANTINE_DAYS) if misses == 3 else None,
+        timestamp + QUARANTINE_AFTER_CLOSE if misses == 3 else None,
     )
 
 
@@ -105,12 +105,18 @@ def delist_stale_jobs(
     result = {"cutoff": cutoff, "candidates": len(ids), "changed": 0}
     if dry_run or not ids:
         return result
-    timestamp = (today or datetime.now(timezone.utc)).isoformat()
+    moment = today or datetime.now(timezone.utc)
+    timestamp = moment.isoformat()
+    eligible_at = (moment + QUARANTINE_AFTER_CLOSE).isoformat()
     payload = {
         "is_active": False,
         "listing_confidence": "closed",
         "confidence_reason": f"last_seen_older_than_{days}_days",
         "lifecycle_updated_at": timestamp,
+        "quarantined_at": timestamp,
+        "quarantine_until": eligible_at,
+        "deletion_eligible_at": eligible_at,
+        "retired_at": timestamp,
     }
     changed = 0
     for i in range(0, len(ids), _BATCH_SIZE):
