@@ -66,18 +66,14 @@ def missing_transition(
     *,
     now: datetime | None = None,
 ) -> MissingTransition:
+    """One complete miss closes the listing. Later misses do not move the clock."""
     misses = max(0, previous_misses) + 1
-    if misses == 1:
-        return MissingTransition(misses, "uncertain", True)
-    if misses == 2:
-        return MissingTransition(misses, "likely_closed", True)
     timestamp = now or datetime.now(timezone.utc)
-    return MissingTransition(
-        misses,
-        "closed",
-        False,
-        timestamp + QUARANTINE_AFTER_CLOSE if misses == 3 else None,
-    )
+    if misses == 1:
+        return MissingTransition(
+            misses, "closed", False, timestamp + QUARANTINE_AFTER_CLOSE
+        )
+    return MissingTransition(misses, "closed", False, None)
 
 
 def stale_last_seen_cutoff(*, days: int = AGE_STALE_DAYS, today: datetime | None = None) -> int:
@@ -95,7 +91,7 @@ def delist_stale_jobs(
 ) -> dict[str, int]:
     """Age backstop: hide jobs not seen in ``days`` (25–30 max; default 30).
 
-    Presence-based close (three complete misses) is the primary clock for
+    Presence-based close (one complete miss) is the primary clock for
     companies in this run. This catches companies that never appeared in a
     later folder — the ghost-job path. Rows with NULL last_seen are left
     alone; those are extension/saved-job entries, not scraper inventory.

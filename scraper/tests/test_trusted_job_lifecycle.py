@@ -28,21 +28,18 @@ def test_growth_is_complete_and_coverage_is_capped_for_storage() -> None:
     assert result.coverage_ratio == 1.0
 
 
-def test_three_complete_misses_close_then_quarantine_listing() -> None:
+def test_one_complete_miss_closes_then_quarantines_the_listing() -> None:
     now = datetime(2026, 7, 11, 12, tzinfo=timezone.utc)
 
     first = missing_transition(0, now=now)
     second = missing_transition(1, now=now)
-    third = missing_transition(2, now=now)
 
-    assert first.listing_confidence == "uncertain"
-    assert first.is_active is True
-    assert second.listing_confidence == "likely_closed"
-    assert second.is_active is True
-    assert third.listing_confidence == "closed"
-    assert third.is_active is False
-    assert third.quarantine_until is not None
-    assert (third.quarantine_until - now).total_seconds() == 3600
+    assert first.listing_confidence == "closed"
+    assert first.is_active is False
+    assert first.quarantine_until is not None
+    assert (first.quarantine_until - now).total_seconds() == 3600
+    assert second.listing_confidence == "closed"
+    assert second.quarantine_until is None
 
 
 def test_additional_misses_do_not_extend_quarantine() -> None:

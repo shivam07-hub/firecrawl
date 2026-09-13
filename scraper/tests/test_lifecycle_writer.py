@@ -55,13 +55,13 @@ def test_seen_jobs_reactivate_and_reset_misses() -> None:
     assert job_updates[1][1]["reactivated_at"] == now.isoformat()
 
 
-def test_third_missing_run_sets_fixed_deletion_eligibility() -> None:
+def test_first_missing_run_sets_fixed_deletion_eligibility() -> None:
     db = DB()
     now = datetime(2026, 7, 11, tzinfo=timezone.utc)
 
     apply_missing(
         db,
-        [{"job_id": "j1", "consecutive_complete_misses": 2}],
+        [{"job_id": "j1", "consecutive_complete_misses": 0}],
         set(),
         source_run_id="run-1",
         now=now,
@@ -71,10 +71,10 @@ def test_third_missing_run_sets_fixed_deletion_eligibility() -> None:
     assert update["listing_confidence"] == "closed"
     assert update["is_active"] is False
     assert update["last_source_run_id"] == "run-1"
-    assert update["deletion_eligible_at"] == "2026-08-10T00:00:00+00:00"
+    assert update["deletion_eligible_at"] == "2026-07-11T01:00:00+00:00"
 
 
-def test_fourth_missing_run_does_not_extend_deletion_clock() -> None:
+def test_later_missing_run_does_not_extend_deletion_clock() -> None:
     db = DB()
 
     apply_missing(
