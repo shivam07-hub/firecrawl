@@ -49,21 +49,9 @@ def apply_seen(
         sb.table("jobs").update({"reactivated_at": timestamp}).in_(
             "job_id", chunk
         ).execute()
-    _write_observations(
-        sb,
-        [
-            {
-                "job_id": job_id,
-                "source_run_id": source_run_id,
-                "observer": "scraper",
-                "result": "seen_live",
-                "strength": "strong",
-                "observed_at": timestamp,
-                "evidence": {"source_run_status": "complete_or_seen"},
-            }
-            for job_id in sorted(current_ids)
-        ],
-    )
+    # Live presence lives on jobs.last_verified_live_at. A seen_live row per
+    # poll was the 230k-row diary; Ghost Index keeps the latest historical ping
+    # plus a freeze at retire.
 
 
 def apply_missing(
@@ -99,19 +87,20 @@ def apply_missing(
             quarantine,
         )
         buckets[key].append(job_id)
-        observations.append(
-            {
-                "job_id": job_id,
-                "source_run_id": source_run_id,
-                "observer": "scraper",
-                "result": "source_missing",
-                "strength": "medium",
-                "observed_at": timestamp,
-                "evidence": {
-                    "consecutive_complete_misses": transition.consecutive_misses
-                },
-            }
-        )
+        if transition.consecutive_misses == 1:
+            observations.append(
+                {
+                    "job_id": job_id,
+                    "source_run_id": source_run_id,
+                    "observer": "scraper",
+                    "result": "source_missing",
+                    "strength": "medium",
+                    "observed_at": timestamp,
+                    "evidence": {
+                        "consecutive_complete_misses": transition.consecutive_misses
+                    },
+                }
+            )
 
     for (misses, confidence, is_active, quarantine), job_ids in buckets.items():
         payload = {
